@@ -1,0 +1,26 @@
+{
+  "name": "@intrusion/client",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite -c vite.config.mjs --port 5173 --configLoader native",
+    "build": "tsc --noEmit && vite build -c vite.config.mjs --configLoader native",
+    "preview": "vite preview -c vite.config.mjs --configLoader native"
+  },
+  "dependencies": {
+    "@intrusion/shared": "*",
+    "lucide-react": "^0.475.0",
+    "pixi.js": "^8.8.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.6",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.0.6",
+    "vite": "^6.1.0"
+  }
+}

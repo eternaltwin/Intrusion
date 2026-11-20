@@ -1,4 +1,11 @@
-www/client.js
-website-bin/website.js
-website-bin/node_modules
-website-bin/package-lock.json
+node_modules/
+dist/
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+legacy/www/client.js
+legacy/website-bin/website.js
+legacy/website-bin/node_modules/
+legacy/website-bin/package-lock.json

@@ -1,0 +1,140 @@
+/* Minimal modern enhancements preserving 100% of design.css + style.css */
+
+#tooltip {
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.mxmainmenu a,
+.mxcontent a,
+ul.tabs li a,
+.window img.wbutton {
+  cursor: pointer;
+}
+
+.client .swf {
+  position: relative;
+  overflow: hidden;
+}
+
+.client .swf canvas#main {
+  display: block;
+  width: 600px;
+  height: 400px;
+}
+
+/* Top bar operator status */
+.mxtopmenucontent .opBar {
+  float: right;
+  font-size: 8pt;
+  line-height: 22px;
+  color: #d0d194;
+  padding-right: 10px;
+}
+
+.mxtopmenucontent .opBar a {
+  color: #fed82a;
+  text-decoration: none;
+  margin-left: 10px;
+  cursor: pointer;
+}
+
+.mxtopmenucontent .opBar a:hover {
+  text-decoration: underline;
+}
+
+/* Subtle classic notification banner inside .mxcontent */
+.classicNotice {
+  margin-bottom: 10px;
+  padding: 5px 10px;
+  background-color: #3b3d28;
+  border: 1px solid #fed82a;
+  outline: 1px solid #292b1c;
+  color: #fed82a;
+  font-size: 9pt;
+}
+
+.classicNotice.error {
+  border-color: #ff693e;
+  color: #ff693e;
+}
+
+/* Drag-and-drop subtle visual cue in Decks */
+#deckContainer li,
+#poolContainer li {
+  user-select: none;
+}
+
+#deckContainer li.dragging,
+#poolContainer li.dragging {
+  opacity: 0.45;
+  outline: 1px dashed #fed82a;
+}
+
+#deckContainer.dragOver,
+#poolContainer.dragOver {
+  outline: 1px dashed #fed82a;
+}
+
+/* Storage viewer face & mail styling matching .client .sidePanel */
+.storage .viewer .sidePanel {
+  width: 248px;
+  min-height: 240px;
+  max-height: 420px;
+  padding: 5px;
+  font-size: 9pt;
+  background-color: #3b3d28;
+  overflow: auto;
+  border: 1px solid #292b1c;
+  border-bottom: 1px solid #71754c;
+}
+
+.storage .viewer .sidePanel h1 {
+  margin: 0px -5px 10px -5px;
+  padding: 2px 5px;
+  font-size: 10pt;
+  letter-spacing: 0.5pt;
+  background-color: #292b1c;
+}
+
+.storage .viewer .sidePanel img.face,
+.client .sidePanel img.face,
+.briefingPanel img.face {
+  width: 64px;
+  height: 64px;
+  float: left;
+  margin-right: 6px;
+  margin-bottom: 4px;
+  padding: 1px;
+  border: 1px dotted #d0d194;
+}
+
+/* Auth / Register classic form alignment */
+.authSplit {
+  min-height: 360px;
+}
+
+.authSplit .infos {
+  float: left;
+  width: 500px;
+}
+
+.authSplit .authBox {
+  float: right;
+  width: 365px;
+}
+
+.authSplit .register form label {
+  display: block;
+  margin-top: 8px;
+  margin-bottom: 2px;
+  font-size: 9pt;
+  font-weight: bold;
+  color: #fed82a;
+}
+
+.authSplit .register form input.field {
+  width: 240px;
+  padding: 3px 4px;
+  margin-bottom: 6px;
+}

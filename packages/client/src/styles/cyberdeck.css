@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: "IntrusionRetro";
+  src: url("/assets/fonts/38.ttf") format("truetype");
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+  --cyber-bg: #0c1009;
+  --cyber-panel: #161c11;
+  --cyber-panel-2: #1f2718;
+  --cyber-olive: #595c3c;
+  --cyber-border: #3a4429;
+  --cyber-amber: #fed82a;
+  --cyber-gold: #e59f07;
+  --cyber-green: #58f287;
+  --cyber-danger: #ff5555;
+  --cyber-text: #d8dfb8;
+  --cyber-muted: #8b9467;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #4a5535 #12170e;
+}
+
+.crt-overlay::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background:
+    linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.14) 50%),
+    radial-gradient(circle at center, transparent 65%, rgba(0, 0, 0, 0.32) 100%);
+  background-size: 100% 3px, 100% 100%;
+}
+
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: rgba(6, 9, 4, 0.78);
+  backdrop-filter: blur(3px);
+}
+
+.cyber-card {
+  background: linear-gradient(180deg, rgba(31, 39, 24, 0.94) 0%, rgba(20, 26, 15, 0.96) 100%);
+  border: 1px solid var(--cyber-border);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(208, 209, 148, 0.08);
+}
+
+.cyber-btn {
+  background: linear-gradient(180deg, #323c23 0%, #222918 100%);
+  border: 1px solid #55643b;
+  color: #e9efc8;
+  transition: transform 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.cyber-btn:hover:not(:disabled) {
+  border-color: var(--cyber-amber);
+  color: var(--cyber-amber);
+}
+
+.cyber-btn-amber {
+  background: linear-gradient(180deg, #f3b71b 0%, #c98305 100%);
+  border: 1px solid #fed82a;
+  color: #15190e;
+  font-weight: 700;
+}
+
+.cyber-btn-amber:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.intrusion-doc img.face {
+  float: left;
+  margin: 0 12px 8px 0;
+  border: 1px solid #71754c;
+  background: #14190f;
+  width: 56px;
+  height: 56px;
+  image-rendering: pixelated;
+}
+
+.intrusion-doc em {
+  color: #8fa16a;
+  font-style: normal;
+  font-size: 0.85em;
+}
+
+.intrusion-doc strong {
+  color: #fed82a;
+}
+
+.intrusion-doc .bin {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  color: #7ee787;
+  background: #0a0e08;
+  padding: 0.65rem;
+  border: 1px dashed #3d4b2b;
+  border-radius: 4px;
+  white-space: pre-wrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
