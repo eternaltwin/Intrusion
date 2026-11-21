@@ -120,6 +120,7 @@ class UserTerminal {
 	var historyPos		: Int;
 	var compList		: List<MCField> = new List();
 	var fpsAvg			: Float;
+	var lastPasteStamp	: Float = 0.0;
 
 	public var aliases	: Hash<String>;
 
@@ -612,6 +613,7 @@ class UserTerminal {
 		kl = {};
 		Reflect.setField(kl, "onKeyDown", onKey);
 		js.Browser.window.addEventListener("keydown", onKey);
+		js.Browser.window.addEventListener("paste", onPaste);
 		if (Manager.app != null && Manager.app.view != null) {
 			Manager.app.view.addEventListener("wheel", onWheel, { passive: false });
 		}
@@ -1935,11 +1937,18 @@ class UserTerminal {
 			} );
 		}
 		popMC = cast Manager.DM.attach("pop", Data.DP_TOP);
+		var padX = 10;
+		var padY = 8;
+		popMC.field._x = padX;
+		popMC.field._y = padY;
+		popMC.field.text = str + "_";
+		var cursorW = popMC.field.textWidth;
+		var cursorH = popMC.field.textHeight;
 		popMC.field.text = str;
-		popMC.bg._width = popMC.field.textWidth+13;
-		popMC.bg._height = popMC.field.textHeight+10;
-		popMC._x = Data.WID*0.5 - popMC.bg._width*0.5;
-		popMC._y = Data.HEI*0.5 - popMC.bg._height*0.5;
+		popMC.bg._width = Math.ceil(Math.max(popMC.field.textWidth, cursorW)) + padX * 2;
+		popMC.bg._height = Math.ceil(Math.max(popMC.field.textHeight, cursorH)) + padY * 2;
+		popMC._x = Math.round(Data.WID*0.5 - popMC.bg._width*0.5);
+		popMC._y = Math.round(Data.HEI*0.5 - popMC.bg._height*0.5);
 		if ( fl_generated )
 			startAnim( A_Text, popMC, str );
 //		startAnim( A_BubbleIn, popMC ).spd*=0.8;
@@ -2545,14 +2554,79 @@ class UserTerminal {
 	}
 
 
+	function applyPastedText(raw:String):Bool {
+		if (fl_end || apps.length > 0 || raw == null || raw.length == 0) return false;
+		if (pwin != null) {
+			var lower = raw.toLowerCase();
+			var cleaned = "";
+			for (i in 0...lower.length) {
+				var ch = lower.charAt(i);
+				if ((ch >= "0" && ch <= "9") || (ch >= "a" && ch <= "z")) {
+					cleaned += ch;
+				}
+			}
+			if (cleaned.length == 0) return false;
+			var next = pwin.input.text + cleaned;
+			if (next.length > 32) next = next.substr(0, 32);
+			pwin.input.text = next;
+			playSound("single_03");
+			return true;
+		}
+		if (fl_leet && fs != null && cmdLine != null && cmdLine._visible && popMC == null) {
+			var cleanedCmd = StringTools.replace(StringTools.replace(raw, "\r", ""), "\n", " ");
+			cleanedCmd = StringTools.replace(cleanedCmd, "\t", " ");
+			if (cleanedCmd.length == 0) return false;
+			var nextCmd = cmdLine.field.text + cleanedCmd;
+			if (nextCmd.length > 64) nextCmd = nextCmd.substr(0, 64);
+			cmdLine.field.text = nextCmd;
+			return true;
+		}
+		return false;
+	}
+
+	function onPaste(e:Dynamic) {
+		var tgt: Dynamic = e.target;
+		if (tgt != null && tgt.tagName != null) {
+			var tag = Std.string(tgt.tagName).toUpperCase();
+			if (tag == "INPUT" || tag == "TEXTAREA" || tag == "SELECT" || tgt.isContentEditable == true) return;
+		}
+		if (fl_end || apps.length > 0) return;
+		var canPaste = pwin != null || (fl_leet && fs != null && cmdLine != null && cmdLine._visible && popMC == null);
+		if (!canPaste) return;
+		var cd: Dynamic = e.clipboardData != null ? e.clipboardData : (untyped js.Browser.window).clipboardData;
+		var txt: String = cd != null ? cd.getData("text") : null;
+		lastPasteStamp = haxe.Timer.stamp() * 1000.0;
+		if (applyPastedText(txt)) {
+			e.preventDefault();
+		}
+	}
+
 	function onKey(e:KeyboardEvent) {
 		var tgt: Dynamic = e.target;
 		if (tgt != null && tgt.tagName != null) {
 			var tag = Std.string(tgt.tagName).toUpperCase();
-			if (tag == "INPUT" || tag == "TEXTAREA" || tag == "SELECT") return;
+			if (tag == "INPUT" || tag == "TEXTAREA" || tag == "SELECT" || tgt.isContentEditable == true) return;
 		}
 		if ( apps.length > 0 )
 			return;
+		var isPasteCombo = (e.ctrlKey || e.metaKey) && !e.altKey && (e.keyCode == 86 || (e.key != null && e.key.toLowerCase() == "v"));
+		if (isPasteCombo && (pwin != null || (fl_leet && fs != null && cmdLine != null && cmdLine._visible && popMC == null))) {
+			var stampBefore = lastPasteStamp;
+			var me = this;
+			js.Browser.window.setTimeout(function() {
+				if (me.fl_end || me.lastPasteStamp != stampBefore) return;
+				var nav: Dynamic = js.Browser.navigator;
+				if (nav != null && nav.clipboard != null && nav.clipboard.readText != null) {
+					nav.clipboard.readText().then(function(txt:String) {
+						if (!me.fl_end && me.lastPasteStamp == stampBefore) {
+							me.lastPasteStamp = haxe.Timer.stamp() * 1000.0;
+							me.applyPastedText(txt);
+						}
+					}, function(_:Dynamic) {});
+				}
+			}, 40);
+			return;
+		}
 		if (fl_leet && fs != null && cmdLine != null && popMC == null && pwin == null) {
 			var kc = e.keyCode;
 			if (kc == Key.BACKSPACE || kc == Key.DELETE) {
@@ -2695,8 +2769,11 @@ class UserTerminal {
 
         if (pwin!= null) {
             if ((c == Key.BACKSPACE || c == Key.DELETE)) {
-                if (pwin.input.text.length > 0)
+                if (e.ctrlKey || e.metaKey) {
+                    pwin.input.text = "";
+                } else if (pwin.input.text.length > 0) {
                     pwin.input.text = pwin.input.text.substr(0, pwin.input.text.length - 1);
+                }
                 e.preventDefault();
             } else if (e.key != null && e.key.length == 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 var ch = e.key.toLowerCase();
@@ -2719,6 +2796,7 @@ class UserTerminal {
 	public function dispose() {
 		fl_end = true;
 		js.Browser.window.removeEventListener("keydown", onKey);
+		js.Browser.window.removeEventListener("paste", onPaste);
 		if (Manager.app != null && Manager.app.view != null) {
 			try { Manager.app.view.removeEventListener("wheel", onWheel); } catch (err: Dynamic) {}
 		}

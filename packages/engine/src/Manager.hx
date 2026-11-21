@@ -95,11 +95,15 @@ class Manager {
 		trace("FATAL ["+PARAMS._seed+"] : "+str+"\n"+getStacks());
 
 		var mc : MCSprite = cast Manager.DM.attach("pop", Data.DP_TOPTOP);
+		var padX = 10;
+		var padY = 8;
+		mc.field._x = padX;
+		mc.field._y = padY;
 		mc.field.text = Lang.get.Fatal+"\n\n"+str;
-		mc.bg._width = mc.field.textWidth+13;
-		mc.bg._height = mc.field.textHeight+10;
-		mc._x = Data.WID*0.5 - mc.bg._width*0.5;
-		mc._y = Data.HEI*0.5 - mc.bg._height*0.5;
+		mc.bg._width = Math.ceil(mc.field.textWidth) + padX * 2;
+		mc.bg._height = Math.ceil(mc.field.textHeight) + padY * 2;
+		mc._x = Math.round(Data.WID*0.5 - mc.bg._width*0.5);
+		mc._y = Math.round(Data.HEI*0.5 - mc.bg._height*0.5);
 		mc.onRelease = function() {
 			// TODO: Fix?
 			//flash.Lib.getURL(Manager.PARAMS._errorUrl);

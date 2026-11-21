@@ -1,5 +1,10 @@
 /* Minimal modern enhancements preserving 100% of design.css + style.css */
 
+/* Align repeating background slice (site_header_bg.png) with .mxtophead (site_header.png) without legacy 23px #tid_bar */
+body {
+  background-position: center top;
+}
+
 #tooltip {
   pointer-events: none;
   z-index: 9999;

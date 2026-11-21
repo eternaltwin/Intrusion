@@ -8228,16 +8228,20 @@ Manager.getStacks = function() {
 Manager.fatal = function(str) {
 	console.log("src/Manager.hx:95:","FATAL [" + Manager.PARAMS._seed + "] : " + str + "\n" + Manager.getStacks());
 	var mc = Manager.DM.attach("pop",Data.DP_TOPTOP);
+	var padX = 10;
+	var padY = 8;
+	MCField.get_field(mc).set__x(padX);
+	MCField.get_field(mc).set__y(padY);
 	var tmp = _$Lang_AllTexts.getText(Lang.get,"Fatal") + "\n\n";
 	MCField.get_field(mc).text = tmp + str;
 	var _this = MCSprite.get_bg(mc);
-	_this.width = MCField.get_field(mc).width + 13;
+	_this.width = Math.ceil(MCField.get_field(mc).get_textWidth()) + padX * 2;
 	var _this = MCSprite.get_bg(mc);
-	_this.height = MCField.get_field(mc).get_textHeight() + 10;
+	_this.height = Math.ceil(MCField.get_field(mc).get_textHeight()) + padY * 2;
 	var _this = mc;
-	_this.x = 300. - MCSprite.get_bg(mc).width * 0.5;
+	_this.x = Math.round(300. - MCSprite.get_bg(mc).width * 0.5);
 	var _this = mc;
-	_this.y = 200. - MCSprite.get_bg(mc).height * 0.5;
+	_this.y = Math.round(200. - MCSprite.get_bg(mc).height * 0.5);
 	mc.set_onRelease(function() {
 	});
 	mt_bumdum_Col.setPercentColor(Manager.ROOT,25,16711680);
@@ -10763,7 +10767,9 @@ UserTerminal.prototype = {
 		this.updateStats();
 		this.kl = { };
 		this.kl["onKeyDown"] = $bind(this,this.onKey);
+		this.lastPasteStamp = 0.0;
 		window.addEventListener("keydown",$bind(this,this.onKey));
+		window.addEventListener("paste",$bind(this,this.onPaste));
 		if(Manager.app != null && Manager.app.view != null) {
 			Manager.app.view.addEventListener("wheel",$bind(this,this.onWheel),{ passive : false});
 		}
@@ -12273,15 +12279,22 @@ UserTerminal.prototype = {
 			});
 		}
 		this.popMC = Manager.DM.attach("pop",Data.DP_TOP);
+		var padX = 10;
+		var padY = 8;
+		MCField.get_field(this.popMC).set__x(padX);
+		MCField.get_field(this.popMC).set__y(padY);
+		MCField.get_field(this.popMC).text = str + "_";
+		var cursorW = MCField.get_field(this.popMC).get_textWidth();
+		var cursorH = MCField.get_field(this.popMC).get_textHeight();
 		MCField.get_field(this.popMC).text = str;
 		var _this = MCSprite.get_bg(this.popMC);
-		_this.width = MCField.get_field(this.popMC).width + 13;
+		_this.width = Math.ceil(Math.max(MCField.get_field(this.popMC).get_textWidth(),cursorW)) + padX * 2;
 		var _this = MCSprite.get_bg(this.popMC);
-		_this.height = MCField.get_field(this.popMC).get_textHeight() + 10;
+		_this.height = Math.ceil(Math.max(MCField.get_field(this.popMC).get_textHeight(),cursorH)) + padY * 2;
 		var _this = this.popMC;
-		_this.x = 300. - MCSprite.get_bg(this.popMC).width * 0.5;
+		_this.x = Math.round(300. - MCSprite.get_bg(this.popMC).width * 0.5);
 		var _this = this.popMC;
-		_this.y = 200. - MCSprite.get_bg(this.popMC).height * 0.5;
+		_this.y = Math.round(200. - MCSprite.get_bg(this.popMC).height * 0.5);
 		if(this.fl_generated) {
 			this.startAnim(AnimType.A_Text,this.popMC,str);
 		}
@@ -12965,15 +12978,100 @@ UserTerminal.prototype = {
 	}
 	,spam: function(str) {
 	}
+	,applyPastedText: function(raw) {
+		if(this.fl_end || this.apps.length > 0 || raw == null || raw.length == 0) {
+			return false;
+		}
+		if(this.pwin != null) {
+			var lower = raw.toLowerCase();
+			var cleaned = "";
+			var _g = 0;
+			var _g1 = lower.length;
+			while(_g < _g1) {
+				var i = _g++;
+				var ch = lower.charAt(i);
+				if((ch >= "0" && ch <= "9") || (ch >= "a" && ch <= "z")) {
+					cleaned += ch;
+				}
+			}
+			if(cleaned.length == 0) {
+				return false;
+			}
+			var next = MCPasswordInput.get_input(this.pwin).text + cleaned;
+			if(next.length > 32) {
+				next = HxOverrides.substr(next,0,32);
+			}
+			MCPasswordInput.get_input(this.pwin).text = next;
+			this.playSound("single_03");
+			return true;
+		}
+		if(this.fl_leet && this.fs != null && this.cmdLine != null && this.cmdLine.visible && this.popMC == null) {
+			var cleanedCmd = StringTools.replace(StringTools.replace(raw,"\r",""),"\n"," ");
+			cleanedCmd = StringTools.replace(cleanedCmd,"\t"," ");
+			if(cleanedCmd.length == 0) {
+				return false;
+			}
+			var nextCmd = MCField.get_field(this.cmdLine).text + cleanedCmd;
+			if(nextCmd.length > 64) {
+				nextCmd = HxOverrides.substr(nextCmd,0,64);
+			}
+			MCField.get_field(this.cmdLine).text = nextCmd;
+			return true;
+		}
+		return false;
+	}
+	,onPaste: function(e) {
+		var tgt = e.target;
+		if(tgt != null && tgt.tagName != null) {
+			var tag = Std.string(tgt.tagName).toUpperCase();
+			if(tag == "INPUT" || tag == "TEXTAREA" || tag == "SELECT" || tgt.isContentEditable == true) {
+				return;
+			}
+		}
+		if(this.fl_end || this.apps.length > 0) {
+			return;
+		}
+		var canPaste = this.pwin != null || (this.fl_leet && this.fs != null && this.cmdLine != null && this.cmdLine.visible && this.popMC == null);
+		if(!canPaste) {
+			return;
+		}
+		var cd = e.clipboardData != null ? e.clipboardData : window.clipboardData;
+		var txt = cd != null ? cd.getData("text") : null;
+		this.lastPasteStamp = HxOverrides.now();
+		if(this.applyPastedText(txt)) {
+			e.preventDefault();
+		}
+	}
 	,onKey: function(e) {
 		var tgt = e.target;
 		if(tgt != null && tgt.tagName != null) {
 			var tag = Std.string(tgt.tagName).toUpperCase();
-			if(tag == "INPUT" || tag == "TEXTAREA" || tag == "SELECT") {
+			if(tag == "INPUT" || tag == "TEXTAREA" || tag == "SELECT" || tgt.isContentEditable == true) {
 				return;
 			}
 		}
 		if(this.apps.length > 0) {
+			return;
+		}
+		var isPasteCombo = (e.ctrlKey || e.metaKey) && !e.altKey && (e.keyCode == 86 || (e.key != null && e.key.toLowerCase() == "v"));
+		if(isPasteCombo && (this.pwin != null || (this.fl_leet && this.fs != null && this.cmdLine != null && this.cmdLine.visible && this.popMC == null))) {
+			var stampBefore = this.lastPasteStamp;
+			var me = this;
+			window.setTimeout(function() {
+				if(me.fl_end || me.lastPasteStamp != stampBefore) {
+					return;
+				}
+				var nav = window.navigator;
+				if(nav != null && nav.clipboard != null && nav.clipboard.readText != null) {
+					nav.clipboard.readText().then(function(txt) {
+						if(!me.fl_end && me.lastPasteStamp == stampBefore) {
+							me.lastPasteStamp = HxOverrides.now();
+							me.applyPastedText(txt);
+						}
+					},function(_) {
+					});
+				}
+			},40);
 			return;
 		}
 		if(this.fl_leet && this.fs != null && this.cmdLine != null && this.popMC == null && this.pwin == null) {
@@ -13124,7 +13222,9 @@ UserTerminal.prototype = {
 		}
 		if(this.pwin != null) {
 			if(c == 8 || c == 46) {
-				if(MCPasswordInput.get_input(this.pwin).text.length > 0) {
+				if(e.ctrlKey || e.metaKey) {
+					MCPasswordInput.get_input(this.pwin).text = "";
+				} else if(MCPasswordInput.get_input(this.pwin).text.length > 0) {
 					var tmp = HxOverrides.substr(MCPasswordInput.get_input(this.pwin).text,0,MCPasswordInput.get_input(this.pwin).text.length - 1);
 					MCPasswordInput.get_input(this.pwin).text = tmp;
 				}
@@ -13150,6 +13250,7 @@ UserTerminal.prototype = {
 	,dispose: function() {
 		this.fl_end = true;
 		window.removeEventListener("keydown",$bind(this,this.onKey));
+		window.removeEventListener("paste",$bind(this,this.onPaste));
 		if(Manager.app != null && Manager.app.view != null) {
 			try {
 				Manager.app.view.removeEventListener("wheel",$bind(this,this.onWheel));
@@ -17692,7 +17793,10 @@ common_Text.prototype = $extend(PIXI.Text.prototype,{
 		return value;
 	}
 	,get_textHeight: function() {
-		return this.style.lineHeight;
+		if(this.text == null || this.text == "") {
+			return 0.0;
+		}
+		return this.height;
 	}
 	,set_textHeight: function(value) {
 		this.style.lineHeight = value;
@@ -17765,6 +17869,9 @@ common_Text.prototype = $extend(PIXI.Text.prototype,{
 		return this.text;
 	}
 	,get_textWidth: function() {
+		if(this.text == null || this.text == "") {
+			return 0.0;
+		}
 		return this.width;
 	}
 	,set_textWidth: function(textWidth) {

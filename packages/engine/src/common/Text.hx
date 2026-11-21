@@ -10,7 +10,6 @@ import pixi.core.math.shapes.Rectangle;
 @:build(common.macros.Alias.build("height", "_height"))
 @:build(common.macros.Alias.build("visible", "_visible"))
 @:build(common.macros.Alias.build("text", "htmlText"))
-@:build(common.macros.Alias.build("width", "textWidth"))
 class Text extends PixiText {
     var containerWidth: Float;
     var containerHeight: Float;
@@ -23,6 +22,7 @@ class Text extends PixiText {
     public var wordWrap(get, set): Bool;
     public var multiline(get, set): Bool;
     public var textColor(get, set): Dynamic;
+    public var textWidth(get, set): Float;
     public var textHeight(get, set): Float;
 
     public function new(containerWidth: Float, containerHeight: Float, initialText: String, align: String = "left", ?style:DefaultStyle) {
@@ -65,8 +65,18 @@ class Text extends PixiText {
         return value;
     }
 
+    public function get_textWidth(): Float {
+        if (this.text == null || this.text == "") return 0.0;
+        return this.width;
+    }
+    public function set_textWidth(value: Float): Float {
+        this.width = value;
+        return this.width;
+    }
+
     public function get_textHeight(): Float {
-        return this.style.lineHeight;
+        if (this.text == null || this.text == "") return 0.0;
+        return this.height;
     }
     public function set_textHeight(value: Float): Float {
         this.style.lineHeight = value;
