@@ -972,7 +972,6 @@ Dock.prototype = {
 			var _this1 = mc;
 			_this1.y = 4;
 			mc.gotoAndStop(1);
-			mc.cacheAsBitmap = true;
 			mc.filters = this.baseFilters;
 			if(this.term.fl_leet) {
 				MCField.get_field(mc).text = "";
@@ -3914,24 +3913,17 @@ GFileSystem.prototype = {
 			this.sty = this.sy;
 		}
 		this.sty += Math.round(d * 6);
-		this.stimer = 0;
-		this.updateScrollPos();
 		this.stimer = 2;
+		this.updateScrollPos();
 	}
 	,updateScrollPos: function() {
 		if(this.scroller == null) {
 			return;
 		}
 		if(this.sty != null) {
-			var delta = (this.sty - this.sy) * 0.1;
-			if(delta > -1 && delta < 0) {
-				delta = -1;
-			}
-			if(delta > 0 && delta < 1) {
-				delta = 1;
-			}
-			this.sy += delta | 0;
-			if(Math.abs(this.sy - this.sty) <= 1) {
+			var factor = 1.0 - Math.pow(0.85,mt_Timer.tmod);
+			this.sy += (this.sty - this.sy) * factor;
+			if(Math.abs(this.sy - this.sty) <= 0.5) {
 				this.sy = this.sty;
 				this.sty = null;
 			}
@@ -3940,18 +3932,24 @@ GFileSystem.prototype = {
 			this.stimer -= mt_Timer.tmod;
 		} else {
 			if(this.sy < this.smin) {
-				this.sy = this.sy + mt_Timer.tmod * (this.smin - this.sy) * GFileSystem.SCROLL_SPEED | 0;
+				this.sy += (this.smin - this.sy) * (1.0 - Math.pow(1.0 - GFileSystem.SCROLL_SPEED,mt_Timer.tmod));
+				if(Math.abs(this.smin - this.sy) < 0.5) {
+					this.sy = this.smin;
+				}
 				this.sty = null;
 			}
 			if(this.sy > this.smax) {
-				this.sy = this.sy + mt_Timer.tmod * (this.smax - this.sy) * GFileSystem.SCROLL_SPEED | 0;
+				this.sy += (this.smax - this.sy) * (1.0 - Math.pow(1.0 - GFileSystem.SCROLL_SPEED,mt_Timer.tmod));
+				if(Math.abs(this.smax - this.sy) < 0.5) {
+					this.sy = this.smax;
+				}
 				this.sty = null;
 			}
-			var _this = this.scroller;
-			_this.x = 10 - this.sy;
-			var _this = this.scroller;
-			_this.y = Math.round((30 - this.sy) * 0.5);
 		}
+		var _this = this.scroller;
+		_this.x = 10.0 - this.sy;
+		var _this = this.scroller;
+		_this.y = (30.0 - this.sy) * 0.5;
 	}
 	,onDisconnectButton: function() {
 		if(Progress.isRunning()) {
@@ -4024,7 +4022,6 @@ GFileSystem.prototype = {
 		this.detach();
 		this.bg = Manager.DM.attach("bg",Data.DP_FS);
 		this.bg.stop();
-		this.bg.set_blendMode(PIXI.BLEND_MODES.OVERLAY);
 		this.bg.useHandCursor = false;
 		this.bg.set_onRelease(function() {
 		});
@@ -4130,6 +4127,8 @@ GFileSystem.prototype = {
 			tmp.get_smc().gotoAndStop(f);
 		}
 		if(this.fl_auth) {
+			mt_bumdum_Col.setPercentColor(this.wallL,0,0);
+			mt_bumdum_Col.setPercentColor(this.wallR,45,0);
 			this.setWallpaper("sicon","corrupt");
 		}
 	}
@@ -4268,7 +4267,7 @@ GFileSystem.prototype = {
 		}
 		this.updateScrollPos();
 		if(this.tmc != null) {
-			var spd = 4;
+			var spd = 4 * mt_Timer.tmod;
 			var fh = common_MovieClip.resolve(this.tmc,"c1");
 			fh.set__rotation(fh.get__rotation() + spd);
 			if(!this.term.fl_lowq) {
@@ -4277,9 +4276,9 @@ GFileSystem.prototype = {
 				var fh = common_MovieClip.resolve(this.tmc,"c3");
 				fh.set__rotation(fh.get__rotation() + spd * 0.5);
 			}
-			if(this.tmc.get__xscale() != 120) {
+			if(Math.abs(this.tmc.get__xscale() - 120) > 0.1) {
 				var fh = this.tmc;
-				fh.set__xscale(fh.get__xscale() + (120 - this.tmc.get__xscale()) * 0.4);
+				fh.set__xscale(fh.get__xscale() + (120 - this.tmc.get__xscale()) * (1.0 - Math.pow(0.6,mt_Timer.tmod)));
 				this.tmc.set__yscale(this.tmc.get__xscale() * 0.5);
 			}
 		}
@@ -6207,11 +6206,8 @@ GNetwork.prototype = {
 		_this.x = node.mc.x;
 		var _this = mc;
 		_this.y = node.mc.y - 24;
-		Manager.app.ticker.add(function() {
-			if(mc._currentframe == mc._totalframes - 1) {
-				mc.removeMovieClip();
-			}
-		});
+		mc.loop = false;
+		mc.removeOnFrame = mc._totalframes;
 	}
 	,updateVisibility: function(fl_anim) {
 		if(fl_anim == null) {
@@ -6300,14 +6296,16 @@ GNetwork.prototype = {
 		var bmpCont = this.sdm.empty(Data.DP_BG);
 		var _this = bmpCont;
 		_this.x = -300;
-		bmpCont.set_blendMode(PIXI.BLEND_MODES.OVERLAY);
 		var flat = this.sdm.empty(Data.DP_BG);
+		var _this = flat;
+		_this.x = bmpCont.x;
 		var flatDm = new mt_DepthManager(flat);
 		var bg = flatDm.attach("bgNet",0);
 		var _this = bg;
 		_this.x = -15 - bmpCont.x;
 		var _this = bg;
 		_this.y = 140;
+		bg.set__alpha(45);
 		var lmc = this.sdm.empty(Data.DP_BG);
 		this.ldm = new mt_DepthManager(lmc);
 		this.groundField = this.sdm.attach("groundField",Data.DP_TOP);
@@ -6423,7 +6421,6 @@ GNetwork.prototype = {
 						mcList.push({ d : node.path.length, mc : mc});
 					}
 				}
-				mcNode.cacheAsBitmap = true;
 				node.mc = mcNode;
 				if(node.fl_target && this.term.gameLevel == 4) {
 					var amc = this.sdm.attach("arrow",Data.DP_ITEM);
@@ -6562,8 +6559,12 @@ GNetwork.prototype = {
 				}
 				if(node.system.fl_crashed) {
 					MCNode.get_sicon(node.mc).gotoAndStop("corrupt");
-					mt_bumdum_Col.setPercentColor(node.mc,30,11149892);
+					mt_bumdum_Col.setPercentColor(node.mc,45,11149892);
 				}
+				mt_bumdum_Col.setPercentColor(MCNode.get_sicon(node.mc),0,0);
+			} else {
+				var _this2 = MCNode.get_sicon(node.mc);
+				_this2.visible = false;
 			}
 		}
 		this.detachPath();
@@ -6580,16 +6581,16 @@ GNetwork.prototype = {
 			return;
 		}
 		if(this.tmc != null) {
-			var spd = 4;
+			var spd = 4 * mt_Timer.tmod;
 			var fh = common_MovieClip.resolve(this.tmc,"c1");
 			fh.set__rotation(fh.get__rotation() + spd);
 			var fh = common_MovieClip.resolve(this.tmc,"c2");
 			fh.set__rotation(fh.get__rotation() + -spd * 1.3);
 			var fh = common_MovieClip.resolve(this.tmc,"c3");
 			fh.set__rotation(fh.get__rotation() + spd * 0.5);
-			if(this.tmc.get__xscale() != 90) {
+			if(Math.abs(this.tmc.get__xscale() - 90) > 0.1) {
 				var fh = this.tmc;
-				fh.set__xscale(fh.get__xscale() + (90 - this.tmc.get__xscale()) * 0.4);
+				fh.set__xscale(fh.get__xscale() + (90 - this.tmc.get__xscale()) * (1.0 - Math.pow(0.6,mt_Timer.tmod)));
 				this.tmc.set__yscale(this.tmc.get__xscale() * 0.5);
 			}
 		}
@@ -6656,17 +6657,12 @@ GNetwork.prototype = {
 				_this.width = MCFieldShadow.get_shadow(mcc).width + 5;
 				var _this = MCFieldShadow.get_shadow(mcc);
 				_this.y = MCField.get_field(mc).y + 22;
-				var tmp = common_BlurFilter.create(4,4);
-				MCFieldShadow.get_shadow(mcc).filters = [tmp];
+				MCFieldShadow.get_shadow(mcc).alpha = 0.4;
 				var delta = Std.random(30) + 10;
 				MCFieldShadow.get_shadow(mcc).x -= delta * 0.2;
 				MCFieldShadow.get_shadow(mcc).y += delta;
-				var bmp = Manager.app.renderer.generateTexture(cont,PIXI.SCALE_MODES.DEFAULT,1);
-				bmp.resize(cont.width + 20,cont.height + 40,true);
-				mc.removeMovieClip();
-				cont.attachBitmap(bmp,1);
 				var spd = Std.random(20) / 10 + 1;
-				this.gspamList.push({ mc : cont, dx : spd, dy : this.fl_spamDir ? -spd * 0.5 : spd * 0.5, bmp : bmp});
+				this.gspamList.push({ mc : cont, dx : spd, dy : this.fl_spamDir ? -spd * 0.5 : spd * 0.5, bmp : null});
 				this.fl_spamDir = !this.fl_spamDir;
 			}
 			var _g_head = this.gspamList.h;
@@ -6679,42 +6675,29 @@ GNetwork.prototype = {
 				_this.x = mc.x - mt_Timer.tmod * gs.dx;
 				var _this1 = mc;
 				_this1.y = mc.y - mt_Timer.tmod * gs.dy;
-				if(mc.x + mc.width * 2 < 0 || mc.y + mc.height < 0 || mc.y > 700) {
+				if(mc.x + mc.width * 2 < -400 || mc.y + mc.height < -600 || mc.y > 800) {
 					this.gspamList.remove(gs);
 					mc.removeMovieClip();
 				}
 			}
 		}
 		if(this.sx != this.stx || this.sy != this.sty) {
-			var delta = Math.round(this.stx - this.sx);
-			if(delta > 0 && delta < 1) {
-				delta = 1;
-			}
-			if(delta > -1 && delta < 0) {
-				delta = -1;
-			}
-			this.sx += delta * this.scrollSpeed;
-			if(Math.abs(this.stx - this.sx) < 1) {
+			var sFactor = 1.0 - Math.pow(1.0 - this.scrollSpeed,mt_Timer.tmod);
+			this.sx += (this.stx - this.sx) * sFactor;
+			if(Math.abs(this.stx - this.sx) < 0.25) {
 				this.sx = this.stx;
 			}
-			var delta = Math.round(this.sty - this.sy);
-			if(delta > 0 && delta < 1) {
-				delta = 1;
-			}
-			if(delta > -1 && delta < 0) {
-				delta = -1;
-			}
-			this.sy += (this.sty - this.sy) * this.scrollSpeed;
-			if(Math.abs(this.sty - this.sy) < 1) {
+			this.sy += (this.sty - this.sy) * sFactor;
+			if(Math.abs(this.sty - this.sy) < 0.25) {
 				this.sy = this.sty;
 			}
 		}
 		this.sx = Math.max(-260,Math.min(260,this.sx));
 		this.sy = Math.max(-260,Math.min(0,this.sy));
 		var _this = this.scroller;
-		_this.x = Math.round(this.sx);
+		_this.x = this.sx;
 		var _this = this.scroller;
-		_this.y = Math.round(this.sy);
+		_this.y = this.sy;
 		this.tutorialPoint(_$Tutorial_AllData.getTutorial(Tutorial.get,"first"),"connect",NodeType.TutoTerm);
 		this.tutorialPoint(_$Tutorial_AllData.getTutorial(Tutorial.get,"first"),"entrance",NodeType.Entrance);
 		this.tutorialPoint(_$Tutorial_AllData.getTutorial(Tutorial.get,"first"),"crashed",NodeType.Entrance);
@@ -10761,6 +10744,9 @@ UserTerminal.prototype = {
 		this.kl = { };
 		this.kl["onKeyDown"] = $bind(this,this.onKey);
 		window.addEventListener("keydown",$bind(this,this.onKey));
+		if(Manager.app != null && Manager.app.view != null) {
+			Manager.app.view.addEventListener("wheel",$bind(this,this.onWheel),{ passive : false});
+		}
 		this.playSound("single_04");
 		this.log(_$Lang_AllTexts.getText(Lang.get,"Log_ConnectedGlobal"));
 		if(this.chipset != null) {
@@ -11958,7 +11944,7 @@ UserTerminal.prototype = {
 	,endAnim: function(a) {
 		a.kill = true;
 		if(a.fl_killFilters) {
-			a.mc.filters = [];
+			a.mc.filters = null;
 		}
 		if(a.cb != null) {
 			a.cb();
@@ -12063,9 +12049,11 @@ UserTerminal.prototype = {
 			fx.data = Std.random(314) / 100;
 			break;
 		case 2:
-			var fxFrame = Std.random(fx.mc._totalframes);
+			var fxFrame = Std.random(fx.mc._totalframes) + 1;
 			mc.gotoAndStop(fxFrame);
-			mc.get_smc().stop();
+			if(mc.get_smc() != null) {
+				mc.get_smc().gotoAndStop(1);
+			}
 			if(link == "fx_glight") {
 				var s = Std.random(70) + 30;
 				mc.set__xscale((Std.random(2) * 2 - 1) * s);
@@ -12841,12 +12829,7 @@ UserTerminal.prototype = {
 		MCField.get_field(lmc).text = str;
 		MCField.get_field(lmc).style.fill = color;
 		this.logMC.y += MCField.get_field(lmc).get_textHeight();
-		MCField.get_field(lmc).filters = common_GlowFilter.create(color,1,8,8,1);
-		var bmp = Manager.app.renderer.generateTexture(lmc,PIXI.SCALE_MODES.DEFAULT,1);
-		bmp.resize(MCField.get_field(lmc).width + 5,MCField.get_field(lmc).height + 5,true);
-		lmc.removeMovieClip();
-		var mc = Manager.DM.empty(Data.DP_TOP);
-		mc.attachBitmap(bmp,1);
+		var mc = lmc;
 		this.startAnim(AnimType.A_Blink,mc);
 		this.logHistory.push({ col : color, str : str});
 		this.logLines.push({ ta : 100, t : new Date().getTime(), mc : mc});
@@ -13090,9 +13073,25 @@ UserTerminal.prototype = {
 			}
 		}
 	}
+	,onWheel: function(e) {
+		if(this.fl_end || this.apps.length > 0 || this.popMC != null || this.pwin != null) {
+			return;
+		}
+		if(this.fs != null) {
+			this.fs.onMouseWheel(e.deltaY > 0 ? -3 : 3);
+			e.preventDefault();
+		}
+	}
 	,dispose: function() {
 		this.fl_end = true;
 		window.removeEventListener("keydown",$bind(this,this.onKey));
+		if(Manager.app != null && Manager.app.view != null) {
+			try {
+				Manager.app.view.removeEventListener("wheel",$bind(this,this.onWheel));
+			} catch( _g ) {
+				haxe_NativeStackTrace.lastError = _g;
+			}
+		}
 		if(this.apps != null) {
 			var activeApps = Lambda.array(this.apps);
 			var _g = 0;
@@ -13259,7 +13258,7 @@ UserTerminal.prototype = {
 			if(a.t == null) {
 				cpt = Progress.get();
 			} else {
-				a.t += a.spd * this.dspeed;
+				a.t += a.spd * this.dspeed * mt_Timer.tmod;
 				if(a.t > 1) {
 					a.t = 1;
 				}
@@ -13268,7 +13267,7 @@ UserTerminal.prototype = {
 			if(!a.kill && cpt >= 0) {
 				switch(a.type._hx_index) {
 				case 0:
-					a.mc.gotoAndStop(Math.floor(cpt * a.mc._totalframes));
+					a.mc.gotoAndStop(Math.max(1,Math.floor(cpt * a.mc._totalframes)) | 0);
 					break;
 				case 1:
 					a.mc.set__alpha(100 * cpt);
@@ -13414,16 +13413,14 @@ UserTerminal.prototype = {
 					}
 					break;
 				case 16:
-					a.mc.y += a.data;
-					a.data += 3.5;
+					a.mc.y += a.data * mt_Timer.tmod;
+					a.data += 3.5 * mt_Timer.tmod;
 					if(a.mc.y >= a.ty) {
 						a.kill = true;
 					}
 					break;
 				case 17:
 					a.mc.set__alpha(100 * Math.min(1,cpt / 0.4));
-					var tmp6 = common_BlurFilter.create(0,0);
-					a.mc.filters = [tmp6];
 					break;
 				case 18:
 					a.mc.set__alpha(100 * cpt);
@@ -13471,7 +13468,7 @@ UserTerminal.prototype = {
 				fl_kill = fx.mc.get__alpha() <= 0;
 				break;
 			case 1:
-				fx.data += 0.2;
+				fx.data += 0.2 * mt_Timer.tmod;
 				fx.mc.set__xscale(Math.cos(fx.data) * 100);
 				var n1 = 1;
 				if(n1 == null) {
@@ -13484,8 +13481,19 @@ UserTerminal.prototype = {
 				fl_kill = fx.mc.get__alpha() <= 0;
 				break;
 			case 2:
-				fl_kill = fx.mc.get_smc()._currentframe == fx.mc.get_smc()._totalframes;
-				fx.mc.get_smc().nextFrame();
+				if(fx.mc.get_smc() == null) {
+					fl_kill = true;
+				} else {
+					fx.data += mt_Timer.tmod;
+					while(fx.data >= 1.0) {
+						fx.data -= 1.0;
+						if(fx.mc.get_smc()._currentframe >= fx.mc.get_smc()._totalframes) {
+							fl_kill = true;
+							break;
+						}
+						fx.mc.get_smc().nextFrame();
+					}
+				}
 				break;
 			case 3:
 				var n2 = 2;
@@ -13655,7 +13663,6 @@ UserTerminal.prototype = {
 				_this1.y = this.lifeBar.y + 2 + 6 * i;
 			}
 			this.comboMc.filters = common_GlowFilter.create(4476253,1,4,4,10);
-			this.comboMc.cacheAsBitmap = true;
 			this.bubble(this.comboMc,(_$Lang_AllTextsFormat.getText(Lang.fmt,"Tooltip_Combo"))({ _n : n, _total : this.maxCombo}),null,-1.5);
 		}
 	}
@@ -16411,7 +16418,9 @@ var common_InternalMovieClip = function(builder) {
 	this.removeObjOnFrame = null;
 	this.removeOnFrame = null;
 	this.stopOnFrame = [];
+	this.frameAcc = 0.0;
 	this.isPlaying = false;
+	this.loopStartFrame = 1;
 	this.sprites = new haxe_ds_StringMap();
 	this.frames = [];
 	this._totalframes = 0;
@@ -16429,7 +16438,9 @@ common_InternalMovieClip.prototype = $extend(PIXI.Container.prototype,{
 	,frames: null
 	,sprites: null
 	,loop: null
+	,loopStartFrame: null
 	,isPlaying: null
+	,frameAcc: null
 	,_zIndex: null
 	,_name: null
 	,tint: null
@@ -16472,7 +16483,7 @@ common_InternalMovieClip.prototype = $extend(PIXI.Container.prototype,{
 		this.sprites = sprites;
 	}
 	,get_smc: function() {
-		return this.sprites.h["smc"];
+		return this.get("smc");
 	}
 	,update: function() {
 		var _g = 0;
@@ -16484,12 +16495,34 @@ common_InternalMovieClip.prototype = $extend(PIXI.Container.prototype,{
 				i.update();
 			}
 		}
+		if(this._totalframes > 0 && this._currentframe >= 1 && this._currentframe <= this._totalframes) {
+			var activeContainer = this.frames[this._currentframe - 1].container;
+			var _g = 0;
+			var _g1 = activeContainer.children;
+			while(_g < _g1.length) {
+				var child = _g1[_g];
+				++_g;
+				if(((child) instanceof common_InternalMovieClip)) {
+					child.update();
+				}
+			}
+		}
 		if(this.isPlaying && this.visible) {
-			this.nextFrame();
+			this.frameAcc += mt_Timer.tmod;
+			while(this.frameAcc >= 1.0) {
+				this.frameAcc -= 1.0;
+				if(this.isPlaying && this.visible) {
+					this.nextFrame();
+				} else {
+					this.frameAcc = 0.0;
+					break;
+				}
+			}
 		}
 	}
 	,stop: function() {
 		this.isPlaying = false;
+		this.frameAcc = 0.0;
 	}
 	,play: function() {
 		this.isPlaying = true;
@@ -16536,7 +16569,8 @@ common_InternalMovieClip.prototype = $extend(PIXI.Container.prototype,{
 				this.stop();
 				return;
 			} else {
-				this._currentframe = 0;
+				var startF = this.loopStartFrame >= 1 && this.loopStartFrame <= this._totalframes ? this.loopStartFrame : 1;
+				this._currentframe = startF - 1;
 			}
 		}
 		this._currentframe++;
@@ -16554,22 +16588,53 @@ common_InternalMovieClip.prototype = $extend(PIXI.Container.prototype,{
 				this.frames[i].container.visible = false;
 			}
 		}
-		var sprite = this.frames[this._currentframe - 1].sprites.iterator();
-		while(sprite.hasNext()) {
-			var sprite1 = sprite.next();
-			if(sprite1.transform != null) {
-				var t = sprite1.transform;
+		var curFrame = this.frames[this._currentframe - 1];
+		var depths = [];
+		var d = curFrame.sprites.keys();
+		while(d.hasNext()) {
+			var d1 = d.next();
+			depths.push(d1);
+		}
+		depths.sort(function(a,b) {
+			return a - b;
+		});
+		var _g = 0;
+		while(_g < depths.length) {
+			var d = depths[_g];
+			++_g;
+			var sprite = curFrame.sprites.h[d];
+			if(sprite == null) {
+				continue;
+			}
+			if(sprite.isMask == true) {
+				sprite.sprite.visible = false;
+				continue;
+			}
+			if(sprite.transform != null) {
+				var t = sprite.transform;
 				var tx = t.x;
 				var ty = t.y;
-				if(!isInitialLoading && (sprite1.sprite.x != 0 || sprite1.sprite.y != 0)) {
-					tx = sprite1.sprite.x;
-					ty = sprite1.sprite.y;
+				if(!isInitialLoading && ((sprite.sprite) instanceof common_Text) && (sprite.sprite.x != 0 || sprite.sprite.y != 0)) {
+					tx = sprite.sprite.x;
+					ty = sprite.sprite.y;
 				}
-				sprite1.sprite.setTransform(tx,ty,t.scaleX,t.scaleY,t.rotation,t.skewX,t.skewY,t.pivotX,t.pivotY);
+				var px = sprite.sprite.pivot != null ? sprite.sprite.pivot.x : 0.0;
+				var py = sprite.sprite.pivot != null ? sprite.sprite.pivot.y : 0.0;
+				sprite.sprite.setTransform(tx,ty,t.scaleX,t.scaleY,t.rotation,t.skewX,t.skewY,px,py);
 			}
-			this.frames[this._currentframe - 1].container.addChild(sprite1.sprite);
+			if(sprite.alpha != null) {
+				sprite.sprite.alpha = sprite.alpha;
+			}
+			if(sprite.tint != null) {
+				if(((sprite.sprite) instanceof common_InternalMovieClip)) {
+					sprite.sprite.set_tint(sprite.tint);
+				} else if(((sprite.sprite) instanceof PIXI.Sprite)) {
+					sprite.sprite.tint = sprite.tint;
+				}
+			}
+			curFrame.container.addChild(sprite.sprite);
 		}
-		this.frames[this._currentframe - 1].container.visible = true;
+		curFrame.container.visible = true;
 		var e = this.width;
 		if(this.stopOnFrame.indexOf(this._currentframe) != -1) {
 			this.stop();
@@ -16975,6 +17040,20 @@ common_MovieClipBuilder.prototype = {
 			var tag = _g1[_g];
 			++_g;
 			switch(haxe_xml__$Access_AttribAccess.resolve(tag,"type")) {
+			case "DoActionTag":
+				if(haxe_xml__$Access_HasAttribAccess.resolve(tag,"actionBytes")) {
+					var ab = haxe_xml__$Access_AttribAccess.resolve(tag,"actionBytes").toLowerCase();
+					if(ab.length >= 14 && HxOverrides.substr(ab,0,6) == "810200" && HxOverrides.substr(ab,10,4) == "0600") {
+						var lo = Std.parseInt("0x" + HxOverrides.substr(ab,6,2));
+						var hi = Std.parseInt("0x" + HxOverrides.substr(ab,8,2));
+						if(lo != null && hi != null) {
+							mc.loopStartFrame = (hi << 8 | lo) + 1;
+						}
+					} else if(ab == "0700") {
+						mc.stopOnFrame.push(frameId);
+					}
+				}
+				break;
 			case "FrameLabelTag":
 				frameName = haxe_xml__$Access_AttribAccess.resolve(tag,"name");
 				break;
@@ -17002,17 +17081,43 @@ common_MovieClipBuilder.prototype = {
 		var name = tmp != null ? tmp : frameId == null ? "null" : "" + frameId;
 		mc.addFrame(name,objects);
 	}
+	,parseColorState: function(tag,prevAlpha,prevTint) {
+		if(!haxe_xml__$Access_HasNodeAccess.resolve(tag,"colorTransform")) {
+			return { alpha : prevAlpha, tint : prevTint};
+		}
+		var ct = haxe_xml__$Access_NodeAccess.resolve(tag,"colorTransform");
+		var aMult = haxe_xml__$Access_HasAttribAccess.resolve(ct,"alphaMultTerm") ? Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(ct,"alphaMultTerm")) : 256;
+		var aAdd = haxe_xml__$Access_HasAttribAccess.resolve(ct,"alphaAddTerm") ? Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(ct,"alphaAddTerm")) : 0;
+		var alpha = Math.max(0.0,Math.min(1.0,aMult / 256.0 + aAdd / 255.0));
+		var rMult = haxe_xml__$Access_HasAttribAccess.resolve(ct,"redMultTerm") ? Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(ct,"redMultTerm")) : 256;
+		var gMult = haxe_xml__$Access_HasAttribAccess.resolve(ct,"greenMultTerm") ? Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(ct,"greenMultTerm")) : 256;
+		var bMult = haxe_xml__$Access_HasAttribAccess.resolve(ct,"blueMultTerm") ? Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(ct,"blueMultTerm")) : 256;
+		var rAdd = haxe_xml__$Access_HasAttribAccess.resolve(ct,"redAddTerm") ? Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(ct,"redAddTerm")) : 0;
+		var gAdd = haxe_xml__$Access_HasAttribAccess.resolve(ct,"greenAddTerm") ? Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(ct,"greenAddTerm")) : 0;
+		var bAdd = haxe_xml__$Access_HasAttribAccess.resolve(ct,"blueAddTerm") ? Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(ct,"blueAddTerm")) : 0;
+		var isIdentityColor = rMult == 256 && gMult == 256 && bMult == 256 && rAdd == 0 && gAdd == 0 && bAdd == 0;
+		if(isIdentityColor) {
+			return { alpha : alpha, tint : 16777215};
+		}
+		var r = Math.max(0,Math.min(255,Math.round(255 * (rMult / 256.0) + rAdd))) | 0;
+		var g = Math.max(0,Math.min(255,Math.round(255 * (gMult / 256.0) + gAdd))) | 0;
+		var b = Math.max(0,Math.min(255,Math.round(255 * (bMult / 256.0) + bAdd))) | 0;
+		return { alpha : alpha, tint : mt_bumdum_Col.objToCol({ r : r, g : g, b : b})};
+	}
 	,placeObject: function(tag,objects,sprites) {
-		var transform = this.getTransform(tag);
+		var depth = Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(tag,"depth"));
+		var prev = objects.h.hasOwnProperty(depth) ? objects.h[depth] : null;
+		var isMove = haxe_xml__$Access_HasAttribAccess.resolve(tag,"placeFlagMove") && haxe_xml__$Access_AttribAccess.resolve(tag,"placeFlagMove") == "true";
 		if(haxe_xml__$Access_AttribAccess.resolve(tag,"characterId") == "0") {
-			var depth = Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(tag,"depth"));
-			if(!objects.h.hasOwnProperty(depth)) {
+			if(prev == null) {
 				throw haxe_Exception.thrown("Moving an object that is not present");
 			}
-			var object = objects.h[depth];
-			objects.h[depth] = { name : object.name, sprite : object.sprite, transform : transform};
+			var nextTransform = haxe_xml__$Access_HasNodeAccess.resolve(tag,"matrix") ? this.getTransform(tag) : prev.transform;
+			var nextColor = this.parseColorState(tag,prev.alpha,prev.tint);
+			objects.h[depth] = { name : prev.name, sprite : prev.sprite, transform : nextTransform, alpha : nextColor.alpha, tint : nextColor.tint, isMask : prev.isMask};
 			return;
 		}
+		var transform = haxe_xml__$Access_HasNodeAccess.resolve(tag,"matrix") ? this.getTransform(tag) : isMove && prev != null ? prev.transform : this.getTransform(tag);
 		var t = this.getTag(haxe_xml__$Access_AttribAccess.resolve(tag,"characterId"));
 		var objectId = this.getObjectId(t);
 		var name;
@@ -17028,8 +17133,8 @@ common_MovieClipBuilder.prototype = {
 		case "DefineShape2Tag":case "DefineShape3Tag":case "DefineShape4Tag":case "DefineShapeTag":
 			var baseTexture = this.textureCache.getTexture(this.assetRoot + ("shapes_svg/" + haxe_xml__$Access_AttribAccess.resolve(t,"shapeId") + ".svg"));
 			var bounds = this.getBounds(haxe_xml__$Access_NodeAccess.resolve(t,"shapeBounds"));
-			var rw = Math.floor(Math.min(Math.floor(bounds.width),Math.floor(baseTexture.width)));
-			var rh = Math.floor(Math.min(Math.floor(bounds.height),Math.floor(baseTexture.height)));
+			var rw = Math.floor(Math.min(Math.ceil(bounds.width),Math.floor(baseTexture.width)));
+			var rh = Math.floor(Math.min(Math.ceil(bounds.height),Math.floor(baseTexture.height)));
 			if(rw < 1) {
 				rw = 1;
 			}
@@ -17038,30 +17143,43 @@ common_MovieClipBuilder.prototype = {
 			}
 			var texture = new PIXI.Texture(baseTexture.baseTexture,new PIXI.Rectangle(0,0,rw,rh));
 			var sprite1 = new PIXI.Sprite(texture);
-			transform.x = bounds.x + transform.x;
-			transform.y = bounds.y + transform.y;
+			sprite1.pivot.set(-bounds.x,-bounds.y);
 			sprite = sprite1;
 			break;
 		case "DefineSpriteTag":
-			var sprite1 = this.buildMovieClip(haxe_xml__$Access_AttribAccess.resolve(t,"spriteId"),name);
-			sprite = sprite1;
+			sprite = this.buildMovieClip(haxe_xml__$Access_AttribAccess.resolve(t,"spriteId"),name);
 			break;
 		case "DefineEditTextTag":case "DefineTextTag":
 			var bounds = this.getBounds(haxe_xml__$Access_AttribAccess.resolve(t,"type") == "DefineEditTextTag" ? haxe_xml__$Access_NodeAccess.resolve(t,"bounds") : haxe_xml__$Access_NodeAccess.resolve(t,"textBounds"));
 			var text = this.buildTextField(t,bounds.width,bounds.height);
-			transform.x += bounds.x;
-			transform.y += bounds.y;
+			transform = { x : transform.x + bounds.x, y : transform.y + bounds.y, scaleX : transform.scaleX, scaleY : transform.scaleY, rotation : transform.rotation, skewX : transform.skewX, skewY : transform.skewY, pivotX : 0.0, pivotY : 0.0};
 			sprite = text;
 			break;
 		default:
 			var other = _g;
 			throw haxe_Exception.thrown("Unsupported tag definition: " + other);
 		}
-		this.applyColor(tag,sprite);
+		var isMask = haxe_xml__$Access_HasAttribAccess.resolve(tag,"clipDepth") && haxe_xml__$Access_AttribAccess.resolve(tag,"clipDepth") != "0";
+		var colorState = this.parseColorState(tag,1.0,null);
+		if(isMask) {
+			sprite.visible = false;
+		} else {
+			if(colorState.alpha != null) {
+				sprite.alpha = colorState.alpha;
+			}
+			if(colorState.tint != null) {
+				if(((sprite) instanceof common_InternalMovieClip)) {
+					sprite.set_tint(colorState.tint);
+				} else if(((sprite) instanceof PIXI.Sprite)) {
+					sprite.tint = colorState.tint;
+				}
+			}
+		}
 		this.applyFilters(tag,sprite);
-		sprites.h[name] = sprite;
-		var key = Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(tag,"depth"));
-		objects.h[key] = { name : name, sprite : sprite, transform : transform};
+		if(!Object.prototype.hasOwnProperty.call(sprites.h,name)) {
+			sprites.h[name] = sprite;
+		}
+		objects.h[depth] = { name : name, sprite : sprite, transform : transform, alpha : colorState.alpha, tint : colorState.tint, isMask : isMask};
 	}
 	,applyColor: function(tag,sprite) {
 		if(haxe_xml__$Access_AttribAccess.resolve(tag,"clipDepth") != "0") {
@@ -17240,28 +17358,26 @@ common_MovieClipBuilder.prototype = {
 		return this.decomposeMatrix(haxe_xml__$Access_NodeAccess.resolve(tag,"matrix"));
 	}
 	,decomposeMatrix: function(m) {
-		var a = parseFloat(haxe_xml__$Access_AttribAccess.resolve(m,"scaleX"));
-		var b = parseFloat(haxe_xml__$Access_AttribAccess.resolve(m,"rotateSkew0"));
-		var c = parseFloat(haxe_xml__$Access_AttribAccess.resolve(m,"rotateSkew1"));
-		var d = parseFloat(haxe_xml__$Access_AttribAccess.resolve(m,"scaleY"));
-		var tx = parseFloat(haxe_xml__$Access_AttribAccess.resolve(m,"translateX")) / 20;
-		var ty = parseFloat(haxe_xml__$Access_AttribAccess.resolve(m,"translateY")) / 20;
-		var pivot_x = 0.0;
-		var pivot_y = 0.0;
-		var skewX = -Math.atan2(-c,d);
-		var skewY = Math.atan2(b,a);
-		var rotation = 0;
-		var delta = Math.abs(skewX + skewY);
-		if(delta < 0.00001 || Math.abs(Math.PI - delta) < 0.00001) {
-			rotation = skewY;
-			skewX = 0;
-			skewY = 0;
+		var a = !haxe_xml__$Access_HasAttribAccess.resolve(m,"hasScale") || haxe_xml__$Access_AttribAccess.resolve(m,"hasScale") == "true" ? parseFloat(haxe_xml__$Access_AttribAccess.resolve(m,"scaleX")) : 1.0;
+		var d = !haxe_xml__$Access_HasAttribAccess.resolve(m,"hasScale") || haxe_xml__$Access_AttribAccess.resolve(m,"hasScale") == "true" ? parseFloat(haxe_xml__$Access_AttribAccess.resolve(m,"scaleY")) : 1.0;
+		var b = !haxe_xml__$Access_HasAttribAccess.resolve(m,"hasRotate") || haxe_xml__$Access_AttribAccess.resolve(m,"hasRotate") == "true" ? parseFloat(haxe_xml__$Access_AttribAccess.resolve(m,"rotateSkew0")) : 0.0;
+		var c = !haxe_xml__$Access_HasAttribAccess.resolve(m,"hasRotate") || haxe_xml__$Access_AttribAccess.resolve(m,"hasRotate") == "true" ? parseFloat(haxe_xml__$Access_AttribAccess.resolve(m,"rotateSkew1")) : 0.0;
+		var tx = parseFloat(haxe_xml__$Access_AttribAccess.resolve(m,"translateX")) / 20.0;
+		var ty = parseFloat(haxe_xml__$Access_AttribAccess.resolve(m,"translateY")) / 20.0;
+		if(b == 0.0 && c == 0.0) {
+			return { x : tx, y : ty, scaleX : a, scaleY : d, rotation : 0.0, skewX : 0.0, skewY : 0.0, pivotX : 0.0, pivotY : 0.0};
 		}
 		var scaleX = Math.sqrt(a * a + b * b);
 		var scaleY = Math.sqrt(c * c + d * d);
-		var x = tx + (pivot_x * a + pivot_y * c);
-		var y = ty + (pivot_x * b + pivot_y * d);
-		return { x : x, y : y, scaleX : scaleX, scaleY : scaleY, rotation : rotation, skewX : skewX, skewY : skewY, pivotX : pivot_x, pivotY : pivot_x};
+		var skewY = Math.atan2(b,a);
+		var skewX = Math.atan2(c,d);
+		var rotation = 0.0;
+		if(Math.abs(skewX + skewY) < 0.0001) {
+			rotation = skewY;
+			skewX = 0.0;
+			skewY = 0.0;
+		}
+		return { x : tx, y : ty, scaleX : scaleX, scaleY : scaleY, rotation : rotation, skewX : skewX, skewY : skewY, pivotX : 0.0, pivotY : 0.0};
 	}
 	,getMatrix: function(tag) {
 		if(!haxe_xml__$Access_HasNodeAccess.resolve(tag,"matrix")) {
@@ -20532,21 +20648,29 @@ mt_bumdum_Col.setPercentColor = function(mc,prc,col,inc,alpha) {
 	if(alpha == null) {
 		alpha = 100;
 	}
-	if(prc == 0) {
+	if(prc <= 0) {
 		mc.set_tint(16777215);
 		return;
 	}
-	console.log("src/mt/bumdum/Lib.hx:130:","FIXME");
-	if(inc == null) {
-		inc = 0;
+	var c = Math.min(1.0,Math.max(0.0,prc / 100.0));
+	var blended = mt_bumdum_Col.mergeCol(col,16777215,c);
+	if(inc != null && inc != 0) {
+		var o = mt_bumdum_Col.colToObj(blended);
+		o.r = mt_bumdum_Num.mm(0,o.r + inc,255) | 0;
+		o.g = mt_bumdum_Num.mm(0,o.g + inc,255) | 0;
+		o.b = mt_bumdum_Num.mm(0,o.b + inc,255) | 0;
+		blended = mt_bumdum_Col.objToCol(o);
 	}
-	var color = mt_bumdum_Col.colToObj(col);
-	var c = prc / 100;
-	var ct__ = null;
-	var ct = { r : c * color.r + inc | 0, g : c * color.g + inc | 0, b : c * color.b + inc | 0};
-	mt_bumdum_Col.setColor(mc,mt_bumdum_Col.objToCol(ct));
+	mt_bumdum_Col.setColor(mc,blended);
 };
 mt_bumdum_Col.setColor = function(mc,col,dec) {
+	if(dec != null && dec != 0) {
+		var o = mt_bumdum_Col.colToObj(col);
+		o.r = mt_bumdum_Num.mm(0,o.r + dec,255) | 0;
+		o.g = mt_bumdum_Num.mm(0,o.g + dec,255) | 0;
+		o.b = mt_bumdum_Num.mm(0,o.b + dec,255) | 0;
+		col = mt_bumdum_Col.objToCol(o);
+	}
 	mc.set_tint(col);
 };
 mt_bumdum_Col.mergeCol = function(col,col2,c) {

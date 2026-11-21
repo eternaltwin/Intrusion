@@ -144,7 +144,6 @@ class Dock {
 			mc._x = Math.round( Data.WID*0.5 - list.length*ICON_WIDTH*0.5 + i*ICON_WIDTH );
 			mc._y = 4;
 			mc.gotoAndStop(1);
-			mc.cacheAsBitmap = true;
 			mc.filters = baseFilters;
 //			mc._visible = !fl_lock;
 			if ( term.fl_leet ) {

@@ -612,6 +612,9 @@ class UserTerminal {
 		kl = {};
 		Reflect.setField(kl, "onKeyDown", onKey);
 		js.Browser.window.addEventListener("keydown", onKey);
+		if (Manager.app != null && Manager.app.view != null) {
+			Manager.app.view.addEventListener("wheel", onWheel, { passive: false });
+		}
 		//Key.addListener(kl);
 		playSound("single_04");
 
@@ -1667,7 +1670,7 @@ class UserTerminal {
 	function endAnim(a:Anim) {
 		a.kill = true;
 		if ( a.fl_killFilters )
-			a.mc.filters = [];
+			a.mc.filters = null;
 		if ( a.cb!=null )
 			a.cb();
 		switch(a.type) {
@@ -1749,9 +1752,11 @@ class UserTerminal {
 				fx.dy = -Std.random(20)/10-0.3;
 				fx.data = Std.random(314)/100;
 			case AFX_PlayFrames :
-				var fxFrame = Std.random(fx.mc._totalframes);
+				var fxFrame = Std.random(fx.mc._totalframes) + 1;
 				mc.gotoAndStop(fxFrame);
-				mc.smc.stop();
+				if (mc.smc != null) {
+					mc.smc.gotoAndStop(1);
+				}
 				if ( link=="fx_glight" ) {
 					var s = Std.random(70)+30;
 					mc._xscale = (Std.random(2)*2-1) * s;
@@ -2436,16 +2441,7 @@ class UserTerminal {
 		lmc.field.style.fill = color;
 		logMC._y+=lmc.field.textHeight;
 
-		//if ( color!=Data.GREEN )
-			lmc.field.filters = GlowFilter.create( color, 1, 8,8,1 );
-
-		var bmp = Manager.app.renderer.generateTexture(cast lmc, pixi.core.ScaleModes.DEFAULT, 1);
-		bmp.resize( lmc.field.width+5, lmc.field.height+5, true);
-		lmc.removeMovieClip();
-
-		var mc = Manager.DM.empty(Data.DP_TOP);
-		mc.attachBitmap(bmp,1);
-
+		var mc : MovieClip = cast lmc;
 		startAnim(A_Blink,mc);
 
 		logHistory.push({col:color, str:str});
@@ -2678,9 +2674,20 @@ class UserTerminal {
         }
 	}
 
+	function onWheel(e: js.html.WheelEvent) {
+		if (fl_end || apps.length > 0 || popMC != null || pwin != null) return;
+		if (fs != null) {
+			fs.onMouseWheel(e.deltaY > 0 ? -3 : 3);
+			e.preventDefault();
+		}
+	}
+
 	public function dispose() {
 		fl_end = true;
 		js.Browser.window.removeEventListener("keydown", onKey);
+		if (Manager.app != null && Manager.app.view != null) {
+			try { Manager.app.view.removeEventListener("wheel", onWheel); } catch (err: Dynamic) {}
+		}
 		if (apps != null) {
 			var activeApps = Lambda.array(apps);
 			for (a in activeApps) {
@@ -2827,7 +2834,7 @@ class UserTerminal {
 				if (a.t==null)
 					Progress.get();
 				else {
-					a.t += a.spd*dspeed;
+					a.t += a.spd * dspeed * Timer.tmod;
 					if ( a.t>1 )
 						a.t=1;
 					a.t;
@@ -2836,7 +2843,7 @@ class UserTerminal {
 				switch(a.type) {
 
 					case A_PlayFrames :
-						a.mc.gotoAndStop( Math.floor(cpt*a.mc._totalframes) );
+						a.mc.gotoAndStop( Std.int(Math.max(1, Math.floor(cpt*a.mc._totalframes))) );
 
 					case A_FadeIn :
 						a.mc._alpha = 100 * cpt;
@@ -2846,9 +2853,6 @@ class UserTerminal {
 
 					case A_BlurIn :
 						a.mc._alpha = 100 * normFact(cpt,0.4);
-						// TODO: Fix this, the filter is still applied after being removed for some reason
-						//a.mc.filters = [ BlurFilter.create(16*(1-cpt),16*(1-cpt)) ];
-						a.mc.filters = [ BlurFilter.create(0,0) ];
 
 					case A_FadeRemove :
 						a.mc._alpha = 100 * (1-cpt);
@@ -2960,8 +2964,8 @@ class UserTerminal {
 						];
 //						a.mc.field.filters = [ new BlurFilter.create(32*cpt2,2*cpt2) ];
 					case A_Bump :
-						a.mc._y+=a.data;
-						a.data+=3.5;
+						a.mc._y += a.data * Timer.tmod;
+						a.data += 3.5 * Timer.tmod;
 						if ( a.mc._y>=a.ty )
 							a.kill = true;
 					case A_MenuIn :
@@ -3003,14 +3007,25 @@ class UserTerminal {
 						fx.mc._alpha-=Timer.tmod*4;
 					fl_kill = fx.mc._alpha<=0;
 				case AFX_Binary :
-					fx.data+=0.2;
+					fx.data += 0.2 * Timer.tmod;
 					fx.mc._xscale = Math.cos(fx.data)*100;
 					if ( fx.timer>=Data.SECONDS(1) )
 						fx.mc._alpha-=Timer.tmod*4;
 					fl_kill = fx.mc._alpha<=0;
 				case AFX_PlayFrames :
-					fl_kill = fx.mc.smc._currentframe==fx.mc.smc._totalframes;
-					fx.mc.smc.nextFrame();
+					if (fx.mc.smc == null) {
+						fl_kill = true;
+					} else {
+						fx.data += Timer.tmod;
+						while (fx.data >= 1.0) {
+							fx.data -= 1.0;
+							if (fx.mc.smc._currentframe >= fx.mc.smc._totalframes) {
+								fl_kill = true;
+								break;
+							}
+							fx.mc.smc.nextFrame();
+						}
+					}
 				case AFX_Spark :
 					if ( fx.timer>=Data.SECONDS(2) )
 						fx.mc._alpha -= Timer.tmod*4;
@@ -3178,7 +3193,6 @@ class UserTerminal {
 				mc._y = lifeBar._y + 2 + 6*i;
 			}
 			comboMc.filters = GlowFilter.create(0x444d5d, 1, 4,4,10);
-			comboMc.cacheAsBitmap = true;
 			bubble(comboMc, Lang.fmt.Tooltip_Combo({_n:n,_total:maxCombo}), -1.5);
 		}
 	}

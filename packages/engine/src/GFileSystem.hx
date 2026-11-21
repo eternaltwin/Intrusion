@@ -54,8 +54,8 @@ class GFileSystem {
 	var zoom				: Float;
 	var stimer				: Float;
 	var stx					: Int;
-	var sty					: Int;
-	var sy					: Int;
+	var sty					: Null<Float>;
+	var sy					: Float;
 	var smin				: Int;
 	var smax				: Int;
 
@@ -1377,7 +1377,7 @@ class GFileSystem {
 		updateScrollPos();
 	}
 
-	function blinkArrows(delta:Int) {
+	function blinkArrows(delta:Float) {
 		if ( delta==0 )
 			return;
 
@@ -1396,7 +1396,7 @@ class GFileSystem {
 		onMouseWheel(-dirY*16);
 	}
 
-	function onMouseWheel(delta:Int) {
+	public function onMouseWheel(delta:Int) {
 		if (fl_lock)
 			return;
 
@@ -1413,22 +1413,17 @@ class GFileSystem {
 			sty = sy;
 		sty += Math.round(d*6);
 
-		stimer = 0;
-		updateScrollPos();
 		stimer = 2;
+		updateScrollPos();
 	}
 
 
 	function updateScrollPos() {
 		if (scroller==null) return;
 		if ( sty!=null ) {
-			var delta = (sty-sy)*0.1;
-			if ( delta>-1 && delta<0 )
-				delta = -1;
-			if ( delta>0 && delta<1 )
-				delta = 1;
-			sy += Std.int(delta);
-			if ( Math.abs(sy-sty)<=1 ) {
+			var factor = 1.0 - Math.pow(0.85, Timer.tmod);
+			sy += (sty - sy) * factor;
+			if ( Math.abs(sy-sty)<=0.5 ) {
 				sy = sty;
 				sty = null;
 			}
@@ -1437,16 +1432,18 @@ class GFileSystem {
 			stimer-=Timer.tmod;
 		else {
 			if ( sy<smin ) {
-				sy = Std.int(sy + Timer.tmod*(smin-sy)*SCROLL_SPEED);
+				sy += (smin-sy) * (1.0 - Math.pow(1.0 - SCROLL_SPEED, Timer.tmod));
+				if (Math.abs(smin - sy) < 0.5) sy = smin;
 				sty = null;
 			}
 			if ( sy>smax ) {
-				sy = Std.int(sy + Timer.tmod*(smax-sy)*SCROLL_SPEED);
+				sy += (smax-sy) * (1.0 - Math.pow(1.0 - SCROLL_SPEED, Timer.tmod));
+				if (Math.abs(smax - sy) < 0.5) sy = smax;
 				sty = null;
 			}
-			scroller._x = (10-sy);
-			scroller._y = Math.round((30-sy)*0.5);
 		}
+		scroller._x = 10.0 - sy;
+		scroller._y = (30.0 - sy) * 0.5;
 	}
 
 	function onDisconnectButton() {
@@ -1521,8 +1518,6 @@ class GFileSystem {
 
 		bg = Manager.DM.attach("bg",Data.DP_FS);
 		bg.stop();
-		// TODO: Might not be correct.
-		bg.blendMode = pixi.core.Pixi.BlendModes.OVERLAY;
 		bg.useHandCursor = false;
 		bg.onRelease = function() {};
 
@@ -1631,15 +1626,11 @@ class GFileSystem {
 		bg.gotoAndStop(f);
 		wallL?.smc.gotoAndStop(f);
 		wallR?.smc.gotoAndStop(f);
-		if ( fl_auth )
+		if ( fl_auth ) {
+			Col.setPercentColor(wallL, 0, 0);
+			Col.setPercentColor(wallR, 45, 0x0);
 			setWallpaper("sicon","corrupt");
-
-//			Col.setPercentColor( bg, 50, 0xff0000 );
-//			Col.setPercentColor( wallL, 50, 0xff0000 );
-//			Col.setPercentColor( wallR, 50, 0xff0000 );
-//		}
-//		bg
-//		bg.gotoAndStop( if(fl_auth) 1 else 2 );
+		}
 	}
 
 	function detachFolder() {
@@ -1746,14 +1737,14 @@ class GFileSystem {
 //		}
 
 		if ( tmc!=null ) {
-			var spd = 4;
+			var spd = 4 * Timer.tmod;
 			tmc.c1._rotation+=spd;
 			if ( !term.fl_lowq ) {
 				tmc.c2._rotation+=-spd*1.3;
 				tmc.c3._rotation+=spd*0.5;
 			}
-			if ( tmc._xscale!=120 ) {
-				tmc._xscale += (120-tmc._xscale)*0.4;
+			if ( Math.abs(tmc._xscale-120) > 0.1 ) {
+				tmc._xscale += (120-tmc._xscale)*(1.0 - Math.pow(0.6, Timer.tmod));
 				tmc._yscale = tmc._xscale*0.5;
 			}
 		}

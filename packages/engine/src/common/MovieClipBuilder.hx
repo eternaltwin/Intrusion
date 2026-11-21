@@ -82,7 +82,7 @@ class MovieClipBuilder {
       var frameId = 1;
       var frameName = null;
 
-      var objects: IntHash<{name: String, sprite: DisplayObject, ?transform: Transform}> = new IntHash();
+      var objects: IntHash<FrameSpriteEntry> = new IntHash();
       var sprites: Hash<DisplayObject> = new Hash();
 
       for (tag in spriteTag.nodes.item) {
@@ -93,6 +93,19 @@ class MovieClipBuilder {
             placeObject(tag, objects, sprites);
           case "FrameLabelTag":
             frameName = tag.att.name;
+          case "DoActionTag":
+            if (tag.has.actionBytes) {
+              var ab = tag.att.actionBytes.toLowerCase();
+              if (ab.length >= 14 && ab.substr(0, 6) == "810200" && ab.substr(10, 4) == "0600") {
+                var lo = Std.parseInt("0x" + ab.substr(6, 2));
+                var hi = Std.parseInt("0x" + ab.substr(8, 2));
+                if (lo != null && hi != null) {
+                  mc.loopStartFrame = ((hi << 8) | lo) + 1;
+                }
+              } else if (ab == "0700") {
+                mc.stopOnFrame.push(frameId);
+              }
+            }
           case "ShowFrameTag":
             addFrame(mc, frameName, frameId, objects);
             objects = objects.copy();
@@ -106,59 +119,122 @@ class MovieClipBuilder {
         return mc;
     }
 
-    private function addFrame(mc: MovieClip, frameName: String, frameId: Int, objects: IntHash<{name: String, sprite: DisplayObject, ?transform: Transform}>) {
+    private function addFrame(mc: MovieClip, frameName: String, frameId: Int, objects: IntHash<FrameSpriteEntry>) {
       var name = frameName ?? Std.string(frameId);
       mc.addFrame(name, objects);
     }
 
-    private function placeObject(tag: haxe.xml.Access, objects: IntHash<{name: String, sprite: DisplayObject, ?transform: Transform}>, sprites: Hash<DisplayObject>) {
-          var transform = getTransform(tag);
+    private function parseColorState(tag: haxe.xml.Access, prevAlpha: Null<Float>, prevTint: Null<Int>): {alpha: Null<Float>, tint: Null<Int>} {
+      if (!tag.hasNode.colorTransform) {
+        return {alpha: prevAlpha, tint: prevTint};
+      }
+      var ct = tag.node.colorTransform;
+      var aMult = ct.has.alphaMultTerm ? Std.parseInt(ct.att.alphaMultTerm) : 256;
+      var aAdd = ct.has.alphaAddTerm ? Std.parseInt(ct.att.alphaAddTerm) : 0;
+      var alpha = Math.max(0.0, Math.min(1.0, (aMult / 256.0) + (aAdd / 255.0)));
+
+      var rMult = ct.has.redMultTerm ? Std.parseInt(ct.att.redMultTerm) : 256;
+      var gMult = ct.has.greenMultTerm ? Std.parseInt(ct.att.greenMultTerm) : 256;
+      var bMult = ct.has.blueMultTerm ? Std.parseInt(ct.att.blueMultTerm) : 256;
+      var rAdd = ct.has.redAddTerm ? Std.parseInt(ct.att.redAddTerm) : 0;
+      var gAdd = ct.has.greenAddTerm ? Std.parseInt(ct.att.greenAddTerm) : 0;
+      var bAdd = ct.has.blueAddTerm ? Std.parseInt(ct.att.blueAddTerm) : 0;
+
+      var isIdentityColor = (rMult == 256 && gMult == 256 && bMult == 256 && rAdd == 0 && gAdd == 0 && bAdd == 0);
+      if (isIdentityColor) {
+        return {alpha: alpha, tint: 0xFFFFFF};
+      }
+      var r = Std.int(Math.max(0, Math.min(255, Math.round(255 * (rMult / 256.0) + rAdd))));
+      var g = Std.int(Math.max(0, Math.min(255, Math.round(255 * (gMult / 256.0) + gAdd))));
+      var b = Std.int(Math.max(0, Math.min(255, Math.round(255 * (bMult / 256.0) + bAdd))));
+      return {alpha: alpha, tint: Col.objToCol({r: r, g: g, b: b})};
+    }
+
+    private function placeObject(tag: haxe.xml.Access, objects: IntHash<FrameSpriteEntry>, sprites: Hash<DisplayObject>) {
+          var depth = Std.parseInt(tag.att.depth);
+          var prev = objects.exists(depth) ? objects.get(depth) : null;
+          var isMove = tag.has.placeFlagMove && tag.att.placeFlagMove == "true";
 
           if (tag.att.characterId == "0") {
-            var depth = Std.parseInt(tag.att.depth);
-            if (!objects.exists(depth))
+            if (prev == null)
               throw "Moving an object that is not present";
-            var object = objects.get(depth);
-            objects.set(depth, {name: object.name, sprite: object.sprite, transform: transform});
+            var nextTransform = tag.hasNode.matrix ? getTransform(tag) : prev.transform;
+            var nextColor = parseColorState(tag, prev.alpha, prev.tint);
+            objects.set(depth, {
+              name: prev.name,
+              sprite: prev.sprite,
+              transform: nextTransform,
+              alpha: nextColor.alpha,
+              tint: nextColor.tint,
+              isMask: prev.isMask
+            });
             return;
           }
 
-            var t = getTag(tag.att.characterId);
-            var objectId = getObjectId(t);
-            var name = if (tag.has.name) tag.att.name else getSpriteName(objectId) ?? objectId;
+          var transform = tag.hasNode.matrix ? getTransform(tag) : (isMove && prev != null ? prev.transform : getTransform(tag));
+          var t = getTag(tag.att.characterId);
+          var objectId = getObjectId(t);
+          var name = if (tag.has.name) tag.att.name else getSpriteName(objectId) ?? objectId;
 
-            var sprite: DisplayObject = switch (t.att.type) {
-              case "DefineSpriteTag":
-                var sprite = buildMovieClip(t.att.spriteId, name);
-                // Get bounds from child?
-                sprite;
-              case "DefineEditTextTag" | "DefineTextTag":
-                var bounds = getBounds(if (t.att.type == "DefineEditTextTag") t.node.bounds else t.node.textBounds);
-                var text: Text = buildTextField(t, bounds.width, bounds.height);
-                transform.x = transform.x + bounds.x;
-                transform.y = transform.y + bounds.y;
-                text;
-              case "DefineShapeTag" | "DefineShape2Tag" | "DefineShape3Tag" | "DefineShape4Tag":
-                var baseTexture = textureCache.getTexture(this.assetRoot + 'shapes_svg/${t.att.shapeId}.svg');
-                var bounds = getBounds(t.node.shapeBounds);
-                // Shapes aren't exported properly and have a 1px margin with artifacts added, trimming it here.
-                var rw = Math.floor(Math.min(Math.floor(bounds.width), Math.floor(baseTexture.width)));
-                var rh = Math.floor(Math.min(Math.floor(bounds.height), Math.floor(baseTexture.height)));
-                if (rw < 1) rw = 1;
-                if (rh < 1) rh = 1;
-                var texture = new Texture(baseTexture.baseTexture, new Rectangle(0, 0, rw, rh));
-                var sprite = new Sprite(texture);
-                transform.x = bounds.x + transform.x;
-                transform.y = bounds.y + transform.y;
-                sprite;
-              case other:
-                throw "Unsupported tag definition: " + other;
+          var sprite: DisplayObject = switch (t.att.type) {
+            case "DefineSpriteTag":
+              buildMovieClip(t.att.spriteId, name);
+            case "DefineEditTextTag" | "DefineTextTag":
+              var bounds = getBounds(if (t.att.type == "DefineEditTextTag") t.node.bounds else t.node.textBounds);
+              var text: Text = buildTextField(t, bounds.width, bounds.height);
+              transform = {
+                x: transform.x + bounds.x,
+                y: transform.y + bounds.y,
+                scaleX: transform.scaleX,
+                scaleY: transform.scaleY,
+                rotation: transform.rotation,
+                skewX: transform.skewX,
+                skewY: transform.skewY,
+                pivotX: 0.0,
+                pivotY: 0.0
+              };
+              text;
+            case "DefineShapeTag" | "DefineShape2Tag" | "DefineShape3Tag" | "DefineShape4Tag":
+              var baseTexture = textureCache.getTexture(this.assetRoot + 'shapes_svg/${t.att.shapeId}.svg');
+              var bounds = getBounds(t.node.shapeBounds);
+              var rw = Math.floor(Math.min(Math.ceil(bounds.width), Math.floor(baseTexture.width)));
+              var rh = Math.floor(Math.min(Math.ceil(bounds.height), Math.floor(baseTexture.height)));
+              if (rw < 1) rw = 1;
+              if (rh < 1) rh = 1;
+              var texture = new Texture(baseTexture.baseTexture, new Rectangle(0, 0, rw, rh));
+              var sprite = new Sprite(texture);
+              sprite.pivot.set(-bounds.x, -bounds.y);
+              sprite;
+            case other:
+              throw "Unsupported tag definition: " + other;
+          }
+
+          var isMask = tag.has.clipDepth && tag.att.clipDepth != "0";
+          var colorState = parseColorState(tag, 1.0, null);
+          if (isMask) {
+            sprite.visible = false;
+          } else {
+            if (colorState.alpha != null) sprite.alpha = colorState.alpha;
+            if (colorState.tint != null) {
+              if (Std.is(sprite, InternalMovieClip)) {
+                (cast sprite : MovieClip).tint = colorState.tint;
+              } else if (Std.is(sprite, Sprite)) {
+                (cast sprite : Sprite).tint = colorState.tint;
+              }
             }
-
-            applyColor(tag, sprite);   
-            applyFilters(tag, sprite);
+          }
+          applyFilters(tag, sprite);
+          if (!sprites.exists(name)) {
             sprites.set(name, sprite);
-            objects.set(Std.parseInt(tag.att.depth), {name: name, sprite: sprite, transform: transform});
+          }
+          objects.set(depth, {
+            name: name,
+            sprite: sprite,
+            transform: transform,
+            alpha: colorState.alpha,
+            tint: colorState.tint,
+            isMask: isMask
+          });
     }
 
     private function applyColor(tag: haxe.xml.Access, sprite: DisplayObject) {
@@ -355,52 +431,50 @@ class MovieClipBuilder {
     }
 
     private function decomposeMatrix(m: haxe.xml.Access) {
-      // sort out rotation / skew..
-      var a = Std.parseFloat(m.att.scaleX);
-      // Rotation seems inverted in flash.. correcting that here
-      var b = Std.parseFloat(m.att.rotateSkew0);
-      var c = Std.parseFloat(m.att.rotateSkew1);
-      var d = Std.parseFloat(m.att.scaleY);
-      var tx = Std.parseFloat(m.att.translateX) / 20;
-      var ty = Std.parseFloat(m.att.translateY) / 20;
+      var a = (!m.has.hasScale || m.att.hasScale == "true") ? Std.parseFloat(m.att.scaleX) : 1.0;
+      var d = (!m.has.hasScale || m.att.hasScale == "true") ? Std.parseFloat(m.att.scaleY) : 1.0;
+      var b = (!m.has.hasRotate || m.att.hasRotate == "true") ? Std.parseFloat(m.att.rotateSkew0) : 0.0;
+      var c = (!m.has.hasRotate || m.att.hasRotate == "true") ? Std.parseFloat(m.att.rotateSkew1) : 0.0;
+      var tx = Std.parseFloat(m.att.translateX) / 20.0;
+      var ty = Std.parseFloat(m.att.translateY) / 20.0;
 
-      // TODO: what should we do for pivot?
-      //var pivot = transform.pivot;
-      var pivot = {x: 0.0, y: 0.0};
-
-      var skewX = -Math.atan2(-c, d);
-      var skewY = Math.atan2(b, a);
-
-      var rotation:Float = 0;
-
-      var delta = Math.abs(skewX + skewY);
-
-      if (delta < 0.00001 || Math.abs(Math.PI - delta) < 0.00001)
-      {
-          rotation = skewY;
-          skewX = 0;
-          skewY = 0;
+      if (b == 0.0 && c == 0.0) {
+        return {
+          x: tx,
+          y: ty,
+          scaleX: a,
+          scaleY: d,
+          rotation: 0.0,
+          skewX: 0.0,
+          skewY: 0.0,
+          pivotX: 0.0,
+          pivotY: 0.0
+        };
       }
 
-      // next set scale
       var scaleX = Math.sqrt((a * a) + (b * b));
       var scaleY = Math.sqrt((c * c) + (d * d));
+      var skewY = Math.atan2(b, a);
+      var skewX = Math.atan2(c, d);
+      var rotation: Float = 0.0;
 
-      // next set position
-      var x = tx + ((pivot.x * a) + (pivot.y * c));
-      var y = ty + ((pivot.x * b) + (pivot.y * d));
+      if (Math.abs(skewX + skewY) < 0.0001) {
+        rotation = skewY;
+        skewX = 0.0;
+        skewY = 0.0;
+      }
 
       return {
-        x: x,
-        y: y,
+        x: tx,
+        y: ty,
         scaleX: scaleX,
         scaleY: scaleY,
         rotation: rotation,
         skewX: skewX,
         skewY: skewY,
-        pivotX: pivot.x,
-        pivotY: pivot.x
-    };
+        pivotX: 0.0,
+        pivotY: 0.0
+      };
   }
 
     private function getMatrix(tag: haxe.xml.Access): Null<Matrix> {

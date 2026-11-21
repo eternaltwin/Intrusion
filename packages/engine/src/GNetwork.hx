@@ -1391,11 +1391,8 @@ class GNetwork {
 		var mc = sdm.attach("mapBleep",Data.DP_TOPTOP);
 		mc._x = node.mc._x;
 		mc._y = node.mc._y-24;
-		// TODO: Check if this works
-		Manager.app.ticker.add(function() {
-			if (mc._currentframe==mc._totalframes-1 )
-				mc.removeMovieClip();
-		});
+		mc.loop = false;
+		mc.removeOnFrame = mc._totalframes;
 	}
 
 	public function updateVisibility(?fl_anim=true) {
@@ -1471,12 +1468,13 @@ class GNetwork {
 
 		var bmpCont = sdm.empty(Data.DP_BG);
 		bmpCont._x = -300;
-		bmpCont.blendMode = pixi.core.Pixi.BlendModes.OVERLAY;
 		var flat  = sdm.empty(Data.DP_BG);
+		flat._x = bmpCont._x;
 		var flatDm = new mt.DepthManager(flat);
 		var bg = flatDm.attach("bgNet",0);
 		bg._x = -15-bmpCont._x;
 		bg._y = 140;
+		bg._alpha = 45;
 		var lmc = sdm.empty(Data.DP_BG);
 		ldm = new mt.DepthManager(lmc); // links
 
@@ -1573,7 +1571,6 @@ class GNetwork {
 						mcList.push({d:node.path.length, mc:mc});
 					}
 				}
-				mcNode.cacheAsBitmap = true;
 				node.mc = mcNode;
 				if ( node.fl_target && term.gameLevel==4 ) {
 					var amc = sdm.attach("arrow",Data.DP_ITEM);
@@ -1724,9 +1721,11 @@ class GNetwork {
 					node.mc.sicon.gotoAndStop("smile");
 				if ( node.system.fl_crashed ) {
 					node.mc.sicon.gotoAndStop("corrupt");
-					Col.setPercentColor( node.mc, 30, 0xaa2244 );
+					Col.setPercentColor( node.mc, 45, 0xaa2244 );
 				}
-//				node.mc.base._visible = true;
+				Col.setPercentColor( node.mc.sicon, 0, 0 );
+			} else {
+				node.mc.sicon._visible = false;
 			}
 		}
 		detachPath();
@@ -1776,12 +1775,12 @@ class GNetwork {
 //		var msty = (Manager.ROOT._ymouse - Data.HEI*0.5)*0.15;
 
 		if ( tmc!=null ) {
-			var spd = 4;
+			var spd = 4 * mt.Timer.tmod;
 			tmc.c1._rotation+=spd;
 			tmc.c2._rotation+=-spd*1.3;
 			tmc.c3._rotation+=spd*0.5;
-			if ( tmc._xscale!=90 ) {
-				tmc._xscale += (90-tmc._xscale)*0.4;
+			if ( Math.abs(tmc._xscale-90) > 0.1 ) {
+				tmc._xscale += (90-tmc._xscale)*(1.0 - Math.pow(0.6, mt.Timer.tmod));
 				tmc._yscale = tmc._xscale*0.5;
 			}
 		}
@@ -1843,20 +1842,16 @@ class GNetwork {
 				mcc.shadow.text = mc.field.text;
 				mcc.shadow._width = mcc.shadow.textWidth+5;
 				mcc.shadow._y = mc.field._y+22;
-				mcc.shadow.filters = [ BlurFilter.create(4,4) ];
+				mcc.shadow.alpha = 0.4;
 				var delta = Std.random(30)+10;
 				mcc.shadow._x-=delta*0.2;
 				mcc.shadow._y+=delta;
-				var bmp = Manager.app.renderer.generateTexture(cont, pixi.core.ScaleModes.DEFAULT, 1);
-				bmp.resize( cont.width+20, cont.height+40, true);
-				mc.removeMovieClip();
-				cont.attachBitmap(bmp,1);
 				var spd = Std.random(20)/10+1;
 				gspamList.push({
 					mc	: cont,
 					dx	: spd,
 					dy	: if(fl_spamDir) -spd*0.5 else spd*0.5,
-					bmp	: bmp,
+					bmp	: null,
 				});
 				fl_spamDir = !fl_spamDir;
 			}
@@ -1866,9 +1861,7 @@ class GNetwork {
 				var mc = gs.mc;
 				mc._x-=mt.Timer.tmod*gs.dx;
 				mc._y-=mt.Timer.tmod*gs.dy;
-				if ( mc._x+mc.width*2<0 || mc._y+mc.height<0 || mc._y>700 ) {
-					// TODO: cleanup
-					//gs.bmp.dispose();
+				if ( mc._x+mc.width*2<-400 || mc._y+mc.height<-600 || mc._y>800 ) {
 					gspamList.remove(gs);
 					mc.removeMovieClip();
 				}
@@ -1877,27 +1870,18 @@ class GNetwork {
 
 
 		if ( sx!=stx || sy!=sty ) {
-			// X
-			var delta = Math.round(stx-sx);
-			if ( delta>0 && delta<1 )	delta=1;
-			if ( delta>-1 && delta<0 )	delta=-1;
-			sx = sx + delta*scrollSpeed;
-			if ( Math.abs(stx-sx)<1 )
+			var sFactor = 1.0 - Math.pow(1.0 - scrollSpeed, mt.Timer.tmod);
+			sx += (stx - sx) * sFactor;
+			if ( Math.abs(stx-sx)<0.25 )
 				sx = stx;
-			// Y
-			var delta = Math.round(sty-sy);
-			if ( delta>0 && delta<1 )	delta=1;
-			if ( delta>-1 && delta<0 )	delta=-1;
-			sy = sy + (sty-sy)*scrollSpeed;
-			if ( Math.abs(sty-sy)<1 )
+			sy += (sty - sy) * sFactor;
+			if ( Math.abs(sty-sy)<0.25 )
 				sy = sty;
 		}
 		sx = Math.max(-260, Math.min(260,sx));
 		sy = Math.max(-260, Math.min(0,sy));
-//		scroller._x = Math.round( sx-mstx );
-//		scroller._y = Math.round( sy-msty );
-		scroller._x = Math.round(sx);
-		scroller._y = Math.round(sy);
+		scroller._x = sx;
+		scroller._y = sy;
 //		bg2._x = -0.3*scroller._x + 50;
 //		bg2._y = -0.3*scroller._y + 250;
 

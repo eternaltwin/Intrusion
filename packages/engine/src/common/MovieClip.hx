@@ -109,7 +109,9 @@ class InternalMovieClip extends Container {
     var sprites: Hash<DisplayObject> = new Hash();
 
 	public var loop:Bool;
+	public var loopStartFrame:Int = 1;
 	var isPlaying:Bool = false;
+	var frameAcc:Float = 0.0;
     
 	var _zIndex:Int;
     public var _name:String;
@@ -179,7 +181,7 @@ class InternalMovieClip extends Container {
 
 
     public function get_smc(): MovieClip {
-        return cast this.sprites.get("smc");
+        return cast this.get("smc");
     }
 
 	public function update() {
@@ -188,14 +190,32 @@ class InternalMovieClip extends Container {
 				(cast i).update();
 			}
 		}
+		if (this._totalframes > 0 && this._currentframe >= 1 && this._currentframe <= this._totalframes) {
+			var activeContainer = this.frames[this._currentframe - 1].container;
+			for (child in activeContainer.children) {
+				if (Std.is(child, InternalMovieClip)) {
+					(cast child).update();
+				}
+			}
+		}
 
 		if (this.isPlaying && this.visible) {
-			this.nextFrame();
+			this.frameAcc += mt.Timer.tmod;
+			while (this.frameAcc >= 1.0) {
+				this.frameAcc -= 1.0;
+				if (this.isPlaying && this.visible) {
+					this.nextFrame();
+				} else {
+					this.frameAcc = 0.0;
+					break;
+				}
+			}
 		}
 	}
 
     public function stop() {
 		this.isPlaying = false;
+		this.frameAcc = 0.0;
 	}
 
 	public function play() {
@@ -246,7 +266,8 @@ class InternalMovieClip extends Container {
 				stop();
 				return;
 			} else {
-				this._currentframe = 0;
+				var startF = this.loopStartFrame >= 1 && this.loopStartFrame <= this._totalframes ? this.loopStartFrame : 1;
+				this._currentframe = startF - 1;
 			}
 		}
 
@@ -255,31 +276,50 @@ class InternalMovieClip extends Container {
 	}
 
 	public function showFrame(isInitialLoading: Bool = false) {
-        // TODO: copy scale
-		//var scale = untyped this.scale.clone();
-		//this.texture = textures[this._currentframe - 1];
-		//this.scale.copyFrom(scale);
 		for (i in 0...this._totalframes) {
 			if (i != this._currentframe - 1) {
 				this.frames[i].container.visible = false;
 			}
 		}
 
-        for (sprite in this.frames[this._currentframe - 1].sprites) {
-            if (sprite.transform != null) {
-                var t = sprite.transform;
+		var curFrame = this.frames[this._currentframe - 1];
+		var depths = new Array<Int>();
+		for (d in curFrame.sprites.keys()) depths.push(d);
+		depths.sort(function(a, b) return a - b);
+
+		for (d in depths) {
+			var sprite = curFrame.sprites.get(d);
+			if (sprite == null) continue;
+			if (sprite.isMask == true) {
+				sprite.sprite.visible = false;
+				continue;
+			}
+			if (sprite.transform != null) {
+				var t = sprite.transform;
 				var tx = t.x;
 				var ty = t.y;
-				// This is horribly hacky, trying to preserve custom x/y set manually instead of overriding with file position..
-				if (!isInitialLoading && (sprite.sprite.x != 0 || sprite.sprite.y != 0)) {
+				// Preserve manual label adjustments on Text nodes only; never freeze Sprite/MovieClip timeline motion!
+				if (!isInitialLoading && Std.is(sprite.sprite, common.Text) && (sprite.sprite.x != 0 || sprite.sprite.y != 0)) {
 					tx = sprite.sprite.x;
 					ty = sprite.sprite.y;
 				}
-                sprite.sprite.setTransform(tx,  ty, t.scaleX, t.scaleY, t.rotation, t.skewX, t.skewY, t.pivotX, t.pivotY);
-            }
-            this.frames[_currentframe - 1].container.addChild(sprite.sprite);
-        }
-        this.frames[this._currentframe - 1].container.visible = true;
+				var px = sprite.sprite.pivot != null ? sprite.sprite.pivot.x : 0.0;
+				var py = sprite.sprite.pivot != null ? sprite.sprite.pivot.y : 0.0;
+				sprite.sprite.setTransform(tx, ty, t.scaleX, t.scaleY, t.rotation, t.skewX, t.skewY, px, py);
+			}
+			if (sprite.alpha != null) {
+				sprite.sprite.alpha = sprite.alpha;
+			}
+			if (sprite.tint != null) {
+				if (Std.is(sprite.sprite, InternalMovieClip)) {
+					(cast sprite.sprite : InternalMovieClip).tint = sprite.tint;
+				} else if (Std.is(sprite.sprite, Sprite)) {
+					(cast sprite.sprite : Sprite).tint = sprite.tint;
+				}
+			}
+			curFrame.container.addChild(sprite.sprite);
+		}
+		curFrame.container.visible = true;
 
         var e = this.width;
 		if (this.stopOnFrame.contains(this._currentframe)) {
@@ -299,7 +339,7 @@ class InternalMovieClip extends Container {
 		}
 	}
 
-    public function addFrame(name: String, sprites: IntHash<{name: String, sprite: DisplayObject, ?transform: Transform}>) {
+    public function addFrame(name: String, sprites: IntHash<FrameSpriteEntry>) {
         this._totalframes++;
         var container = new Container();
         container.visible = false;

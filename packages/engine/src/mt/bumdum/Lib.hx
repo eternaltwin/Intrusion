@@ -122,26 +122,30 @@ class Col {
 	}
 
 	static public function setPercentColor(mc:MovieClip, prc:Float, col, ?inc:Float, ?alpha = 100) {
-		if (prc == 0) {
+		if (prc <= 0) {
 			mc.tint = 0xFFFFFF;
 			return;
 		}
-
-		trace("FIXME");
-		if (inc == null)
-			inc = 0;
-		var color = colToObj(col);
-		var c = prc / 100;
-		var ct = {_: null};
-		var ct = {
-			r: Std.int(c * color.r + inc),
-			g: Std.int(c * color.g + inc),
-			b: Std.int(c * color.b + inc),
-		};
-		setColor(mc, objToCol(ct));
+		var c = Math.min(1.0, Math.max(0.0, prc / 100.0));
+		var blended = mergeCol(col, 0xFFFFFF, c);
+		if (inc != null && inc != 0) {
+			var o = colToObj(blended);
+			o.r = Std.int(Num.mm(0, o.r + inc, 255));
+			o.g = Std.int(Num.mm(0, o.g + inc, 255));
+			o.b = Std.int(Num.mm(0, o.b + inc, 255));
+			blended = objToCol(o);
+		}
+		setColor(mc, blended);
 	}
 
-	static public function setColor(mc:MovieClip, col, ?dec) {
+	static public function setColor(mc:MovieClip, col, ?dec:Float) {
+		if (dec != null && dec != 0) {
+			var o = colToObj(col);
+			o.r = Std.int(Num.mm(0, o.r + dec, 255));
+			o.g = Std.int(Num.mm(0, o.g + dec, 255));
+			o.b = Std.int(Num.mm(0, o.b + dec, 255));
+			col = objToCol(o);
+		}
 		mc.tint = col;
 	}
 

@@ -17,9 +17,18 @@ typedef Transform = {
     ?pivotY:Float
 }
 
+typedef FrameSpriteEntry = {
+    name: String,
+    sprite: DisplayObject,
+    ?transform: Transform,
+    ?alpha: Null<Float>,
+    ?tint: Null<Int>,
+    ?isMask: Bool
+}
+
 // Key is the depth
 typedef Frame = {
     name: String,
     container: Container,
-    sprites: IntHash<{name: String, sprite: DisplayObject, ?transform: Transform}>
+    sprites: IntHash<FrameSpriteEntry>
 }
