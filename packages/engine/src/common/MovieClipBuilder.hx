@@ -509,15 +509,7 @@ class MovieClipBuilder {
     private function buildFilter(filterTag: haxe.xml.Access): Array<Filter> {
       switch(filterTag.att.type) {
         case "GLOWFILTER":
-          var color = getIntCol(filterTag.node.glowColor);
-          var alpha = Std.parseInt(filterTag.node.glowColor.att.alpha) / 255;
-          var blurX = Std.parseFloat(filterTag.att.blurX);
-          var blurY = Std.parseFloat(filterTag.att.blurY);
-          var strength = Std.parseFloat(filterTag.att.strength);
-          var quality = Std.parseInt(filterTag.att.passes);
-          var inner = filterTag.att.innerGlow == "true";
-          var knockout = filterTag.att.knockout == "true";
-          return GlowFilter.create(color, alpha, blurX, blurY, strength, quality, inner, knockout);
+          return [];
         case "DROPSHADOWFILTER":
           var distance = Std.parseFloat(filterTag.att.distance);
           var angle = Std.parseFloat(filterTag.att.angle);

@@ -1599,6 +1599,19 @@ class UserTerminal {
 	}
 
 
+	public function cancelAnim(type:AnimType, mc:MovieClip) {
+		var i = 0;
+		while ( i < animList.length ) {
+			var a = animList[i];
+			if ( a.type==type && a.mc==mc ) {
+				a.kill = true;
+				animList.splice(i, 1);
+			}
+			else
+				i++;
+		}
+	}
+
 	public function startAnim(type:AnimType, mc:MovieClip, ?str:String, ?delay=0.0, ?fl_linkToProgress=false) {
 		var spd = 0.06;
 		for (a in animList)
@@ -2760,12 +2773,35 @@ class UserTerminal {
 			}
 
 			// dock shortcuts
-			if ( cmdLine==null )
+			if ( cmdLine==null ) {
+				var matchedShortcut = false;
 				for (i in 0...ls.shortcuts.length)
 					if ( c==ls.shortcuts[i] ) {
 						dock.onShortcut(i);
+						matchedShortcut = true;
 						break;
 					}
+				if ( !matchedShortcut && !e.ctrlKey && !e.metaKey && !e.altKey ) {
+					var digitCode = -1;
+					if ( e.code != null ) {
+						if ( e.code.indexOf("Digit") == 0 && e.code.length == 6 )
+							digitCode = e.code.charCodeAt(5);
+						else if ( e.code.indexOf("Numpad") == 0 && e.code.length == 7 ) {
+							var nc = e.code.charCodeAt(6);
+							if ( nc >= 48 && nc <= 57 ) digitCode = nc;
+						}
+					}
+					if ( digitCode < 0 && c >= 96 && c <= 105 )
+						digitCode = c - 48;
+					if ( digitCode >= 48 && digitCode <= 57 ) {
+						for (i in 0...ls.shortcuts.length)
+							if ( digitCode == ls.shortcuts[i] ) {
+								dock.onShortcut(i);
+								break;
+							}
+					}
+				}
+			}
 
 //			if ( c>=48 && c<=57 && cmdLine==null )
 //				dock.onKeyShortcut(c-48);

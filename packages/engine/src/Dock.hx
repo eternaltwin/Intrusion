@@ -255,14 +255,23 @@ class Dock {
 	function setPending(p:DockSlot) {
 		if ( fl_lock ) return;
 		pending = p;
+		term.cancelAnim(A_Blink, pending.mc);
+		dm.over(pending.mc);
+		var slotMc : MCField = cast pending.mc;
+		if ( slotMc.field != null )
+			slotMc.field.textColor = Data.GREEN;
 		pending.mc.filters =
 			GlowFilter.create(Data.GREEN,1, 2,2, 10, 1, true )
-			.concat(GlowFilter.create(Data.GREEN,1, 32,32, 1, 1));
+			.concat(GlowFilter.create(Data.GREEN,1, 32,32, 2, 1));
 	}
 
 	public function clearPending() {
-		if (pending != null)
+		if (pending != null && pending.mc != null) {
+			var slotMc : MCField = cast pending.mc;
+			if ( slotMc.field != null )
+				slotMc.field.textColor = 0xffffff;
 			pending.mc.filters = baseFilters;
+		}
 		pending = null;
 	}
 
@@ -274,10 +283,11 @@ class Dock {
 		if ( fl_lock ) return;
 		if ( Progress.isRunning() ) return;
 		if ( pending==null ) return;
-		term.vman.exec( pending.virus, f );
-		onActivate(pending);
-		term.fs.setTarget(f);
+		var p = pending;
 		clearPending();
+		onActivate(p);
+		term.fs.setTarget(f);
+		term.vman.exec( p.virus, f );
 	}
 
 	public function giveTargetNode(n:NetNode) {
@@ -382,13 +392,15 @@ class Dock {
 	}
 
 	function onActivate(ds:DockSlot) {
+		if ( ds==null || ds.mc==null ) return;
 		dm.over(ds.mc);
-		if ( pending!=null )
+		if ( pending!=null && pending.mc!=null )
 			dm.over(pending.mc);
 		var a = term.startAnim(A_Blink,ds.mc);
 		var me = this;
 		a.cb = function() {
-			ds.mc.filters = me.baseFilters;
+			if ( me.pending != ds && ds.mc != null )
+				ds.mc.filters = me.baseFilters;
 		}
 	}
 

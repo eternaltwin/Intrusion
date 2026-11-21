@@ -1101,12 +1101,22 @@ Dock.prototype = {
 			return;
 		}
 		this.pending = p;
+		this.term.cancelAnim(AnimType.A_Blink,this.pending.mc);
+		this.dm.over(this.pending.mc);
+		var slotField = MCField.get_field(this.pending.mc);
+		if(slotField != null) {
+			slotField.set_textColor(10875441);
+		}
 		var tmp = common_GlowFilter.create(10875441,1,2,2,10,1,true);
-		var tmp1 = common_GlowFilter.create(10875441,1,32,32,1,1);
+		var tmp1 = common_GlowFilter.create(10875441,1,32,32,2,1);
 		this.pending.mc.filters = tmp.concat(tmp1);
 	}
 	,clearPending: function() {
-		if(this.pending != null) {
+		if(this.pending != null && this.pending.mc != null) {
+			var slotField = MCField.get_field(this.pending.mc);
+			if(slotField != null) {
+				slotField.set_textColor(16777215);
+			}
 			this.pending.mc.filters = this.baseFilters;
 		}
 		this.pending = null;
@@ -1124,10 +1134,11 @@ Dock.prototype = {
 		if(this.pending == null) {
 			return;
 		}
-		this.term.vman.exec(this.pending.virus,f);
-		this.onActivate(this.pending);
-		this.term.fs.setTarget(f);
+		var p = this.pending;
 		this.clearPending();
+		this.onActivate(p);
+		this.term.fs.setTarget(f);
+		this.term.vman.exec(p.virus,f);
 	}
 	,giveTargetNode: function(n) {
 		if(this.fl_lock) {
@@ -1230,14 +1241,19 @@ Dock.prototype = {
 		this.onClickSlot(list[idx]);
 	}
 	,onActivate: function(ds) {
+		if(ds == null || ds.mc == null) {
+			return;
+		}
 		this.dm.over(ds.mc);
-		if(this.pending != null) {
+		if(this.pending != null && this.pending.mc != null) {
 			this.dm.over(this.pending.mc);
 		}
 		var a = this.term.startAnim(AnimType.A_Blink,ds.mc);
 		var me = this;
 		a.cb = function() {
-			ds.mc.filters = me.baseFilters;
+			if(me.pending != ds && ds.mc != null) {
+				ds.mc.filters = me.baseFilters;
+			}
 		};
 	}
 	,onRollOver: function(ds) {
@@ -11909,6 +11925,18 @@ UserTerminal.prototype = {
 		while(this.hasEffect(et)) this.removeEffect(et,false);
 		this.updateBars();
 	}
+	,cancelAnim: function(type,mc) {
+		var i = 0;
+		while(i < this.animList.length) {
+			var a = this.animList[i];
+			if(a.type == type && a.mc == mc) {
+				a.kill = true;
+				this.animList.splice(i,1);
+			} else {
+				++i;
+			}
+		}
+	}
 	,startAnim: function(type,mc,str,delay,fl_linkToProgress) {
 		if(fl_linkToProgress == null) {
 			fl_linkToProgress = false;
@@ -13239,13 +13267,42 @@ UserTerminal.prototype = {
 				break;
 			}
 			if(this.cmdLine == null) {
+				var matchedShortcut = false;
 				var _g = 0;
 				var _g1 = this.ls.shortcuts.length;
 				while(_g < _g1) {
 					var i = _g++;
 					if(c == this.ls.shortcuts[i]) {
 						this.dock.onShortcut(i);
+						matchedShortcut = true;
 						break;
+					}
+				}
+				if(!matchedShortcut && !e.ctrlKey && !e.metaKey && !e.altKey) {
+					var digitCode = -1;
+					if(e.code != null) {
+						if(e.code.indexOf("Digit") == 0 && e.code.length == 6) {
+							digitCode = HxOverrides.cca(e.code,5);
+						} else if(e.code.indexOf("Numpad") == 0 && e.code.length == 7) {
+							var nc = HxOverrides.cca(e.code,6);
+							if(nc >= 48 && nc <= 57) {
+								digitCode = nc;
+							}
+						}
+					}
+					if(digitCode < 0 && c >= 96 && c <= 105) {
+						digitCode = c - 48;
+					}
+					if(digitCode >= 48 && digitCode <= 57) {
+						var _g2 = 0;
+						var _g3 = this.ls.shortcuts.length;
+						while(_g2 < _g3) {
+							var i1 = _g2++;
+							if(digitCode == this.ls.shortcuts[i1]) {
+								this.dock.onShortcut(i1);
+								break;
+							}
+						}
 					}
 				}
 			}
@@ -16429,9 +16486,34 @@ WinAppOptions.prototype = $extend(WinApp.prototype,{
 var common_GlowFilter = function() { };
 $hxClasses["common.GlowFilter"] = common_GlowFilter;
 common_GlowFilter.__name__ = "common.GlowFilter";
+common_GlowFilter.CACHE = null;
 common_GlowFilter.create = function(color,alpha,blurX,blurY,strength,quality,inner,knockout) {
-	var glowFilter = new PIXI.filters.GlowFilter((blurX + blurY) / 2 / 10,!inner ? strength / 10 : 0,inner ? strength / 10 : 0,color,quality * 10 / 15.0);
-	return [];
+	if(common_GlowFilter.CACHE == null) {
+		common_GlowFilter.CACHE = new haxe_ds_StringMap();
+	}
+	var a = alpha == null ? 1.0 : alpha;
+	var bx = blurX == null ? 0.0 : blurX;
+	var by = blurY == null ? 0.0 : blurY;
+	var s = strength == null ? 2.0 : strength;
+	if(a <= 0.02 || bx <= 0.2 && by <= 0.2 || s <= 0.0) {
+		return [];
+	}
+	var rawDist = (bx + by) * 0.5;
+	var dist = rawDist <= 3.5 ? 2 : rawDist <= 7.0 ? 4 : rawDist <= 14.0 ? 8 : 12;
+	var eff = Math.min(3.5,s <= 1.5 ? s * 1.8 : 1.5 + Math.log(s) * 0.6) * Math.min(1.0,a);
+	eff = Math.round(eff * 10.0) / 10.0;
+	if(eff <= 0.05) {
+		return [];
+	}
+	var isInner = inner == true;
+	var isKnockout = knockout == true;
+	var key = dist + ":" + (isInner ? 1 : 0) + ":" + (isKnockout ? 1 : 0) + ":" + color + ":" + eff;
+	var cached = common_GlowFilter.CACHE.h[key];
+	if(cached == null) {
+		cached = new PIXI.filters.GlowFilter({ distance : dist, outerStrength : isInner ? 0.0 : eff, innerStrength : isInner ? eff : 0.0, color : color, quality : 0.25, knockout : isKnockout});
+		common_GlowFilter.CACHE.h[key] = cached;
+	}
+	return [cached];
 };
 var common_BlurFilter = function() { };
 $hxClasses["common.BlurFilter"] = common_BlurFilter;
@@ -17667,15 +17749,7 @@ common_MovieClipBuilder.prototype = {
 			var knockout = haxe_xml__$Access_AttribAccess.resolve(filterTag,"knockout") == "true";
 			return [common_DropShadowFilter.create(distance,angle,color,alpha,blurX,blurY,strength,quality,inner,knockout)];
 		case "GLOWFILTER":
-			var color = this.getIntCol(haxe_xml__$Access_NodeAccess.resolve(filterTag,"glowColor"));
-			var alpha = Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(haxe_xml__$Access_NodeAccess.resolve(filterTag,"glowColor"),"alpha")) / 255;
-			var blurX = parseFloat(haxe_xml__$Access_AttribAccess.resolve(filterTag,"blurX"));
-			var blurY = parseFloat(haxe_xml__$Access_AttribAccess.resolve(filterTag,"blurY"));
-			var strength = parseFloat(haxe_xml__$Access_AttribAccess.resolve(filterTag,"strength"));
-			var quality = Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(filterTag,"passes"));
-			var inner = haxe_xml__$Access_AttribAccess.resolve(filterTag,"innerGlow") == "true";
-			var knockout = haxe_xml__$Access_AttribAccess.resolve(filterTag,"knockout") == "true";
-			return common_GlowFilter.create(color,alpha,blurX,blurY,strength,quality,inner,knockout);
+			return [];
 		default:
 			throw haxe_Exception.thrown("Unsupported filter: " + haxe_xml__$Access_AttribAccess.resolve(filterTag,"type"));
 		}
