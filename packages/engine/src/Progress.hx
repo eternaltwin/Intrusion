@@ -80,10 +80,13 @@ class Progress {
 			if ( b.t>=b.total ) {
 				Manager.ME.term.stopLoop("progress_01", false);
 				b.mc.smc._xscale = 100;
-				b.cb();
-				kills.push(b);
+				b.mc.onRelease = null;
+				b.mc.interactive = false;
+				b.mc.interactiveChildren = false;
 				list.splice(i,1);
+				kills.push(b);
 				i--;
+				b.cb();
 			}
 			i++;
 		}

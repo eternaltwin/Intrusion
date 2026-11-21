@@ -322,14 +322,18 @@ class FSNode {
 			mc.field.visible = false;
 
 		if ( fl_anim ) {
-			var delay = -0.5-0.15*index-Std.random(150)/100;
+			var delay = -0.08*index-Std.random(35)/100;
 			var a = term.startAnim(A_FadeIn, mc, name, delay);
-			a.spd *= 1.7;
+			a.spd *= 1.8;
 //			a.cb =  term.playSound.bind("single_03", 0.0 );
-			term.startAnim(A_Text, mc, name, delay);
-			term.startAnim(A_PlayFrames, mc, name, delay); //.spd *= if(term.fl_lowq) 1.5 else 1;
-			for (emc in fnode.emcList)
-				term.startAnim(A_FadeIn, emc, delay);
+			var at = term.startAnim(A_Text, mc, name, delay);
+			at.spd *= 1.8;
+			var ap = term.startAnim(A_PlayFrames, mc, name, delay);
+			ap.spd *= 1.8;
+			for (emc in fnode.emcList) {
+				var ae = term.startAnim(A_FadeIn, emc, delay);
+				ae.spd *= 1.8;
+			}
 		}
 		else {
 			var a = term.startAnim(A_FadeIn, mc, -index*0.06);
@@ -999,6 +1003,11 @@ class FSNode {
 				emc.filters = [];
 			}
 			term.bubble( emc, getEffectDesc(e.type),over,out );
+			var selfMc = mc;
+			emc.onRelease = function() {
+				if (selfMc != null && selfMc.hit != null && selfMc.hit.onRelease != null)
+					selfMc.hit.onRelease();
+			};
 			emcList.push(emc);
 		}
 	}

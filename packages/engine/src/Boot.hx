@@ -58,6 +58,7 @@ class Boot {
 		}
 		KeyboardManager.destroy();
 		Key.destroy();
+		common.Sound.stopAndDestroyAll();
 		js.Syntax.code("try { if (window.PIXI && PIXI.sound) PIXI.sound.stopAll(); } catch(e) {}");
 		if (Manager.app != null) {
 			try {

@@ -124,6 +124,8 @@ class Manager {
 
 	public static function stopLoading() {
 		if (mcLoading==null) return;
+		mcLoading.interactive = false;
+		mcLoading.interactiveChildren = false;
 		Manager.ME.term.startAnim(A_FadeRemove,mcLoading).spd*=0.5;
 		mcLoading.smc._visible = false;
 //		Manager.ME.term.startAnim(A_FadeOut,mcLoading.smc).spd*=2;

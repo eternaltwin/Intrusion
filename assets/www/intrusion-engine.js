@@ -554,6 +554,7 @@ Boot.unmountEngine = function() {
 	}
 	common_KeyboardManager.destroy();
 	mt_flash_Key.destroy();
+	common_Sound.stopAndDestroyAll();
 	try { if (window.PIXI && PIXI.sound) PIXI.sound.stopAll(); } catch(e) {}
 	if(Manager.app != null) {
 		try {
@@ -1423,17 +1424,20 @@ FSNode.attach = function(dm,fl_anim,fnode,index) {
 		MCField.get_field(mc).visible = false;
 	}
 	if(fl_anim) {
-		var delay = -0.5 - 0.15 * index - Std.random(150) / 100;
+		var delay = -0.08 * index - Std.random(35) / 100;
 		var a = FSNode.term.startAnim(AnimType.A_FadeIn,mc,name,delay);
-		a.spd *= 1.7;
-		FSNode.term.startAnim(AnimType.A_Text,mc,name,delay);
-		FSNode.term.startAnim(AnimType.A_PlayFrames,mc,name,delay);
+		a.spd *= 1.8;
+		var at = FSNode.term.startAnim(AnimType.A_Text,mc,name,delay);
+		at.spd *= 1.8;
+		var ap = FSNode.term.startAnim(AnimType.A_PlayFrames,mc,name,delay);
+		ap.spd *= 1.8;
 		var _g = 0;
 		var _g1 = fnode.emcList;
 		while(_g < _g1.length) {
 			var emc = _g1[_g];
 			++_g;
-			FSNode.term.startAnim(AnimType.A_FadeIn,emc,null,delay);
+			var ae = FSNode.term.startAnim(AnimType.A_FadeIn,emc,null,delay);
+			ae.spd *= 1.8;
 		}
 	} else {
 		var a = FSNode.term.startAnim(AnimType.A_FadeIn,mc,null,-index * 0.06);
@@ -2288,6 +2292,14 @@ FSNode.prototype = {
 				};
 			})(emc);
 			FSNode.term.bubble(emc[0],this.getEffectDesc(e.type),null,null,over,out);
+			var selfMc = [this.mc];
+			emc[0].set_onRelease((function(selfMc) {
+				return function() {
+					if(selfMc[0] != null && MCFile.get_hit(selfMc[0]) != null && MCFile.get_hit(selfMc[0]).onRelease != null) {
+						MCFile.get_hit(selfMc[0]).onRelease();
+					}
+				};
+			})(selfMc));
 			this.emcList.push(emc[0]);
 		}
 	}
@@ -3921,7 +3933,7 @@ GFileSystem.prototype = {
 			return;
 		}
 		if(this.sty != null) {
-			var factor = 1.0 - Math.pow(0.85,mt_Timer.tmod);
+			var factor = 1.0 - Math.pow(1.0 - GFileSystem.SCROLL_SPEED,mt_Timer.tmod);
 			this.sy += (this.sty - this.sy) * factor;
 			if(Math.abs(this.sy - this.sty) <= 0.5) {
 				this.sy = this.sty;
@@ -4194,7 +4206,10 @@ GFileSystem.prototype = {
 			this.term.startAnim(AnimType.A_Text,this.title,this.curFolder.name);
 			this.term.startAnim(AnimType.A_Text,this.sub,spam,-3);
 		}
-		this.focus(0);
+		this.sy = 0;
+		this.sty = null;
+		this.stimer = 0;
+		this.updateScrollPos();
 		this.updateBg();
 		var tmp = this.scrollPrev;
 		if(tmp != null) {
@@ -8246,6 +8261,8 @@ Manager.stopLoading = function() {
 	if(Manager.mcLoading == null) {
 		return;
 	}
+	Manager.mcLoading.interactive = false;
+	Manager.mcLoading.interactiveChildren = false;
 	Manager.ME.term.startAnim(AnimType.A_FadeRemove,Manager.mcLoading).spd *= 0.5;
 	var _this = Manager.mcLoading.get_smc();
 	_this.visible = false;
@@ -9315,10 +9332,13 @@ Progress.update = function() {
 		if(b.t >= b.total) {
 			Manager.ME.term.stopLoop("progress_01",false);
 			b.mc.get_smc().set__xscale(100);
-			b.cb();
-			Progress.kills.push(b);
+			b.mc.set_onRelease(null);
+			b.mc.interactive = false;
+			b.mc.interactiveChildren = false;
 			Progress.list.splice(i,1);
+			Progress.kills.push(b);
 			--i;
+			b.cb();
 		}
 		++i;
 	}
@@ -10799,6 +10819,7 @@ UserTerminal.prototype = {
 			var msg = _$Message.MISSION_RESULT(data);
 			UserTerminal.jsMain.send(Manager.PARAMS._endUrl,msg,$bind(this,this.onEndData));
 			this.fl_end = true;
+			this.stopAllSounds(false);
 			this.bigLog(_$Lang_AllTexts.getText(Lang.get,"BigEnd"),true,null,true);
 		} catch( _g ) {
 			haxe_NativeStackTrace.lastError = _g;
@@ -11070,6 +11091,33 @@ UserTerminal.prototype = {
 			this.stopLoop(id);
 		}
 		this.localSounds = new haxe_ds_List();
+	}
+	,stopAllSounds: function(destroyAll) {
+		if(destroyAll == null) {
+			destroyAll = false;
+		}
+		this.soundAnims = new haxe_ds_List();
+		this.localSounds = new haxe_ds_List();
+		if(this.sfxBank != null) {
+			var h = this.sfxBank.h;
+			var s_h = h;
+			var s_keys = Object.keys(h);
+			var s_length = s_keys.length;
+			var s_current = 0;
+			while(s_current < s_length) {
+				var s = s_h[s_keys[s_current++]];
+				if(s != null && s.data != null) {
+					if(destroyAll) {
+						s.data.destroy();
+					} else {
+						s.data.stop();
+					}
+				}
+			}
+		}
+		if(destroyAll) {
+			common_Sound.stopAndDestroyAll();
+		}
 	}
 	,inheritLoop: function(id) {
 		if(id != null) {
@@ -11582,7 +11630,7 @@ UserTerminal.prototype = {
 			fl_abandon = false;
 		}
 		Manager.loading(_$Lang_AllTexts.getText(Lang.get,"LP_Logout"));
-		this.stopLocalLoops();
+		this.stopAllSounds(false);
 		Tutorial.print();
 		this.dock.hide();
 		this.endGame(fl_abandon);
@@ -12191,6 +12239,11 @@ UserTerminal.prototype = {
 	}
 	,detachPop: function() {
 		this.detachMask();
+		if(this.popMC != null) {
+			this.popMC.set_onRelease(null);
+			this.popMC.interactive = false;
+			this.popMC.interactiveChildren = false;
+		}
 		if(this.fl_generated && this.popMC != null) {
 			this.startAnim(AnimType.A_FadeRemove,this.popMC).spd *= 2;
 		} else {
@@ -12280,6 +12333,8 @@ UserTerminal.prototype = {
 		}
 		this.detachBubble();
 		this.bmc = Manager.DM.attach("bubble",Data.DP_TOP);
+		this.bmc.interactive = false;
+		this.bmc.interactiveChildren = false;
 		if(title != null) {
 			BubbleMC.get_title(this.bmc).text = title;
 		} else {
@@ -12333,14 +12388,22 @@ UserTerminal.prototype = {
 		if(fl_anim == null) {
 			fl_anim = false;
 		}
+		if(this.mask != null) {
+			this.mask.set_onRelease(null);
+			this.mask.interactive = false;
+			this.mask.interactiveChildren = false;
+		}
 		if(fl_anim) {
-			this.startAnim(AnimType.A_FadeRemove,this.mask);
+			if(this.mask != null) {
+				this.startAnim(AnimType.A_FadeRemove,this.mask);
+			}
 			this.mask = null;
 		} else {
 			var tmp = this.mask;
 			if(tmp != null) {
 				tmp.removeMovieClip();
 			}
+			this.mask = null;
 		}
 	}
 	,attachMask: function(cb,dp) {
@@ -12723,9 +12786,11 @@ UserTerminal.prototype = {
 		if(this.cmenu == null) {
 			return;
 		}
+		this.cmenu.set_onRelease(null);
+		this.cmenu.interactive = false;
+		this.cmenu.interactiveChildren = false;
 		this.startAnim(AnimType.A_FadeRemove,this.cmenu).spd *= 3;
-		this.cmenu.set_onRelease(function() {
-		});
+		this.cmenu = null;
 	}
 	,showCMenu: function(dm,x,y,cancel,blist) {
 		if(this.fl_end) {
@@ -13105,17 +13170,17 @@ UserTerminal.prototype = {
 				}
 			}
 		}
-		try {
-			this.stopLocalLoops();
-		} catch( _g ) {
-			haxe_NativeStackTrace.lastError = _g;
-		}
 		if(this.fs != null) {
 			try {
 				this.fs.disconnect();
 			} catch( _g ) {
 				haxe_NativeStackTrace.lastError = _g;
 			}
+		}
+		try {
+			this.stopAllSounds(true);
+		} catch( _g ) {
+			haxe_NativeStackTrace.lastError = _g;
 		}
 	}
 	,stopGame: function() {
@@ -13267,7 +13332,10 @@ UserTerminal.prototype = {
 			if(!a.kill && cpt >= 0) {
 				switch(a.type._hx_index) {
 				case 0:
-					a.mc.gotoAndStop(Math.max(1,Math.floor(cpt * a.mc._totalframes)) | 0);
+					var tf = Math.max(1,Math.floor(cpt * a.mc._totalframes)) | 0;
+					if(a.mc._currentframe != tf) {
+						a.mc.gotoAndStop(tf);
+					}
 					break;
 				case 1:
 					a.mc.set__alpha(100 * cpt);
@@ -16413,6 +16481,7 @@ common_MovieClip.fieldWrite = function(this1,name,mc) {
 	return this1.set(name,{ depth : 1, object : mc});
 };
 var common_InternalMovieClip = function(builder) {
+	this._pressed = false;
 	this.centerX = false;
 	this.onFrame = new haxe_ds_IntMap();
 	this.removeObjOnFrame = null;
@@ -16794,67 +16863,91 @@ common_InternalMovieClip.prototype = $extend(PIXI.Container.prototype,{
 		this.scale.y = v / 100;
 		return v;
 	}
+	,_pressed: null
+	,syncInteractive: function() {
+		this.interactive = this.onRollOut != null || this.onRollOver != null || this.onMouseMove != null || this.onPress != null || this.onRelease != null || this.onReleaseOutside != null;
+	}
+	,ensurePressTracking: function() {
+		var _gthis = this;
+		this.removeAllListeners("pointerdown");
+		this.addListener("pointerdown",function(e) {
+			_gthis._pressed = true;
+			if(_gthis.onPress != null) {
+				e.stopPropagation();
+				_gthis.onPress();
+			}
+		});
+	}
 	,set_onRollOut: function(v) {
 		this.onRollOut = v;
-		this.interactive = v != null;
+		this.removeAllListeners("pointerout");
 		if(v != null) {
-			this.removeAllListeners("pointerout");
 			this.addListener("pointerout",v);
 		}
+		this.syncInteractive();
 		return v;
 	}
 	,set_onRollOver: function(v) {
 		this.onRollOver = v;
-		this.interactive = v != null;
+		this.removeAllListeners("pointerover");
 		if(v != null) {
-			this.removeAllListeners("pointerover");
 			this.addListener("pointerover",v);
 		}
+		this.syncInteractive();
 		return v;
 	}
 	,set_onMouseMove: function(v) {
 		this.onMouseMove = v;
-		this.interactive = v != null;
+		this.removeAllListeners("pointermove");
 		if(v != null) {
-			this.removeAllListeners("pointermove");
 			this.addListener("pointermove",v);
 		}
+		this.syncInteractive();
 		return v;
 	}
 	,set_onPress: function(v) {
 		this.onPress = v;
-		this.interactive = v != null;
-		if(v != null) {
+		if(v != null || this.onRelease != null || this.onReleaseOutside != null) {
+			this.ensurePressTracking();
+		} else {
 			this.removeAllListeners("pointerdown");
-			this.addListener("pointerdown",function(e) {
-				e.stopPropagation();
-				v();
-			});
 		}
+		this.syncInteractive();
 		return v;
 	}
 	,set_onRelease: function(v) {
+		var _gthis = this;
 		this.onRelease = v;
-		this.interactive = v != null;
+		this.removeAllListeners("pointerup");
 		if(v != null) {
-			this.removeAllListeners("pointerup");
+			this.ensurePressTracking();
 			this.addListener("pointerup",function(e) {
+				_gthis._pressed = false;
 				e.stopPropagation();
 				v();
 			});
+		} else if(this.onPress == null && this.onReleaseOutside == null) {
+			this.removeAllListeners("pointerdown");
 		}
+		this.syncInteractive();
 		return v;
 	}
 	,set_onReleaseOutside: function(v) {
+		var _gthis = this;
 		this.onReleaseOutside = v;
-		this.interactive = v != null;
+		this.removeAllListeners("pointerupoutside");
 		if(v != null) {
-			this.removeAllListeners("pointerupoutside");
+			this.ensurePressTracking();
 			this.addListener("pointerupoutside",function(e) {
-				e.stopPropagation();
-				v();
+				if(_gthis._pressed) {
+					_gthis._pressed = false;
+					v();
+				}
 			});
+		} else if(this.onPress == null && this.onRelease == null) {
+			this.removeAllListeners("pointerdown");
 		}
+		this.syncInteractive();
 		return v;
 	}
 	,set_tint: function(value) {
@@ -17455,14 +17548,32 @@ common_MovieClipBuilder.prototype = {
 	,__class__: common_MovieClipBuilder
 };
 var common_Sound = function(container) {
+	this.disposed = false;
 	this.container = container;
+	common_Sound.ALL.push(this);
 };
 $hxClasses["common.Sound"] = common_Sound;
 common_Sound.__name__ = "common.Sound";
+common_Sound.stopAndDestroyAll = function() {
+	var copy = common_Sound.ALL.slice();
+	common_Sound.ALL = [];
+	var _g = 0;
+	while(_g < copy.length) {
+		var s = copy[_g];
+		++_g;
+		if(s != null) {
+			s.destroy();
+		}
+	}
+};
 common_Sound.prototype = {
 	container: null
 	,sound: null
+	,disposed: null
 	,start: function(secondOffset,loops) {
+		if(this.disposed || this.sound == null) {
+			return;
+		}
 		if(loops != 1 && loops < 9000) {
 			throw haxe_Exception.thrown("Playing sound with " + loops + " loops is not supported");
 		}
@@ -17474,19 +17585,58 @@ common_Sound.prototype = {
 		}
 	}
 	,stop: function(linkageID) {
-		this.sound.stop();
+		if(this.disposed || this.sound == null) {
+			return;
+		}
+		try {
+			this.sound.stop();
+		} catch( _g ) {
+			haxe_NativeStackTrace.lastError = _g;
+		}
 	}
 	,setVolume: function(value) {
+		if(this.disposed || this.sound == null) {
+			return;
+		}
 		this.sound.volume = value / 100.0;
 	}
 	,getVolume: function() {
+		if(this.disposed || this.sound == null) {
+			return 0.0;
+		}
 		return this.sound.volume * 100;
+	}
+	,destroy: function() {
+		this.disposed = true;
+		if(this.sound != null) {
+			try {
+				this.sound.stop();
+				this.sound.destroy();
+			} catch( _g ) {
+				haxe_NativeStackTrace.lastError = _g;
+			}
+			this.sound = null;
+		}
 	}
 	,onLoad: function(success) {
 	}
 	,loadSound: function(url,isStreaming) {
 		var _gthis = this;
-		PIXI.sound.Sound.from({ url : url, preload : true, loaded : function(err,sound) {
+		if(this.disposed) {
+			return;
+		}
+		this.sound = PIXI.sound.Sound.from({ url : url, preload : true, loaded : function(err,sound) {
+			if(_gthis.disposed) {
+				if(sound != null) {
+					try {
+						sound.stop();
+						sound.destroy();
+					} catch( _g ) {
+						haxe_NativeStackTrace.lastError = _g;
+					}
+				}
+				return;
+			}
 			_gthis.sound = sound;
 			_gthis.onLoad(err == null);
 		}});
@@ -21126,6 +21276,7 @@ common_KeyboardManager.SPACE = 32;
 common_KeyboardManager.ESCAPE = 27;
 common_KeyboardManager.keyState = new haxe_ds_IntMap();
 common_KeyboardManager.initialized = false;
+common_Sound.ALL = [];
 data_AntivirusXml.ALL = new haxe_ds_StringMap();
 data_ChipsetsXml.FILE = "chipsets.xml";
 data_ChipsetsXml.ALL = new haxe_ds_StringMap();

@@ -1421,7 +1421,7 @@ class GFileSystem {
 	function updateScrollPos() {
 		if (scroller==null) return;
 		if ( sty!=null ) {
-			var factor = 1.0 - Math.pow(0.85, Timer.tmod);
+			var factor = 1.0 - Math.pow(1.0 - SCROLL_SPEED, Timer.tmod);
 			sy += (sty - sy) * factor;
 			if ( Math.abs(sy-sty)<=0.5 ) {
 				sy = sty;
@@ -1684,7 +1684,10 @@ class GFileSystem {
 			term.startAnim( A_Text, title, curFolder.name );
 			term.startAnim( A_Text, sub, spam, -3 );
 		}
-		focus(0);
+		sy = 0;
+		sty = null;
+		stimer = 0;
+		updateScrollPos();
 		updateBg();
 
 		// scrolling arrows

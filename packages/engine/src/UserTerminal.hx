@@ -704,6 +704,7 @@ class UserTerminal {
 //			lv.sendAndLoad( Manager.PARAMS._endUrl, edata, "post" );
 
 			fl_end = true;
+			stopAllSounds(false);
 			bigLog(Lang.get.BigEnd, true, true);
 
 			#if debugProtocol
@@ -1005,6 +1006,21 @@ class UserTerminal {
 		for (id in localSounds)
 			stopLoop(id);
 		localSounds = new List();
+	}
+
+	public function stopAllSounds(?destroyAll=false) {
+		soundAnims = new List();
+		localSounds = new List();
+		if (sfxBank != null) {
+			for (s in sfxBank) {
+				if (s != null && s.data != null) {
+					if (destroyAll) s.data.destroy() else s.data.stop();
+				}
+			}
+		}
+		if (destroyAll) {
+			common.Sound.stopAndDestroyAll();
+		}
 	}
 
 	public function inheritLoop( id:String ) {
@@ -1336,7 +1352,7 @@ class UserTerminal {
 
 	public function logout(?fl_abandon=false) {
 		Manager.loading(Lang.get.LP_Logout);
-		stopLocalLoops();
+		stopAllSounds(false);
 		Tutorial.print();
 		dock.hide();
 		#if debug
@@ -1887,6 +1903,11 @@ class UserTerminal {
 
 	function detachPop() {
 		detachMask();
+		if ( popMC!=null ) {
+			popMC.onRelease = null;
+			popMC.interactive = false;
+			popMC.interactiveChildren = false;
+		}
 		if ( fl_generated && popMC!=null )
 			startAnim(A_FadeRemove, popMC).spd*=2;
 		else
@@ -1969,6 +1990,8 @@ class UserTerminal {
 			return;
 		detachBubble();
 		bmc = cast Manager.DM.attach("bubble",Data.DP_TOP);
+		bmc.interactive = false;
+		bmc.interactiveChildren = false;
 
 //		// local to global...
 //		var x = mc._x;
@@ -2026,12 +2049,20 @@ class UserTerminal {
 
 
 	public function detachMask(fl_anim=false) {
+		if ( mask!=null ) {
+			mask.onRelease = null;
+			mask.interactive = false;
+			mask.interactiveChildren = false;
+		}
 		if ( fl_anim ) {
-			startAnim(A_FadeRemove,mask);
+			if ( mask!=null )
+				startAnim(A_FadeRemove,mask);
 			mask = null;
 		}
-		else
+		else {
 			mask?.removeMovieClip();
+			mask = null;
+		}
 	}
 
 	public function attachMask(?cb:Void->Void, ?dp:Int) {
@@ -2363,8 +2394,11 @@ class UserTerminal {
 
 	public function detachCMenu() {
 		if ( cmenu==null ) return;
+		cmenu.onRelease = null;
+		cmenu.interactive = false;
+		cmenu.interactiveChildren = false;
 		startAnim(A_FadeRemove, cmenu).spd*=3;
-		cmenu.onRelease = function() {};
+		cmenu = null;
 	}
 
 
@@ -2694,10 +2728,10 @@ class UserTerminal {
 				try { a.stop(); } catch (err: Dynamic) {}
 			}
 		}
-		try { stopLocalLoops(); } catch (err: Dynamic) {}
 		if (fs != null) {
 			try { fs.disconnect(); } catch (err: Dynamic) {}
 		}
+		try { stopAllSounds(true); } catch (err: Dynamic) {}
 	}
 
 
@@ -2843,7 +2877,9 @@ class UserTerminal {
 				switch(a.type) {
 
 					case A_PlayFrames :
-						a.mc.gotoAndStop( Std.int(Math.max(1, Math.floor(cpt*a.mc._totalframes))) );
+						var tf = Std.int(Math.max(1, Math.floor(cpt*a.mc._totalframes)));
+						if (a.mc._currentframe != tf)
+							a.mc.gotoAndStop(tf);
 
 					case A_FadeIn :
 						a.mc._alpha = 100 * cpt;

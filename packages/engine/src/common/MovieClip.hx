@@ -480,76 +480,103 @@ class InternalMovieClip extends Container {
 	}
 
     
+	var _pressed: Bool = false;
+
+	function syncInteractive() {
+		this.interactive = (
+			this.onRollOut != null ||
+			this.onRollOver != null ||
+			this.onMouseMove != null ||
+			this.onPress != null ||
+			this.onRelease != null ||
+			this.onReleaseOutside != null
+		);
+	}
+
+	function ensurePressTracking() {
+		this.removeAllListeners("pointerdown");
+		this.addListener("pointerdown", (e) -> {
+			this._pressed = true;
+			if (this.onPress != null) {
+				e.stopPropagation();
+				this.onPress();
+			}
+		});
+	}
+
 	public function set_onRollOut(v:Void->Void):Void->Void {
 		this.onRollOut = v;
-		this.interactive = v != null;
+		this.removeAllListeners("pointerout");
 		if (v != null) {
-			this.removeAllListeners("pointerout");
 			this.addListener('pointerout', v);
 		}
-
+		syncInteractive();
 		return v;
 	}
 
 	public function set_onRollOver(v:Void->Void):Void->Void {
 		this.onRollOver = v;
-		this.interactive = v != null;
+		this.removeAllListeners("pointerover");
 		if (v != null) {
-			this.removeAllListeners("pointerover");
 			this.addListener('pointerover', v);
 		}
+		syncInteractive();
 		return v;
 	}
 
 	public function set_onMouseMove(v:Void->Void):Void->Void {
 		this.onMouseMove = v;
-		this.interactive = v != null;
+		this.removeAllListeners("pointermove");
 		if (v != null) {
-			this.removeAllListeners("pointermove");
 			this.addListener('pointermove', v);
 		}
+		syncInteractive();
 		return v;
 	}
 
 	public function set_onPress(v:Void->Void):Void->Void {
 		this.onPress = v;
-		this.interactive = v != null;
-		if (v != null) {
+		if (v != null || this.onRelease != null || this.onReleaseOutside != null) {
+			ensurePressTracking();
+		} else {
 			this.removeAllListeners("pointerdown");
-			this.addListener('pointerdown', (e) -> {
-				e.stopPropagation();
-				v();
-			});
 		}
-
+		syncInteractive();
 		return v;
 	}
 
 	public function set_onRelease(v:Void->Void):Void->Void {
 		this.onRelease = v;
-		this.interactive = v != null;
+		this.removeAllListeners("pointerup");
 		if (v != null) {
-			this.removeAllListeners("pointerup");
+			ensurePressTracking();
 			this.addListener('pointerup', (e) -> {
+				this._pressed = false;
 				e.stopPropagation();
 				v();
 			});
+		} else if (this.onPress == null && this.onReleaseOutside == null) {
+			this.removeAllListeners("pointerdown");
 		}
-
+		syncInteractive();
 		return v;
 	}
 
 	public function set_onReleaseOutside(v:Void->Void):Void->Void {
 		this.onReleaseOutside = v;
-		this.interactive = v != null;
+		this.removeAllListeners("pointerupoutside");
 		if (v != null) {
-			this.removeAllListeners("pointerupoutside");
+			ensurePressTracking();
 			this.addListener('pointerupoutside', (e) -> {
-				e.stopPropagation();
-				v();
+				if (this._pressed) {
+					this._pressed = false;
+					v();
+				}
 			});
+		} else if (this.onPress == null && this.onRelease == null) {
+			this.removeAllListeners("pointerdown");
 		}
-
+		syncInteractive();
 		return v;
 	}
 
