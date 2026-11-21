@@ -410,6 +410,9 @@ AntivirMan.prototype = {
 		this.attackAll(data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"bigoxy"));
 	}
 	,onVirusRun: function(v) {
+		if(this.term.fs == null) {
+			return;
+		}
 		if(v == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"cd") || v == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"connec") || v == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"extrac") || v == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"target")) {
 			return;
 		}
@@ -444,6 +447,9 @@ AntivirMan.prototype = {
 		}
 	}
 	,onDamageFile: function(dmg,f) {
+		if(this.term.fs == null) {
+			return;
+		}
 		if(this.folderContains(this.term.fs.curFolder,data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"eject"))) {
 			var _g_head = this.getAllByFolder(this.term.fs.curFolder,data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"eject")).h;
 			while(_g_head != null) {
@@ -3825,6 +3831,9 @@ GFileSystem.prototype = {
 		return d;
 	}
 	,logEvent: function(str) {
+		if(this.index == null || this.index.h["log"] == null) {
+			return;
+		}
 		if(this.term.hasEffect(UserEffectType.UE_Furtivity)) {
 			return;
 		}
@@ -6119,7 +6128,6 @@ GNetwork.prototype = {
 		if(Tutorial.play(_$Tutorial_AllData.getTutorial(Tutorial.get,"third"),"unreachable")) {
 			return;
 		}
-		this.term.fs = node.system;
 		this.term.vman.exec(data__$VirusXml_AllData.getVirus(data_VirusXml.get,"connec"),null,node);
 	}
 	,connect: function(node) {
@@ -10318,6 +10326,7 @@ var UserTerminal = function() {
 	this.fl_generated = false;
 	this.fl_success = false;
 	this.fl_busted = false;
+	this.fl_dead = false;
 	this.fl_end = false;
 	this.storage = [];
 	this.animList = [];
@@ -10532,6 +10541,7 @@ UserTerminal.prototype = {
 	,ls: null
 	,fl_success: null
 	,fl_busted: null
+	,fl_dead: null
 	,fl_end: null
 	,fl_lowq: null
 	,fl_leet: null
@@ -11614,6 +11624,8 @@ UserTerminal.prototype = {
 		if(!fl_stealth) {
 			this.avman.onDisconnect();
 		}
+		this.avman.endTurn = new haxe_ds_List();
+		this.vman.endTurn = new haxe_ds_List();
 		this.log(_$Lang_AllTexts.getText(Lang.get,"Disconnected"));
 		if(fl_stealth && this.life > 0) {
 			this.log(_$Lang_AllTexts.getText(Lang.get,"Log_Stealth"));
@@ -11624,6 +11636,7 @@ UserTerminal.prototype = {
 		this.dock.lock();
 		this.dock.showSwitcher();
 		this.fs.disconnect();
+		this.fs = null;
 		this.net.updateVisibility();
 		this.net.unlock();
 		this.net.refresh();
@@ -13339,6 +13352,17 @@ UserTerminal.prototype = {
 		this.popUp(_$Lang_AllTexts.getText(Lang.get,"TimeOut"));
 	}
 	,onDeath: function() {
+		if(this.fl_dead) {
+			return;
+		}
+		this.fl_dead = true;
+		var activeApps = Lambda.array(this.apps);
+		var _g = 0;
+		while(_g < activeApps.length) {
+			var a = activeApps[_g];
+			++_g;
+			a.stop();
+		}
 		this.disconnectFS(true);
 		Progress.cancel();
 		this.popUp(_$Lang_AllTexts.getText(Lang.get,"YouAreDead"));
@@ -13352,7 +13376,7 @@ UserTerminal.prototype = {
 				this.updateBars();
 			}
 		}
-		if(this.tick % 4 == 0 && this.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"smana"))) {
+		if(this.tick % 4 == 0 && this.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"smana")) && this.life > 0) {
 			this.damage(1,false);
 		}
 		if(this.alarmTimer != null && !this.fl_busted) {
@@ -13537,8 +13561,10 @@ UserTerminal.prototype = {
 					if(cpt >= 1) {
 						MCField.get_field(mcc4).text += "_________________\nACCESS GRANTED :-)\n";
 						this.startAnim(AnimType.A_FadeRemove,a.mc,null,-2);
-						TD.texts.set("user",this.fs.owner);
-						this.popUp(TD.texts.get("welcome"));
+						if(this.fs != null) {
+							TD.texts.set("user",this.fs.owner);
+							this.popUp(TD.texts.get("welcome"));
+						}
 					}
 					MCField.get_field(mcc4).text = this.stripLines(MCField.get_field(mcc4).text,8);
 					break;
@@ -13915,7 +13941,7 @@ UserTerminal.prototype = {
 				this.focus();
 			}
 		}
-		if(this.fs != null && this.life == 0) {
+		if(!this.fl_dead && this.lifeTotal > 0 && this.life <= 0) {
 			this.onDeath();
 		}
 		if(Tutorial.at(_$Tutorial_AllData.getTutorial(Tutorial.get,"first"),"mana")) {
@@ -13977,10 +14003,12 @@ VirusMan.prototype = {
 			if(this.term.mana < cc) {
 				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"NotEnoughMana"));
 			}
-			if(this.virus == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"cd")) {
-				this.term.fs.logEvent((_$Lang_AllTextsFormat.getText(Lang.fmt,"TraceCD"))({ _name : f.name}));
-			} else {
-				this.term.fs.logEvent((_$Lang_AllTextsFormat.getText(Lang.fmt,"TraceVirus"))({ _name : this.virus.name, _id : this.virus.id}));
+			if(this.term.fs != null && this.virus.target != "_net") {
+				if(this.virus == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"cd")) {
+					this.term.fs.logEvent((_$Lang_AllTextsFormat.getText(Lang.fmt,"TraceCD"))({ _name : f.name}));
+				} else {
+					this.term.fs.logEvent((_$Lang_AllTextsFormat.getText(Lang.fmt,"TraceVirus"))({ _name : this.virus.name, _id : this.virus.id}));
+				}
 			}
 			if(this.virus.target == "_none") {
 				method.apply(this,[]);
@@ -14557,10 +14585,14 @@ VirusMan.prototype = {
 			this.term.startAnim(AnimType.A_Connect,mc,n.ip,null,true);
 		}
 		this.term.log(_$Lang_AllTexts.getText(Lang.get,"Log_Connecting"));
-		this.term.fs.lock();
+		if(this.term.fs != null) {
+			this.term.fs.lock();
+		}
 		this.start(this.getCT() * 2,function(t,v) {
 			t.net.connect(n);
-			t.fs.logEvent((_$Lang_AllTextsFormat.getText(Lang.fmt,"TraceConnect"))({ _name : t.username}));
+			if(t.fs != null) {
+				t.fs.logEvent((_$Lang_AllTextsFormat.getText(Lang.fmt,"TraceConnect"))({ _name : t.username}));
+			}
 			Tutorial.play(_$Tutorial_AllData.getTutorial(Tutorial.get,"third"),"openSys");
 			Tutorial.play(_$Tutorial_AllData.getTutorial(Tutorial.get,"third"),"copyFile2");
 		});

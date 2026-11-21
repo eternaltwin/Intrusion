@@ -16,7 +16,7 @@ class VirusMan {
 
 	var term		: UserTerminal;
 	var virus		: Virus;
-	var endTurn		: List<Void->Void>;
+	public var endTurn		: List<Void->Void>;
 
 
 	public function new(t:UserTerminal) {
@@ -45,10 +45,12 @@ class VirusMan {
 				cc = Math.round(BRUTE_CC*cc);
 			if ( term.mana<cc )
 				throw Lang.get.NotEnoughMana;
-			if ( virus==VirusXml.get.cd )
-				term.fs.logEvent(Lang.fmt.TraceCD({_name:f.name}));
-			else
-				term.fs.logEvent(Lang.fmt.TraceVirus({_name:virus.name, _id:virus.id}));
+			if ( term.fs!=null && virus.target!="_net" ) {
+				if ( virus==VirusXml.get.cd )
+					term.fs.logEvent(Lang.fmt.TraceCD({_name:f.name}));
+				else
+					term.fs.logEvent(Lang.fmt.TraceVirus({_name:virus.name, _id:virus.id}));
+			}
 			if ( virus.target=="_none" ) {
 				Reflect.callMethod(this,method,[]);
 			}
@@ -485,10 +487,12 @@ class VirusMan {
 			term.startAnim( A_Connect, mc, n.ip, true );
 		term.log(Lang.get.Log_Connecting);
 
-		term.fs.lock();
+		if ( term.fs!=null )
+			term.fs.lock();
 		start(getCT()*2, function(t,v) {
 			t.net.connect(n);
-			t.fs.logEvent(Lang.fmt.TraceConnect({_name:t.username}));
+			if ( t.fs!=null )
+				t.fs.logEvent(Lang.fmt.TraceConnect({_name:t.username}));
 			Tutorial.play( Tutorial.get.third, "openSys" );
 			Tutorial.play( Tutorial.get.third, "copyFile2" );
 		} );

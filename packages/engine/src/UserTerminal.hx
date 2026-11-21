@@ -143,6 +143,7 @@ class UserTerminal {
 
 	public var fl_success	: Volatile<Bool>;
 	public var fl_busted	: Volatile<Bool>;
+	public var fl_dead		: Bool;
 	public var fl_end		: Volatile<Bool>;
 	public var fl_lowq		: Bool;
 	public var fl_leet		: Bool;
@@ -208,6 +209,7 @@ class UserTerminal {
 		fl_generated = false;
 		fl_success = false;
 		fl_busted = false;
+		fl_dead = false;
 		fl_end = false;
 		#if debug fl_adminTest = false; #end
 		storage = new Array();
@@ -1330,6 +1332,8 @@ class UserTerminal {
 //			popUp(Lang.get.Disconnected);
 		if ( !fl_stealth )
 			avman.onDisconnect();
+		avman.endTurn = new List();
+		vman.endTurn = new List();
 		log(Lang.get.Disconnected);
 		if ( fl_stealth && life>0 )
 			log(Lang.get.Log_Stealth);
@@ -1339,7 +1343,7 @@ class UserTerminal {
 		dock.lock();
 		dock.showSwitcher();
 		fs.disconnect();
-		//fs = null;
+		fs = null;
 //		net.curNode = null;
 		net.updateVisibility();
 		net.unlock();
@@ -2866,6 +2870,11 @@ class UserTerminal {
 	}
 
 	function onDeath() {
+		if ( fl_dead )
+			return;
+		fl_dead = true;
+		for (a in Lambda.array(apps))
+			a.stop();
 		disconnectFS(true);
 		Progress.cancel();
 		popUp(Lang.get.YouAreDead);
@@ -2882,7 +2891,7 @@ class UserTerminal {
 				updateBars();
 			}
 		// mana overflow
-		if ( tick%4==0 && hasChipset(ChipsetsXml.get.smana) )
+		if ( tick%4==0 && hasChipset(ChipsetsXml.get.smana) && life>0 )
 			damage(1,false);
 		// alarme
 		if ( alarmTimer!=null && !fl_busted ) {
@@ -3045,8 +3054,10 @@ class UserTerminal {
 						if ( cpt>=1 ) {
 							mcc.field.text += "_________________\nACCESS GRANTED :-)\n";
 							startAnim( A_FadeRemove, a.mc, -2 );
-							TD.texts.set("user",fs.owner);
-							popUp(TD.texts.get("welcome"));
+							if ( fs!=null ) {
+								TD.texts.set("user",fs.owner);
+								popUp(TD.texts.get("welcome"));
+							}
 						}
 						mcc.field.text = stripLines(mcc.field.text,8);
 
@@ -3393,7 +3404,7 @@ class UserTerminal {
 			//caretIdx = flash.Selection.getCaretIndex();
 		}
 
-		if ( fs!=null && life==0 )
+		if ( !fl_dead && lifeTotal>0 && life<=0 )
 			onDeath();
 		if ( Tutorial.at(Tutorial.get.first, "mana") )
 			Tutorial.point( Manager.DM, manaBar._x+manaBar._width*0.5-50, manaBar._y, -30 );

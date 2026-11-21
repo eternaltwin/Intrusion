@@ -293,6 +293,8 @@ class AntivirMan {
 	}
 
 	public function onVirusRun(v:Virus) {
+		if ( term.fs==null )
+			return;
 		if ( v==VirusXml.get.cd || v==VirusXml.get.connec || v==VirusXml.get.extrac || v==VirusXml.get.target )
 			return;
 
@@ -321,6 +323,8 @@ class AntivirMan {
 	}
 
 	public function onDamageFile(dmg:Int,f:FSNode) {
+		if ( term.fs==null )
+			return;
 		// eject
 		if ( folderContains(term.fs.curFolder, AntivirusXml.get.eject) )
 			for (f in getAllByFolder(term.fs.curFolder,AntivirusXml.get.eject))

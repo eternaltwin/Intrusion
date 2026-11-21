@@ -1309,7 +1309,6 @@ class GNetwork {
 		}
 		if ( Tutorial.play(Tutorial.get.third, "unreachable") )
 			return;
-		term.fs = node.system;
 		term.vman.exec(data.VirusXml.get.connec, node);
 	}
 

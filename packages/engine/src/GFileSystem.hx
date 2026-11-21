@@ -1312,6 +1312,8 @@ class GFileSystem {
 
 
 	public function logEvent(str:String) {
+		if ( index==null || index.get("log")==null )
+			return;
 		if ( term.hasEffect(UE_Furtivity) )
 			return;
 		TD.texts.set("time", DateTools.format(Date.now(),"%H:%M"));
