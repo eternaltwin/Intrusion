@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { VirusDef } from '@intrusion/shared';
+import { formatVirusDesc, type VirusDef } from '@intrusion/shared';
 
 interface TooltipContextValue {
   showVirus: (virusId: string) => void;
@@ -81,7 +81,9 @@ export function VirusTooltipProvider({
                   <h1 className="name">
                     {activeVirus.name} <em>({activeVirus.id.toUpperCase()})</em>
                   </h1>
-                  <p className="desc">{activeVirus.desc}</p>
+                  <p className="desc" style={{ whiteSpace: 'pre-line' }}>
+                    {formatVirusDesc(activeVirus)}
+                  </p>
                   <div className="infos">
                     <p>Coût en Ressources : {activeVirus.cc}</p>
                     <p>Niveau requis : {activeVirus.level}</p>

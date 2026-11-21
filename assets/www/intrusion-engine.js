@@ -18863,6 +18863,7 @@ data_VirusXml.replaceVars = function(str,data) {
 	return str;
 };
 data_VirusXml.trim = function(str) {
+	str = StringTools.replace(str,"\r","");
 	str = StringTools.replace(str,"\n","");
 	while(str.charAt(0) == " " || str.charAt(0) == "\t") str = HxOverrides.substr(str,1,null);
 	while(str.charAt(str.length - 1) == " " || str.charAt(str.length - 1) == "\t") str = HxOverrides.substr(str,0,str.length - 1);
