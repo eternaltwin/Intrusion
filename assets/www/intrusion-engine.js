@@ -2601,6 +2601,7 @@ GFileSystem.prototype = {
 		this.cleanUp();
 		this.buildTree();
 		this.applyNameUnicity();
+		this.term.avman.scan(this);
 		this.fillIndexes();
 		this.rseed = Data.newRandSeed(this.seed);
 		this.term.avman.applyEffects(this);
@@ -5620,6 +5621,7 @@ GNetwork.prototype = {
 			var owner = _g.owner;
 			var parent = fn.system.getOneFolder("/user");
 			parent.name = owner;
+			var prevLen = fn.system.rawTree.length;
 			var _this = this.rseed;
 			if(((_this.seed = _this.seed * 16807 % 2147483647) & 1073741823) % 100 < 50) {
 				fn.system.forceFolder(null,parent,"/junk");
@@ -5630,6 +5632,21 @@ GNetwork.prototype = {
 			fn.system.forceFiles(null,parent,"file.video",((_this.seed = _this.seed * 16807 % 2147483647) & 1073741823) % 2);
 			var _this = this.rseed;
 			fn.system.forceFiles(null,parent,"file.music",((_this.seed = _this.seed * 16807 % 2147483647) & 1073741823) % 6 + 1);
+			this.term.avman.scan(fn.system);
+			var hasPaladin = this.term.avman.systemContains(data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"paladin"));
+			var maskAv = data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"mask");
+			var maskCount = parent.countEffect(EffectType.E_Masked) + (this.term.avman.folderContains(parent,maskAv) ? 1 : 0);
+			var _g1 = prevLen;
+			var _g2 = fn.system.rawTree.length;
+			while(_g1 < _g2) {
+				var nf = fn.system.rawTree[_g1++];
+				if(hasPaladin && !nf.fl_folder && nf.av == null) {
+					nf.addEffect(EffectType.E_Immune,1,1);
+				}
+				if(maskCount > 0) {
+					nf.addEffect(EffectType.E_Masked,maskCount);
+				}
+			}
 			break;
 		case 1:
 			var owner = _g.owner;

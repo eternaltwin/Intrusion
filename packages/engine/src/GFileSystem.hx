@@ -283,6 +283,7 @@ class GFileSystem {
 		cleanUp();
 		buildTree();
 		applyNameUnicity();
+		term.avman.scan(this);
 		fillIndexes();
 		initRand();
 

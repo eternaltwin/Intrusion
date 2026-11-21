@@ -1018,12 +1018,23 @@ class GNetwork {
 			case _MModerate(owner)			:
 				var parent = fn.system.getOneFolder("/user");
 				parent.name = owner;
+				var prevLen = fn.system.rawTree.length;
 				if ( rseed.random(100)<50 )
 					fn.system.forceFolder(parent,"/junk");
 				else
 					fn.system.forceFolder(parent,"/music");
 				fn.system.forceFiles(parent,"file.video",rseed.random(2));
 				fn.system.forceFiles(parent,"file.music",rseed.random(6)+1);
+				term.avman.scan(fn.system);
+				var hasPaladin = term.avman.systemContains(data.AntivirusXml.get.paladin);
+				var maskCount = parent.countEffect(E_Masked) + (term.avman.folderContains(parent, data.AntivirusXml.get.mask) ? 1 : 0);
+				for (i in prevLen...fn.system.rawTree.length) {
+					var nf = fn.system.rawTree[i];
+					if ( hasPaladin && !nf.fl_folder && nf.av==null )
+						nf.addEffect(E_Immune, 1, 1);
+					if ( maskCount>0 )
+						nf.addEffect(E_Masked, maskCount);
+				}
 			case _MDelete(owner,fname)	:
 				var f = fn.system.replaceFile(fname);
 				f.addEffect(E_Encoded,rseed.random(4)+6);
