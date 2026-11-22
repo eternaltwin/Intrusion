@@ -691,7 +691,7 @@ class GNetwork {
 	function dispatchCards(cards:List<String>) {
 		var pool = new Array();
 		for (n in nodes)
-			if ( n.type!=Empty && n.system.countFilesByExt("mail")>0 || n.system.countFilesByExt("doc")>0 )
+			if ( n.type!=Empty && (n.system.countFilesByExt("mail")>0 || n.system.countFilesByExt("doc")>0) )
 				pool.push(n);
 
 		if ( pool.length<=0 )
@@ -700,24 +700,29 @@ class GNetwork {
 		// r�partition
 		for (cc in cards) {
 			var node = pool[ rseed.random(pool.length) ];
-			var files = if( rseed.random(2)==0 ) node.system.getFilesByKey("file.mail") else node.system.getFilesByKey("file.doc");
+			var files = node.system.getFilesByKey("file.mail").concat(node.system.getFilesByKey("file.doc"));
 			files = Lambda.array(Lambda.filter(files, function(f) {
 				return !f.fl_target;
 			}));
+			if ( files.length==0 )
+				continue;
 			var f = files[ rseed.random(files.length) ];
 			if (f==null)
 				continue;
 			#if debugGen trace("creditCard : "+cc+" to "+node.system.name+" in "+f.name+" ("+f.getPathString()+")"); #end
 			TD.texts.set("card",cc);
-			if ( f.ext("mail") )
+			if ( f.ext("mail") ) {
 				f.forceMail(
 					TD.texts.get("sellerMail"),
 					TD.texts.get("creditCardMail"),
 					false
 				);
+				f.key = "card.mail";
+			}
 			else {
 				f.content = TD.texts.get("creditCardDoc");
 				f.name = TD.fsNames.get("creditCard.doc");
+				f.key = "card.doc";
 			}
 		}
 	}
@@ -1066,12 +1071,16 @@ class GNetwork {
 			case _MCleanTerminal(owner) :
 				fn.system.forceRootName(owner);
 			case _MCopyMail(owner,sender) :
-				var list = fn.system.getFilesByExt("mail");
+				var list = fn.system.getFilesByKey("file.mail");
+				if ( list.length==0 )
+					list = fn.system.getFilesByExt("mail");
 				var mail = list[rseed.random(list.length)];
 				mail.fl_target = true;
 				mail.forceMail( sender, TD.texts.get("dangerousMail") );
 			case _MFindMails(owner,n) :
-				var list = fn.system.getFilesByExt("mail");
+				var list = fn.system.getFilesByKey("file.mail");
+				if ( list.length<n )
+					list = fn.system.getFilesByExt("mail");
 				if ( list.length<n )
 					Manager.fatal("not enough file for mission _MFindMails");
 				for (i in 0...n) {
@@ -1146,14 +1155,17 @@ class GNetwork {
 				var source = list.splice(rseed.random(list.length),1)[0];
 				source.system.forceRootName(tf);
 				for (f in source.system.getFilesByKey("tvprog.data")) {
-					f.name = TD.names.get("hotProg");
+					var pname = TD.names.get("hotProg");
+					if ( !StringTools.endsWith(pname.toLowerCase(), ".data") )
+						pname += ".data";
+					f.name = pname;
 					f.setOwner("mission");
 				}
 			case _MTVTheft(tv,program) :
 				for (ntv in getNodes(Tv))
-					ntv.system.name = tv+" "+TD.texts.get("roman")+"-"+(rseed.random(9)+1);
+					ntv.system.forceRootName(tv+" "+TD.texts.get("roman")+"-"+(rseed.random(9)+1));
 				var f = fn.system.getOneFile("tvprog.data");
-				f.name = program;
+				f.name = StringTools.endsWith(program.toLowerCase(), ".data") ? program : program + ".data";
 				f.fl_target = true;
 				f.addEffect(E_Encoded,rseed.random(4));
 			case _MTVCrash(tv) :

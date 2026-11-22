@@ -1,10 +1,11 @@
-import { useEffect, useState, type DragEvent, type FormEvent } from 'react';
-import type { ChipsetDef, PlayerDto } from '@intrusion/shared';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
+import type { ChipsetDef, PlayerDto, VirusDef } from '@intrusion/shared';
 import { api } from '../api/client';
 import { useVirusTooltip } from './TooltipContext';
 
 export function DecksView({
   player,
+  viruses = [],
   chipsets,
   addDeckCost,
   addSlotCost,
@@ -12,6 +13,7 @@ export function DecksView({
   onNotify,
 }: {
   player: PlayerDto;
+  viruses?: VirusDef[];
   chipsets: ChipsetDef[];
   addDeckCost: number[];
   addSlotCost: number[];
@@ -33,12 +35,27 @@ export function DecksView({
   const [dragSource, setDragSource] = useState<'deck' | 'pool' | null>(null);
   const [dragTargetZone, setDragTargetZone] = useState<'deck' | 'pool' | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
+  const saveReqIdRef = useRef(0);
+  const pendingSavesRef = useRef(0);
+
+  const virusMap = useMemo(() => {
+    const m = new Map<string, VirusDef>();
+    for (const v of viruses) m.set(v.id, v);
+    return m;
+  }, [viruses]);
 
   useEffect(() => {
     if (!activeDeck) return;
-    setDeckViruses(activeDeck.content);
     setDeckName(activeDeck.name);
-  }, [activeDeck?.id, activeDeck?.capacity, player.decks]);
+    setDeckViruses(activeDeck.content);
+  }, [activeDeck?.id]);
+
+  useEffect(() => {
+    if (!activeDeck) return;
+    if (pendingSavesRef.current === 0) {
+      setDeckViruses(activeDeck.content);
+    }
+  }, [activeDeck?.content]);
 
   if (!activeDeck) return null;
 
@@ -56,6 +73,9 @@ export function DecksView({
   const seenCounts = new Map<string, number>();
   const poolViruses: Array<{ vid: string; copyKey: string }> = [];
   for (const vid of player.viruses) {
+    const vDef = virusMap.get(vid);
+    if (vDef && (vDef.cat === 'hidden' || vDef.cat === 'specials')) continue;
+    if (viruses.length > 0 && !vDef) continue;
     const seen = (seenCounts.get(vid) ?? 0) + 1;
     seenCounts.set(vid, seen);
     const used = usedCounts.get(vid) ?? 0;
@@ -72,16 +92,27 @@ export function DecksView({
     nextFav?: boolean,
     silent = true
   ) => {
+    const reqId = ++saveReqIdRef.current;
+    pendingSavesRef.current++;
+    const targetDeckId = activeDeck.id;
+    const fallbackName = activeDeck.name;
     try {
-      const res = await api.saveDeck(activeDeck.id, {
-        name: nextName.trim() || activeDeck.name,
+      const res = await api.saveDeck(targetDeckId, {
+        name: nextName.trim() || fallbackName,
         content: nextContent,
         isFavorite: nextFav,
       });
-      onPlayerUpdate(res.player);
-      if (!silent) onNotify('Deck sauvegardé.');
+      if (reqId === saveReqIdRef.current) {
+        onPlayerUpdate(res.player);
+        if (!silent) onNotify('Deck sauvegardé.');
+      }
     } catch (err: any) {
-      onNotify(err.message || 'Erreur de sauvegarde du deck.', true);
+      if (reqId === saveReqIdRef.current) {
+        setDeckViruses(activeDeck.content);
+        onNotify(err.message || 'Erreur de sauvegarde du deck.', true);
+      }
+    } finally {
+      pendingSavesRef.current = Math.max(0, pendingSavesRef.current - 1);
     }
   };
 

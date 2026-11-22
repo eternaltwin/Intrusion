@@ -69,10 +69,14 @@ class Dock {
 		return false;
 	}
 
+	public function canSwitchDeck() {
+		return decks.length > 1;
+	}
+
 	public function switchDeck(?n:Int) {
 		if ( n==currentDeck )
 			return;
-		if ( !swButton._visible )
+		if ( swButton==null || !swButton._visible )
 			return;
 		if ( n==null )
 			n = currentDeck+1;
@@ -80,6 +84,7 @@ class Dock {
 			n = 0;
 		detach();
 		currentDeck = n;
+		term.clearEffect(UE_SwitchDeck);
 		term.playSound("absorb_02");
 		term.log( Lang.fmt.Log_ChangedDeck({_name:decks[currentDeck].name}) );
 		attach();
@@ -180,11 +185,15 @@ class Dock {
 				continue;
 
 			var targetMc = ds.mc;
+			var slotVirus = ds.virus;
 			var url = Manager.PARAMS._iconsUrl+ds.virus.id+".png?v="+Manager.PARAMS._iconsVer;
 			var promise = ((untyped Texture).fromURL(url))
 				.then((texture) -> {
-					if ( targetMc != null && targetMc._name != null && targetMc.smc != null )
+					if ( targetMc != null && targetMc._name != null && targetMc.smc != null ) {
 						targetMc.smc.attachBitmap(texture, 1);
+						if ( slotVirus.uses == 0 )
+							targetMc.smc._alpha = 0;
+					}
 				});
 		}
 	}
@@ -207,8 +216,9 @@ class Dock {
 //			d+=Lang.replaceVars(v.desc, {_p:v.power, _s:v.size, _cc:v.cc, _pc:v.power*term.countEffect(UE_Combo)});
 			var d = VirusXml.getDesc(v, term.countEffect(UE_Combo));
 			var i = "";
-			if ( v.cc>0 )
-				i+=Lang.fmt.ManaCost({_n:v.cc}) + "\n";
+			var cc = term.vman.getManaCost(v);
+			if ( cc>0 )
+				i+=Lang.fmt.ManaCost({_n:cc}) + "\n";
 			if ( v.uses!=null )
 				i+=Lang.fmt.ChargeRemaining({_n:v.uses}) + "\n";
 			if ( i.length>0 )
@@ -235,7 +245,7 @@ class Dock {
 	}
 
 	public function show() {
-		if ( term.fs==null )
+		if ( term.fs==null || term.hasEffect(UE_SwitchDeck) )
 			showSwitcher();
 		root._visible = true;
 	}
@@ -355,6 +365,10 @@ class Dock {
 
 		if ( Progress.isRunning() )
 			return;
+		if ( ds.virus.uses==0 ) {
+			term.popUp(Lang.get.NoCharge);
+			return;
+		}
 		if ( ds.virus.target=="_none" ) {
 			term.vman.exec(ds.virus);
 			onActivate(ds);

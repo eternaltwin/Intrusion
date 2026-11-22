@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import type { PlayerDto, ValuableDef } from '@intrusion/shared';
 import { api, type StorageResponse } from '../api/client';
-import { SafeHtml } from '../components/SafeHtml';
+import { parseCineEmbed, SafeHtml } from '../components/SafeHtml';
 
 type StorageTab = 'packs' | 'misc' | 'cards';
 
@@ -40,6 +40,7 @@ export function StorageView({
 
   const handleSellPack = async (e: FormEvent, valuableId: string, maxSell: number) => {
     e.preventDefault();
+    if (maxSell <= 0) return;
     const qty = Math.max(1, Math.min(maxSell, sellCounts[valuableId] ?? maxSell));
     if (qty <= 0) return;
     try {
@@ -48,6 +49,17 @@ export function StorageView({
       setStorage((prev) =>
         prev ? { ...prev, remainingQuota: res.remainingQuota } : prev
       );
+      const nextOwned = res.player.valuables[valuableId] ?? 0;
+      const nextMax = Math.min(nextOwned, res.remainingQuota);
+      setSellCounts((prev) => {
+        const next = { ...prev };
+        if (nextMax <= 0) {
+          delete next[valuableId];
+        } else {
+          next[valuableId] = Math.max(1, Math.min(nextMax, prev[valuableId] ?? nextMax));
+        }
+        return next;
+      });
       onNotify(`Vendu : ${res.soldQty} pack(s) pour +${res.totalEarned} crédits !`);
     } catch (err: any) {
       onNotify(err.message, true);
@@ -149,7 +161,8 @@ export function StorageView({
                   const mult = storage?.marketMultipliers[val.id] ?? 1;
                   const unitPrice = Math.round(val.price * mult);
                   const maxSell = Math.min(count, storage?.remainingQuota ?? 20);
-                  const currentInput = sellCounts[val.id] ?? maxSell;
+                  const currentInput =
+                    maxSell > 0 ? Math.max(1, Math.min(maxSell, sellCounts[val.id] ?? maxSell)) : 1;
 
                   return (
                     <tr
@@ -249,12 +262,34 @@ export function StorageView({
                 </table>
 
                 <div className="viewer">
-                  {selectedFile && (
-                    <div className="sidePanel">
-                      <h1>{selectedFile.name}</h1>
-                      <SafeHtml html={selectedFile.content} />
-                    </div>
-                  )}
+                  {selectedFile && (() => {
+                    const cine = parseCineEmbed(selectedFile.embed);
+                    return (
+                      <div className="sidePanel">
+                        <h1>{selectedFile.name}</h1>
+                        {cine && (
+                          <div className="pic" style={{ marginBottom: 8 }}>
+                            {cine.kind === 'image' && cine.href ? (
+                              <a href={cine.href} target="_blank" rel="noreferrer" className="pic">
+                                <img
+                                  src={cine.src}
+                                  alt={selectedFile.name}
+                                  style={{ maxWidth: '100%', border: '1px solid #71754c' }}
+                                />
+                              </a>
+                            ) : (
+                              <img
+                                src={cine.src}
+                                alt={selectedFile.name}
+                                style={{ maxWidth: '100%', border: '1px solid #71754c' }}
+                              />
+                            )}
+                          </div>
+                        )}
+                        <SafeHtml html={selectedFile.content} />
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="clear" />
               </>

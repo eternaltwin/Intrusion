@@ -130,7 +130,7 @@ export const api = {
   startChallenge: () =>
     requestJson<{ init: MissionInitParams }>('/api/challenges/today/start', { method: 'POST' }),
   endChallenge: (summary: MissionEndSummary) =>
-    requestJson<{ isRanked: boolean; rewardMoney: number; score: number; player: PlayerDto }>(
+    requestJson<{ isRanked: boolean; rewardMoney: number; score: number; scoutRun?: boolean; player: PlayerDto }>(
       '/api/challenges/today/end',
       {
         method: 'POST',

@@ -17,13 +17,19 @@ export function useVirusTooltip() {
 
 export function VirusTooltipProvider({
   viruses,
+  resetKey,
   children,
 }: {
   viruses: VirusDef[];
+  resetKey?: string;
   children: ReactNode;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setActiveId(null);
+  }, [resetKey]);
 
   const virusMap = useMemo(() => {
     const m = new Map<string, VirusDef>();

@@ -17,11 +17,34 @@ class VirusMan {
 	var term		: UserTerminal;
 	var virus		: Virus;
 	public var endTurn		: List<Void->Void>;
+	public var burstUsed	: Bool;
 
 
 	public function new(t:UserTerminal) {
 		term = t;
 		endTurn = new List();
+		burstUsed = false;
+	}
+
+	public function getManaCost(v:Virus) : Int {
+		var cc = v.cc;
+		if ( v.cat=="damage" && term.hasChipset(data.ChipsetsXml.get.brute) )
+			cc = Math.round(BRUTE_CC*cc);
+		if ( term.hasChipset(data.ChipsetsXml.get.thief) ) {
+			if ( v.id=="fmove1" )
+				cc -= Math.floor(v.cc*0.3);
+			else if ( v.id=="fmove2" )
+				cc -= Math.floor(v.cc*0.4);
+			else if ( v.id=="invis" )
+				cc -= Math.floor(v.cc*0.6);
+		}
+		if ( term.hasChipset(data.ChipsetsXml.get.deciph) ) {
+			if ( v.id=="unmask" || v.id=="dec1" )
+				cc -= Math.floor(v.cc*0.5);
+			else if ( v.id=="dec2" || v.id=="dec3" )
+				cc -= Math.floor(v.cc*0.6);
+		}
+		return cc < 0 ? 0 : cc;
 	}
 
 	public function exec(v:Virus, ?f:F, ?n:N) {
@@ -40,14 +63,16 @@ class VirusMan {
 			}
 			if ( v.uses==0 )
 				throw Lang.get.NoCharge;
-			var cc = v.cc;
-			if ( v.cat=="damage" && term.hasChipset(data.ChipsetsXml.get.brute) )
-				cc = Math.round(BRUTE_CC*cc);
+			var cc = getManaCost(v);
 			if ( term.mana<cc )
 				throw Lang.get.NotEnoughMana;
+			if ( virus.target!="_none" && f==null && n==null )
+				throw Lang.get.InvalidTarget;
 			if ( term.fs!=null && virus.target!="_net" ) {
-				if ( virus==VirusXml.get.cd )
-					term.fs.logEvent(Lang.fmt.TraceCD({_name:f.name}));
+				if ( virus==VirusXml.get.cd ) {
+					if ( f!=null )
+						term.fs.logEvent(Lang.fmt.TraceCD({_name:f.name}));
+				}
 				else
 					term.fs.logEvent(Lang.fmt.TraceVirus({_name:virus.name, _id:virus.id}));
 			}
@@ -88,21 +113,23 @@ class VirusMan {
 			throw null;
 
 		// nettoyage string
-		str = Data.trimSpaces(str);
 		str = StringTools.replace(str, "\t", " ");
+		str = StringTools.replace(str, "\u00A0", " ");
+		str = Data.trimSpaces(str);
 		while ( str.length>0 && str.indexOf("  ") >= 0 )
 			str = StringTools.replace(str, "  ", " ");
 		if ( str.length==0 )
 			throw null;
 
-		// aliases
+		// aliases (first word only)
 		var words = str.split(" ");
-		for (from in term.aliases.keys())
-			for (i in 0...words.length) {
-				if ( words[i].toLowerCase()==from )
-					words[i] = term.aliases.get(from);
+		var aliasVal = term.aliases.get(words[0].toLowerCase());
+		if ( aliasVal!=null ) {
+			words[0] = aliasVal;
+			str = words.join(" ");
+			while ( str.indexOf("  ") >= 0 )
+				str = StringTools.replace(str, "  ", " ");
 		}
-		str = words.join(" ");
 
 		// r�cup�ration du virus
 		var v : Virus = null;
@@ -145,7 +172,8 @@ class VirusMan {
 			}
 
 		// lancement
-		term.fs.focus(f.mcIndex);
+		if ( f!=null )
+			term.fs.focus(f.mcIndex);
 		exec(v, f);
 	}
 
@@ -217,10 +245,7 @@ class VirusMan {
 					me.term.log( Lang.fmt.RemainingFurtivity({_n:me.term.countEffect(UE_Furtivity)}) );
 				});
 				
-			if ( me.virus.cat=="damage" && me.term.hasChipset(data.ChipsetsXml.get.brute) )
-				me.term.loseMana( Math.round(me.virus.cc*BRUTE_CC) );
-			else
-				me.term.loseMana( me.virus.cc );
+			me.term.loseMana( me.getManaCost(me.virus) );
 		}, virus.name, if(ct>=3) BA_Slow else BA_Normal );
 		term.detachBubble();
 	}
@@ -253,6 +278,7 @@ class VirusMan {
 			for (fn in tmp)
 				fn();
 		}
+		burstUsed = false;
 	}
 
 	public function onTick(t) {
@@ -262,7 +288,7 @@ class VirusMan {
 			for (f in term.fs.rawTree)
 				if ( f.hasEffect(E_Dot) ) {
 					hit = true;
-					f.damage( f.countEffect(E_Dot) );
+					f.damage( f.countEffect(E_Dot), false );
 					f.removeEffect(E_DotLength);
 					if ( !f.hasEffect(E_DotLength) )
 						f.clearEffect(E_Dot);
@@ -355,6 +381,14 @@ class VirusMan {
 
 		var len = 2.0;
 		switch(term.mdata._type) {
+			case _MCompromiseMail(owner) :
+				var curNode = term.net.getNodeBySys(term.fs);
+				if ( curNode==null || !curNode.fl_target || term.fs.curFolder.key!="/mail" )
+					throw Lang.get.NotThisFolder;
+			case _MArrest(name) :
+				var curNode = term.net.getNodeBySys(term.fs);
+				if ( curNode==null || !curNode.fl_target || term.fs.curFolder.key!="/subcrimedata" )
+					throw Lang.get.NotThisFolder;
 			case _MFalsifyCam(sector) :
 				var n = term.fs.countFilesByExt(term.fs.curFolder,"video");
 				if ( n<=0 )
@@ -366,6 +400,9 @@ class VirusMan {
 					throw Lang.fmt.NeedInFolder({_ext:ext});
 				len = n*0.50;
 			case _MCorruptDisplay(place) :
+				var curNode = term.net.getNodeBySys(term.fs);
+				if ( curNode==null || !curNode.fl_target || term.fs.curFolder.key!="/playlist" )
+					throw Lang.get.NotThisFolder;
 				len = 4;
 			case _MGameHack(g,s,c) :
 				if ( !f.ext("game") )
@@ -375,14 +412,20 @@ class VirusMan {
 			case _MInfectNet(v) :
 				if ( !f.ext("control") )
 					throw Lang.fmt.NeedExt({_ext:"CONTROL"});
+				if ( f.hasEffect(E_Mission) )
+					throw Lang.get.AlreadyDone;
 			case _MSpy(name) :
-				if ( !f.ext("coeur") )
-					throw Lang.fmt.NeedExt({_ext:"COEUR"});
+				if ( f.key!="file.core" )
+					throw Lang.fmt.NeedExt({_ext:Manager.LANG=="en" ? "CORE" : "COEUR"});
 				if ( f.hasEffect(E_CShield) )
 					throw Lang.get.CoreProtected;
+				if ( f.hasEffect(E_Mission) )
+					throw Lang.get.AlreadyDone;
 			case _MSpyCam :
-				if ( !f.ext("coeur") )
-					throw Lang.fmt.NeedExt({_ext:"COEUR"});
+				if ( f.key!="file.core" )
+					throw Lang.fmt.NeedExt({_ext:Manager.LANG=="en" ? "CORE" : "COEUR"});
+				if ( f.hasEffect(E_Mission) )
+					throw Lang.get.AlreadyDone;
 			case _MGetVirus(vname,ext,n) :
 				if ( !f.hasEffect(E_Target) )
 					throw Lang.fmt.NotInfected({_vname:vname});
@@ -422,7 +465,9 @@ class VirusMan {
 					}
 				case _MDeliverFile(pk,pn,file,to) :
 					f = t.fs.uploadFile("secret.doc");
+					f.name = file;
 					f.addEffect(E_Encoded,6+Std.random(4));
+					f.redraw();
 				case _MOverwriteFiles(owner,ext) :
 					for (f in t.fs.getFilesByExt(t.fs.curFolder,ext))
 						if ( !f.hasEffect(E_Mission) ) {
@@ -432,20 +477,13 @@ class VirusMan {
 				case _MGetVirus(vname,ext,total) :
 					f.removeEffect(E_Target);
 					t.missionCpt++;
-//					var cpt = 0;
-//					var list = t.fs.getFilesByExt(ext,true);
-//					if ( total>list.length )
-//						total = list.length;
-//					for (f in list)
-//						if ( !f.hasEffect(E_Target) )
-//							cpt++;
 					var pct = Math.floor(Math.min(t.missionCpt/total,1)*100);
 					t.log( Lang.fmt.ExtractedVirus({_pct:pct,_vname:vname}) );
 					f = null;
 				case _MGameHack(g,s,c) :
 					if ( f.key=="inv.game" )
 						f.changeContent( TD.texts.get("bigInventory") );
-					if ( f.key=="money.game" )
+					if ( f.key=="money.game" || f.key=="gold.game" )
 						f.changeContent( TD.texts.get("lotsGold") );
 					if ( f.key=="stats.game" )
 						f.changeContent( TD.texts.get("bigStats") );
@@ -578,20 +616,24 @@ class VirusMan {
 	}
 
 	function _reboo1(f:F) {
-		//if ( term.avman.systemContains(AntivirusXml.get.sysdef) )
-			//throw Lang.get.RebootBlocked;
-		//start(getCT(f), function(t,v) {
-			//t.fs.reboot();
-		//});
 		if ( term.avman.systemContains(AntivirusXml.get.sysdef) )
 			throw Lang.get.RebootBlocked;
 		start(getCT(f), function(t,v) {
-			for (lk in t.avman.fast.keys()) {
-				var list = t.avman.fast.get(lk);
-				for (file in list)
-					file.addEffect(E_SkipAction, 3,3);
-			}
-			t.fs.reboot();
+			var sys = t.fs;
+			var avFiles = new Array<FSNode>();
+			if ( sys!=null )
+				for (file in sys.rawTree)
+					if ( !file.fl_deleted && file.av!=null && !file.hasEffect(E_Disabled) )
+						avFiles.push(file);
+			t.avman.onVirusRun(v);
+			if ( sys!=null )
+				sys.reboot();
+			for (file in avFiles)
+				if ( !file.fl_deleted && file.av!=null && !file.hasEffect(E_Disabled) ) {
+					var cur = file.countEffect(E_SkipAction);
+					if ( cur<3 )
+						file.addEffect(E_SkipAction, 3-cur, 3);
+				}
 		});
 	}
 
@@ -599,14 +641,22 @@ class VirusMan {
 		if ( term.avman.systemContains(AntivirusXml.get.sysdef) )
 			throw Lang.get.RebootBlocked;
 		start(getCT(f), function(t,v) {
-			for (lk in t.avman.fast.keys()) {
-				var list = t.avman.fast.get(lk);
-				for (file in list) {
-					file.addEffect(E_SkipAction, 3,3);
-					file.addEffect(E_Exploit, 1,1);
+			var sys = t.fs;
+			var avFiles = new Array<FSNode>();
+			if ( sys!=null )
+				for (file in sys.rawTree)
+					if ( !file.fl_deleted && file.av!=null && !file.hasEffect(E_Disabled) )
+						avFiles.push(file);
+			t.avman.onVirusRun(v);
+			if ( sys!=null )
+				sys.reboot();
+			for (file in avFiles)
+				if ( !file.fl_deleted && file.av!=null && !file.hasEffect(E_Disabled) ) {
+					var cur = file.countEffect(E_SkipAction);
+					if ( cur<3 )
+						file.addEffect(E_SkipAction, 3-cur, 3);
+					file.addEffect(E_Exploit, 1, 1);
 				}
-			}
-			t.fs.reboot();
 		});
 	}
 
@@ -774,8 +824,6 @@ class VirusMan {
 	function _unmask(f:F) {
 		if ( !f.hasEffect(E_Masked) ) throw Lang.get.Useless;
 		start(getCT(f)*0.3, function(t,v) {
-			if ( t.hasChipset(ChipsetsXml.get.deciph) )
-				t.gainMana( Math.floor(v.cc*0.5), true );
 			while (f.hasEffect(E_Masked))
 				f.removeEffect(E_Masked);
 			var a = t.startAnim(A_Decrypt, f.mc, f.name);
@@ -841,10 +889,6 @@ class VirusMan {
 
 	function _panic1(f:F) {
 		start(getCT(f)*0.5, function(t,v) {
-			if ( t.hasEffect(UE_MoveFurtivity) ) {
-				t.removeEffect(UE_MoveFurtivity);
-				t.log( Lang.fmt.RemainingMoveFurtivity({_n:t.countEffect(UE_MoveFurtivity)}) );
-			}
 			t.disconnectFS();
 		});
 	}
@@ -892,10 +936,6 @@ class VirusMan {
 			throw Lang.get.NotInRoot;
 		start(getCT(f)*0.5, function(t,v) {
 			t.fs.openFolder(t.fs.curFolder.parent, true);
-			if ( t.hasEffect(UE_MoveFurtivity) ) {
-				t.removeEffect(UE_MoveFurtivity);
-				t.log( Lang.fmt.RemainingMoveFurtivity({_n:t.countEffect(UE_MoveFurtivity)}) );
-			}
 		});
 	}
 
@@ -943,24 +983,18 @@ class VirusMan {
 
 	function _fmove1(f:F) {
 		start(getCT(f)*1.5, function(t,v) {
-			if ( t.hasChipset(ChipsetsXml.get.thief) )
-				t.gainMana( Math.floor(v.cc*0.3), true );
 			t.addEffect(v, UE_MoveFurtivity, v.power);
 		});
 	}
 
 	function _fmove2(f:F) {
 		start(getCT(f)*1.5, function(t,v) {
-			if ( t.hasChipset(ChipsetsXml.get.thief) )
-				t.gainMana( Math.floor(v.cc*0.4), true );
 			t.addEffect(v, UE_MoveFurtivity, v.power);
 		});
 	}
 
 	function _invis(f:F) {
 		start(getCT(f)*1.5, function(t,v) {
-			if ( t.hasChipset(ChipsetsXml.get.thief) )
-				t.gainMana( Math.floor(v.cc*0.6), true );
 			t.addEffect(v, UE_Furtivity, v.power+1);
 		});
 	}
@@ -1090,8 +1124,6 @@ class VirusMan {
 		var n = f.countEffect(E_Encoded);
 		if ( n>virus.power )throw Lang.fmt.EncodingTooStrong({_n:f.countEffect(E_Encoded)});
 		start(getCT(f)*(n+1), function(t,v) {
-			if ( t.hasChipset(ChipsetsXml.get.deciph) )
-				t.gainMana( Math.floor(v.cc*0.5), true );
 			f.decode();
 		});
 	}
@@ -1101,8 +1133,6 @@ class VirusMan {
 		var n = f.countEffect(E_Encoded);
 		if ( n>virus.power )throw Lang.fmt.EncodingTooStrong({_n:f.countEffect(E_Encoded)});
 		start(getCT(f)*(n+1), function(t,v) {
-			if ( t.hasChipset(ChipsetsXml.get.deciph) )
-				t.gainMana( Math.floor(v.cc*0.6), true );
 			f.decode();
 		});
 	}
@@ -1112,8 +1142,6 @@ class VirusMan {
 		var n = f.countEffect(E_Encoded);
 		if ( n>virus.power )throw Lang.fmt.EncodingTooStrong({_n:f.countEffect(E_Encoded)});
 		start(getCT(f)*(n*1.3), function(t,v) {
-			if ( t.hasChipset(ChipsetsXml.get.deciph) )
-				t.gainMana( Math.floor(v.cc*0.6), true );
 			f.decode();
 		});
 	}
@@ -1199,7 +1227,7 @@ class VirusMan {
 		if ( f.hasEffect(E_Masked) ) throw Lang.get.UnknownType;
 		if ( f.av==null ) throw Lang.get.NeedAV;
 		start(getCT(f)*0.5, function(t,v) {
-			f.addEffect(E_SkipAction, t.countEffect(UE_Combo));
+			f.addEffect(E_SkipAction, v.power * t.countEffect(UE_Combo));
 			t.loseCombo();
 		});
 	}
@@ -1237,13 +1265,19 @@ class VirusMan {
 	}
 
 	function _dckswi(f:F) {
+		if ( !term.dock.canSwitchDeck() || term.hasEffect(UE_SwitchDeck) )
+			throw Lang.get.Useless;
 		start(getCT(f)*1, function(t,v) {
+			t.addEffect(v, UE_SwitchDeck, 1, 1);
 			t.dock.showSwitcher();
 		});
 	}
 
 	function _dcksw2(f:F) {
+		if ( !term.dock.canSwitchDeck() || term.hasEffect(UE_SwitchDeck) )
+			throw Lang.get.Useless;
 		start(getCT(f)*1, function(t,v) {
+			t.addEffect(v, UE_SwitchDeck, 1, 1);
 			t.dock.showSwitcher();
 		});
 	}

@@ -126,9 +126,9 @@ class AntivirMan {
 		file.av = null;
 
 		if ( old==AntivirusXml.get.mask ) {
-			if ( !parentContains(term.fs.curFolder,old) )
+			if ( term.fs.curFolder!=null && !parentContains(term.fs.curFolder,old) )
 				term.fs.unmaskFolder();
-			term.fs.recursiveRemoveEffect(term.fs.curFolder, E_Masked);
+			term.fs.recursiveRemoveEffect(file.parent, E_Masked);
 		}
 
 		var fl_last = !systemContains(old);
@@ -326,24 +326,26 @@ class AntivirMan {
 		if ( term.fs==null )
 			return;
 		// eject
-		if ( folderContains(term.fs.curFolder, AntivirusXml.get.eject) )
-			for (f in getAllByFolder(term.fs.curFolder,AntivirusXml.get.eject))
-				endTurn.add(onEject.bind(f));
+		if ( f!=null && f.parent==term.fs.curFolder && folderContains(term.fs.curFolder, AntivirusXml.get.eject) )
+			for (fe in getAllByFolder(term.fs.curFolder,AntivirusXml.get.eject))
+				endTurn.add(onEject.bind(fe));
 		// tique
 		queueAttackAll(AntivirusXml.get.tique);
 	}
 
 	function onExplodeBomb(f:FSNode) {
-		if ( f.life<=0 )
+		if ( f==null || f.fl_deleted || f.life<=0 || f.av==null )
 			return;
 		if ( f.hasEffect(E_SkipAction) ) {
 			f.removeEffect(E_SkipAction);
+			f.clearEffect(E_Counter);
 			term.log( Lang.fmt.AntivirusBlocked({_name:f.name, _av:f.av.key.toUpperCase()}) );
 			return;
 		}
 		var bomb = AntivirusXml.get.bomb;
 		var dmg = f.getAttackModified(bomb);
 		if ( dmg>0 ) {
+			endTurn.add( onAttackSuccessful.bind(f) );
 			logDamage(f.name, f.av, dmg);
 			term.damage(dmg);
 		}
@@ -358,7 +360,7 @@ class AntivirMan {
 
 
 	function onEject(f:FSNode) {
-		if ( f.life<=0 )
+		if ( term.fs==null || f==null || f.fl_deleted || f.life<=0 || f.av==null )
 			return;
 
 		if ( f.hasEffect(E_SkipAction) ) {
@@ -367,11 +369,18 @@ class AntivirMan {
 			return;
 		}
 
+		if ( term.hasEffect(UE_Furtivity) ) {
+			logDodge(f);
+			return;
+		}
+
 		term.log( Lang.fmt.Ejected({_name:f.name, _av:f.av.key.toUpperCase()}) );
 		term.disconnectFS();
 	}
 
 	function onAttackSuccessful(f:FSNode) {
+		if ( f==null || f.fl_deleted || f.life<=0 || f.av==null )
+			return;
 		if ( f.hasEffect(E_Revenge) ) {
 			f.removeEffect(E_Revenge);
 			var p = VirusXml.get.reveng.power;

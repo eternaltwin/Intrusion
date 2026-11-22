@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { PlayerDto } from '@intrusion/shared';
+import { useVirusTooltip } from './TooltipContext';
 
 export type ClassicRoute =
   | 'missions'
@@ -26,6 +27,12 @@ export function ClassicLayout({
   onLogout: () => void;
   children: ReactNode;
 }) {
+  const { hideVirus } = useVirusTooltip();
+  const go = (r: ClassicRoute) => {
+    hideVirus();
+    onNavigate(r);
+  };
+
   return (
     <>
       <div className="mxtophead" id="mxtop">
@@ -34,8 +41,15 @@ export function ClassicLayout({
             {player && (
               <div className="opBar">
                 Connecté : <strong>{player.username}</strong> (BIOS v{player.biosLevel})
-                <a onClick={() => onNavigate('options')}>Options</a>
-                <a onClick={onLogout}>Déconnexion</a>
+                <a onClick={() => go('options')}>Options</a>
+                <a
+                  onClick={() => {
+                    hideVirus();
+                    onLogout();
+                  }}
+                >
+                  Déconnexion
+                </a>
               </div>
             )}
           </div>
@@ -46,7 +60,7 @@ export function ClassicLayout({
             className="logo"
             onClick={(e) => {
               e.preventDefault();
-              onNavigate('missions');
+              go('missions');
             }}
             href="#missions"
           >
@@ -70,49 +84,49 @@ export function ClassicLayout({
 
                 <a
                   className={route === 'missions' ? 'active' : ''}
-                  onClick={() => onNavigate('missions')}
+                  onClick={() => go('missions')}
                 >
                   <img src="/img/icons/disk.png" alt="" /> Missions
                 </a>
                 <a
                   className={route === 'challenge' ? 'active' : ''}
-                  onClick={() => onNavigate('challenge')}
+                  onClick={() => go('challenge')}
                 >
                   <img src="/img/icons/admin.png" alt="" /> Challenge
                 </a>
                 <a
                   className={route === 'decks' ? 'active' : ''}
-                  onClick={() => onNavigate('decks')}
+                  onClick={() => go('decks')}
                 >
                   <img src="/img/icons/deck.png" alt="" /> Decks
                 </a>
                 <a
                   className={route === 'store' ? 'active' : ''}
-                  onClick={() => onNavigate('store')}
+                  onClick={() => go('store')}
                 >
                   <img src="/img/icons/uc.png" alt="" /> Hackstore
                 </a>
                 <a
                   className={route === 'storage' ? 'active' : ''}
-                  onClick={() => onNavigate('storage')}
+                  onClick={() => go('storage')}
                 >
                   <img src="/img/icons/storage.png" alt="" /> Disque Dur
                 </a>
                 <a
                   className={route === 'profile' ? 'active' : ''}
-                  onClick={() => onNavigate('profile')}
+                  onClick={() => go('profile')}
                 >
                   <img src="/img/icons/forum.png" alt="" /> Profil
                 </a>
                 <a
                   className={route === 'guide' ? 'active' : ''}
-                  onClick={() => onNavigate('guide')}
+                  onClick={() => go('guide')}
                 >
                   <img src="/img/icons/help.png" alt="" /> Aide
                 </a>
                 <a
                   className={route === 'options' ? 'active' : ''}
-                  onClick={() => onNavigate('options')}
+                  onClick={() => go('options')}
                 >
                   <img src="/img/icons/chip.png" alt="" /> Options
                 </a>

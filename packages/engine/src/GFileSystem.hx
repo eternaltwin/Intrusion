@@ -278,7 +278,7 @@ class GFileSystem {
 		var genc = rseed.random(3);
 		encodeFiles("inv.game", genc);
 		encodeFiles("stats.game", genc);
-		encodeFiles("gold.game", genc);
+		encodeFiles("money.game", genc);
 
 		cleanUp();
 		buildTree();
@@ -559,8 +559,10 @@ class GFileSystem {
 
 	function hidePasswordInFile(pf:FSNode) {
 		TD.texts.set("pass",mpass);
-		if ( pf.ext("mail") )
+		if ( pf.ext("mail") ) {
 			pf.forceMail( TD.texts.get("SysAdmin"), TD.texts.get("passwordMail") );
+			pf.key = "pass.mail";
+		}
 		else {
 			var o = if(owner!=null) owner else TD.texts.get("sysadmin");
 			TD.texts.set("user",o);
@@ -723,6 +725,16 @@ class GFileSystem {
 			f.sortIndex = 2000 + Data.UNIQ++;
 		else
 			f.sortIndex = rep.sortIndex;
+		if ( !f.fl_folder && f.av==null && term.avman.systemContains(AntivirusXml.get.paladin) )
+			f.addEffect(E_Immune, 1, 1);
+		var maskCount = 0;
+		var p = parent;
+		while ( p!=null ) {
+			maskCount += term.avman.getAllByFolder(p, AntivirusXml.get.mask).length;
+			p = p.parent;
+		}
+		if ( maskCount>0 )
+			f.addEffect(E_Masked, maskCount);
 		buildTree();
 		attachFolder(curFolder,false);
 		term.addIconRain(sdm,f.mc);
@@ -985,7 +997,7 @@ class GFileSystem {
 		if ( file.fl_deleted )
 			return;
 		var old = target;
-		Manager.stopTimers();
+		Live.cancel();
 		if ( target!=null )
 			target.onLoseTarget();
 		target = file;
@@ -1050,7 +1062,7 @@ class GFileSystem {
 	}
 
 	public function clearTarget() {
-		Manager.stopTimers();
+		Live.cancel();
 		term.detachCMenu();
 		tmc?.removeMovieClip();
 		tmc=null;
@@ -1154,7 +1166,7 @@ class GFileSystem {
 		logEvent( Lang.fmt.TraceDelete({_name:f.name}) );
 		if (target==f)
 			clearTarget();
-		if ( a==null )
+		if ( a==null && f.mc!=null )
 			term.startAnim( A_Delete, f.mc );
 		term.avman.onDeleteFile(f,fl_stealth);
 		term.onDeleteFile(f);

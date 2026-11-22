@@ -88,10 +88,10 @@ class WinAppMap extends WinApp {
 
 		// r�cup�ration du contenu affichable de ce dossier
 		var me = this;
-		var list = fs.getFolderFiles(parent);
+		var list = fs.getFolderFiles(parent).copy();
 		list.sort( function(a,b) {
-			if (a.fl_folder) return 1;
-			return -1;
+			if (a.fl_folder == b.fl_folder) return 0;
+			return a.fl_folder ? 1 : -1;
 		} );
 		list = Lambda.array( Lambda.filter(list, function(f:FSNode) {
 			if ( f.fl_deleted )

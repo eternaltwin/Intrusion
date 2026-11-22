@@ -61,25 +61,29 @@ export const MissionEndPayloadSchema = z.object({
   isChallenge: z.boolean(),
   scoutRun: z.boolean(),
   success: z.boolean(),
-  kills: z.number().int().min(0),
+  kills: z.number().int().min(0).max(10000),
   remainingSec: z.number().int().min(0),
-  valuables: z.array(z.string()),
-  copiedFiles: z.array(
-    z.object({
-      name: z.string(),
-      content: z.string(),
-      embed: z.string().nullable(),
-    })
-  ),
-  stolenCards: z.array(
-    z.object({
-      id: z.string(),
-      holder: z.string(),
-      number: z.string(),
-      amount: z.number().int().min(0),
-    })
-  ),
-  goals: z.record(z.string(), z.number().int()),
+  valuables: z.array(z.string()).max(40),
+  copiedFiles: z
+    .array(
+      z.object({
+        name: z.string(),
+        content: z.string(),
+        embed: z.string().nullable(),
+      })
+    )
+    .max(30),
+  stolenCards: z
+    .array(
+      z.object({
+        id: z.string(),
+        holder: z.string(),
+        number: z.string(),
+        amount: z.number().int().min(0),
+      })
+    )
+    .max(10),
+  goals: z.record(z.string(), z.number().int().min(0)),
   score: z.number().int().min(0),
 });
 

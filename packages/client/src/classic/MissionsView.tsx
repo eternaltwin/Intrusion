@@ -175,9 +175,9 @@ export function MissionsView({
               </div>
 
               <ul className="virusList">
-                {primaryDeck.content.map((vid) => (
+                {primaryDeck.content.map((vid, idx) => (
                   <li
-                    key={vid}
+                    key={`${vid}_${idx}`}
                     onMouseEnter={() => showVirus(vid)}
                     onMouseLeave={() => hideVirus(vid)}
                   >

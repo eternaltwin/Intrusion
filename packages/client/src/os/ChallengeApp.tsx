@@ -11,20 +11,35 @@ export function ChallengeApp({
 }) {
   const [data, setData] = useState<ChallengeTodayResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    api
-      .challengeToday()
-      .then(setData)
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api.challengeToday();
+        if (!cancelled) setData(res);
+      } catch (err: any) {
+        if (!cancelled) setError(err.message || 'Impossible de charger le Challenge quotidien.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function handleStart() {
     setLoading(true);
+    setError(null);
     try {
       const res = await api.startChallenge();
       onLaunchMission(res.init);
+    } catch (err: any) {
+      setError(err.message || 'Impossible de démarrer le Challenge.');
     } finally {
       setLoading(false);
     }
@@ -33,7 +48,11 @@ export function ChallengeApp({
   if (!data) {
     return (
       <div className="cyber-card flex h-full items-center justify-center rounded-lg font-mono text-sm text-[#8e9b6b]">
-        Synchronisation du Challenge quotidien...
+        {error ? (
+          <span className="text-rose-300">{error}</span>
+        ) : (
+          'Synchronisation du Challenge quotidien...'
+        )}
       </div>
     );
   }
@@ -68,6 +87,11 @@ export function ChallengeApp({
         </div>
 
         <div className="mt-5 border-t border-[#313b22] pt-4">
+          {error && (
+            <div className="mb-3 rounded border border-rose-500/40 bg-rose-950/50 px-3 py-2 font-mono text-xs text-rose-200">
+              {error}
+            </div>
+          )}
           {data.hasPlayedRanked && (
             <div className="mb-3 rounded bg-[#1d2616] px-3 py-2 text-center font-mono text-xs text-[#a5b884]">
               Tentative classée déjà enregistrée aujourd&apos;hui — vous pouvez rejouer en entraînement libre.

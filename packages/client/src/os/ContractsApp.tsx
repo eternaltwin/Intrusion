@@ -23,10 +23,12 @@ export function ContractsApp({
   const [selected, setSelected] = useState<MissionOfferDto | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirmRefreshOpen, setConfirmRefreshOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const refreshCost = getMissionRefreshCost(player.level);
 
   async function load() {
     setLoading(true);
+    setError(null);
     try {
       const res = await api.missions();
       setData(res);
@@ -35,6 +37,8 @@ export function ContractsApp({
         const pool = [...res.available, ...res.active, ...res.tutorials, ...res.completed];
         return pool.find((m) => m.missionKey === prev.missionKey) ?? res.available[0] ?? null;
       });
+    } catch (err: any) {
+      setError(err.message || 'Impossible de charger les contrats.');
     } finally {
       setLoading(false);
     }
@@ -46,6 +50,7 @@ export function ContractsApp({
 
   async function handleRefresh() {
     setLoading(true);
+    setError(null);
     try {
       const res = await api.refreshMissions();
       setData((prev) =>
@@ -54,6 +59,8 @@ export function ContractsApp({
       setSelected(res.available[0] ?? null);
       if (res.player) onPlayerUpdate(res.player);
       setConfirmRefreshOpen(false);
+    } catch (err: any) {
+      setError(err.message || 'Erreur lors du renouvellement des offres.');
     } finally {
       setLoading(false);
     }
@@ -61,28 +68,41 @@ export function ContractsApp({
 
   async function handleStart(offer: MissionOfferDto) {
     setLoading(true);
+    setError(null);
     try {
       const res = await api.startMission(offer.missionKey);
       onLaunchMission(res.init);
+    } catch (err: any) {
+      setError(err.message || 'Impossible de lancer ce contrat.');
     } finally {
       setLoading(false);
     }
   }
 
   async function handleQuickChipset(chipId: string) {
-    const res = await api.setChipset(chipId === 'none' ? null : chipId);
-    onPlayerUpdate(res.player);
+    setError(null);
+    try {
+      const res = await api.setChipset(chipId === 'none' ? null : chipId);
+      onPlayerUpdate(res.player);
+    } catch (err: any) {
+      setError(err.message || 'Impossible de modifier le chipset actif.');
+    }
   }
 
   async function handleQuickFavoriteDeck(deckId: string) {
     const deck = player.decks.find((d) => d.id === deckId);
     if (!deck) return;
-    const res = await api.saveDeck(deck.id, {
-      name: deck.name,
-      content: deck.content,
-      isFavorite: true,
-    });
-    onPlayerUpdate(res.player);
+    setError(null);
+    try {
+      const res = await api.saveDeck(deck.id, {
+        name: deck.name,
+        content: deck.content,
+        isFavorite: true,
+      });
+      onPlayerUpdate(res.player);
+    } catch (err: any) {
+      setError(err.message || 'Impossible de définir ce deck par défaut.');
+    }
   }
 
   const list: MissionOfferDto[] =
@@ -221,6 +241,11 @@ export function ContractsApp({
 
       {/* Right column: Briefing & Loadout Inspector */}
       <div className="cyber-card flex flex-col justify-between overflow-y-auto rounded-lg p-5 lg:col-span-5">
+        {error && (
+          <div className="mb-3 rounded border border-rose-500/40 bg-rose-950/50 px-3 py-2 font-mono text-xs text-rose-200">
+            {error}
+          </div>
+        )}
         {selected ? (
           <>
             <div>
@@ -292,9 +317,9 @@ export function ContractsApp({
 
                 {favDeck && (
                   <div className="flex flex-wrap gap-1.5 pt-1">
-                    {favDeck.content.map((vid) => (
+                    {favDeck.content.map((vid, idx) => (
                       <div
-                        key={vid}
+                        key={`${vid}_${idx}`}
                         title={vid.toUpperCase()}
                         className="flex items-center gap-1 rounded border border-[#3e4b2b] bg-[#1d2515] px-2 py-1 font-mono text-[11px] text-[#d8dfb8]"
                       >

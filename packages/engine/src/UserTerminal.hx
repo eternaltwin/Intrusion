@@ -165,6 +165,7 @@ class UserTerminal {
 	var timerLimit			: Volatile<Float>;
 	var tick				: Volatile<Int>;
 	var alarmTimer			: Volatile<Int>;
+	var alarmDuration		: Int;
 	public var alarmOrigin	: NetNode;
 	public var kills		: Volatile<Int>;
 
@@ -332,9 +333,14 @@ class UserTerminal {
 		//#if debug
 		//Manager.PARAMS._bios=3;
 		//#end
-		if (Manager.PARAMS._bios<4) {
-			speed+=Manager.PARAMS._bios;
-			dspeed+=Manager.PARAMS._bios*0.6;
+		var bios = Std.int(Math.min(4, Math.max(0, Manager.PARAMS._bios)));
+		if (bios<4) {
+			speed+=bios;
+			dspeed+=bios*0.6;
+		}
+		else {
+			speed+=3.5;
+			dspeed+=4*0.6;
 		}
 
 		gameDiff = switch(gameLevel) {
@@ -466,14 +472,47 @@ class UserTerminal {
 				#end
 
 				// cr�ation des decks
+				var activeDecks = new Array<{_name:String, _content:Array<String>}>();
 				for (deck in Manager.PARAMS._decks) {
+					activeDecks.push(deck);
+					if ( Manager.PARAMS._c )
+						break;
+				}
+				var maxInDeck = new Hash<Int>();
+				for (deck in activeDecks) {
+					var counts = new Hash<Int>();
+					for (id in deck._content) {
+						var c = counts.exists(id) ? counts.get(id) + 1 : 1;
+						counts.set(id, c);
+						if ( !maxInDeck.exists(id) || c > maxInDeck.get(id) )
+							maxInDeck.set(id, c);
+					}
+				}
+				var pools = new Hash<Array<Virus>>();
+				var cursors = new Hash<Int>();
+				for (id in maxInDeck.keys()) {
+					var count = maxInDeck.get(id);
+					if ( !Manager.PARAMS._c && Manager.OWNED_VIRUSES!=null && Manager.OWNED_VIRUSES.exists(id) )
+						count = Manager.OWNED_VIRUSES.get(id);
+					if ( count==null || count<1 )
+						count = 1;
+					var pool = new Array<Virus>();
+					for (i in 0...count) {
+						var inst = VirusXml.createInstance(id);
+						pool.push(inst);
+						virList.add(inst);
+					}
+					pools.set(id, pool);
+					cursors.set(id, 0);
+				}
+				for (deck in activeDecks) {
 					var dvList = new List();
 					for (id in deck._content) {
-						var v = VirusXml.createInstance(id);
-//						if ( !VirusXml.isUnlocked(v, Manager.PARAMS._profile._ulevel) )
-//							Manager.fatal("unknown virus "+id);
+						var pool = pools.get(id);
+						var cur = cursors.get(id);
+						var v = pool[cur % pool.length];
+						cursors.set(id, cur + 1);
 						dvList.add(v);
-						virList.add(v);
 					}
 					if ( missionVirus!=null )
 						dvList.add(missionVirus);
@@ -627,7 +666,12 @@ class UserTerminal {
 		if ( chipset!=null )
 			log( Lang.fmt.Log_Chipset({_c:chipset.name.toUpperCase(), _id:chipset.id.toLowerCase()}) );
 
-		haxe.Timer.delay( onStartGameDelayed, Std.int(DateTools.seconds(1)) );
+		var me = this;
+		Manager.delay( function() {
+			if ( me.fl_end || (Manager.ME!=null && Manager.ME.disposed) )
+				return;
+			me.onStartGameDelayed();
+		}, Std.int(DateTools.seconds(1)) );
 
 //		var me = this;
 //		a.cb = function() {
@@ -701,6 +745,7 @@ class UserTerminal {
 			#end
 
 			var msg : _Message = MISSION_RESULT(data);
+			fl_end = true;
 			jsMain.send(Manager.PARAMS._endUrl, msg, onEndData);
 
 //			var c = new Codec();
@@ -708,7 +753,6 @@ class UserTerminal {
 //			var lv = new flash.LoadVars();
 //			lv.sendAndLoad( Manager.PARAMS._endUrl, edata, "post" );
 
-			fl_end = true;
 			stopAllSounds(false);
 			bigLog(Lang.get.BigEnd, true, true);
 
@@ -787,20 +831,20 @@ class UserTerminal {
 
 	function parseConfig(cfg:String) {
 		aliases = new Hash();
+		if ( cfg==null )
+			return;
 		for (line in cfg.split("\n")) {
 			// clean up
 			line = StringTools.replace(line,"\t"," ");
+			line = StringTools.replace(line,"\u00A0"," ");
 			line = StringTools.replace(line,"\r","");
-			line = Data.trim(line," ");
-			while ( line.indexOf("  ")>=0 )
-				line = StringTools.replace(line,"  "," ");
-			if ( line.length==0 )
-				continue;
-			var original = line;
-
+			var original = Data.trim(line," ");
 			// commentaires
 			if ( line.indexOf("#")>=0 )
 				line = line.substr(0, line.indexOf("#"));
+			line = Data.trim(line," ");
+			while ( line.indexOf("  ")>=0 )
+				line = StringTools.replace(line,"  "," ");
 			if ( line.length==0 )
 				continue;
 
@@ -809,10 +853,13 @@ class UserTerminal {
 			var params = line.substr(command.length+1);
 			switch (command) {
 				case "alias" :
-					var from = Data.trimSpaces( params.split("=")[0] );
-					var to = Data.trimSpaces( params.split("=")[1] );
-					if ( from!=null && to!=null )
-						aliases.set(from,to);
+					var eq = params.indexOf("=");
+					if ( eq>=0 ) {
+						var from = Data.trimSpaces( params.substr(0, eq) ).toLowerCase();
+						var to = Data.trimSpaces( params.substr(eq+1) );
+						if ( from!=null && to!=null && from.length>0 && to.length>0 )
+							aliases.set(from,to);
+					}
 				default :
 					Manager.fatal(Lang.get.InvalidConfigFile+"\n"+original);
 			}
@@ -1121,8 +1168,11 @@ class UserTerminal {
 			case _MFalsifyCam(sector) :
 				if ( n.system.fl_crashed )
 					return false;
-				for (f in n.system.getFilesByKey("archive.video"))
-					if ( !f.hasEffect(E_Mission) )
+				var list = n.system.getTargetFiles(null, true);
+				if ( list.length==0 )
+					return false;
+				for (f in list)
+					if ( f.fl_deleted || !f.hasEffect(E_Mission) )
 						return false;
 				return true;
 			case _MSpyCam :
@@ -1164,16 +1214,22 @@ class UserTerminal {
 						return true;
 				return false;
 			case _MOverwriteFiles(owner,ext) :
-				for (n in mnodes)
-					for (f in n.system.getTargetFiles())
-						if ( f.ext(ext) && !f.hasEffect(E_Mission) && !f.fl_deleted )
+				for (n in mnodes) {
+					if ( n.system.fl_crashed )
+						return false;
+					for (f in n.system.getTargetFiles(null, true))
+						if ( f.ext(ext) && (f.fl_deleted || !f.hasEffect(E_Mission)) )
 							return false;
+				}
 				return true;
 			case _MGameHack(g,s,c) :
 				if ( n.system.fl_crashed )
 					return false;
-				for (f in n.system.getTargetFiles())
-					if ( !f.hasEffect(E_Mission) )
+				var list = n.system.getTargetFiles(null, true);
+				if ( list.length==0 )
+					return false;
+				for (f in list)
+					if ( f.fl_deleted || !f.hasEffect(E_Mission) )
 						return false;
 				return true;
 			case _MInfectNet(v) :
@@ -1193,7 +1249,9 @@ class UserTerminal {
 			case _MTutorialBypass(f) :
 				return hasTargetFiles(1);
 			case _MTV(tf,tt) :
-				var list = n.system.getFilesByKey("tvprog.data");
+				if ( n.system.fl_crashed )
+					return false;
+				var list = Lambda.filter(n.system.rawTree, function(f) { return f.key=="tvprog.data"; });
 				if ( list.length==0 )
 					return false;
 				for (f in list)
@@ -1267,8 +1325,8 @@ class UserTerminal {
 
 	public function updateCopies(uf:FSNode) {
 		for (f in storage)
-			if ( f.id==uf.id )
-				f.copyData(uf);
+			if ( f!=uf && f.fs==uf.fs && f.id==uf.id )
+				uf.copyData(f);
 	}
 
 	public function getMaxStorage() {
@@ -1280,7 +1338,7 @@ class UserTerminal {
 
 	function hasFile(file:FSNode) {
 		for (f in storage)
-			if ( file.name==f.name && file.id==f.id ) return true;
+			if ( file.fs==f.fs && file.id==f.id ) return true;
 		return false;
 	}
 
@@ -1338,13 +1396,17 @@ class UserTerminal {
 //			popUp(Lang.get.SystemCrashed);
 //		else
 //			popUp(Lang.get.Disconnected);
+		vman.onEndTurn();
 		avman.onEndTurn();
 		if ( !fl_stealth ) {
 			avman.onDisconnect();
 			avman.onEndTurn();
+			vman.onEndTurn();
+			avman.onEndTurn();
 		}
 		avman.endTurn = new List();
 		vman.endTurn = new List();
+		vman.burstUsed = false;
 		log(Lang.get.Disconnected);
 		if ( fl_stealth && life>0 )
 			log(Lang.get.Log_Stealth);
@@ -1362,6 +1424,8 @@ class UserTerminal {
 //		avman.setScanLevel(0);
 		clearEffect(UE_Furtivity);
 		clearEffect(UE_MoveFurtivity);
+		clearEffect(UE_SwitchDeck);
+		checkMission();
 		bigLog(Lang.get.BigDisconnected,-30);
 		fl_disconnecting = false;
 //		furtivity = 0;
@@ -1505,7 +1569,7 @@ class UserTerminal {
 		updateTimer();
 
 		log( Lang.fmt.Log_GainedTime({_n:s}), Data.BLUE );
-		popNumber(s," secondes", manaBar._x+manaBar._width*0.5, manaBar._y-20);
+		popNumber(s, Manager.LANG=="en" ? " seconds" : " secondes", manaBar._x+manaBar._width*0.5, manaBar._y-20);
 	}
 
 	public function gainLife(n) {
@@ -1567,16 +1631,19 @@ class UserTerminal {
 			playSound("shield");
 		if ( et==UE_Combo )
 			max = maxCombo;
-		if ( cpt>max )
-			cpt = max;
 		for (e in ueffects)
 			if ( e.type==et ) {
+				var effectiveMax = e.cpt>max ? e.cpt : max;
 				e.cpt+=cpt;
-				if ( e.cpt>max )
-					e.cpt = max;
+				if ( e.cpt>effectiveMax )
+					e.cpt = effectiveMax;
+				if ( source!=null )
+					e.source = source;
 				dock.displayEffects();
 				return;
 			}
+		if ( cpt>max )
+			cpt = max;
 		ueffects.push({
 			source	: source,
 			type	: et,
@@ -1872,7 +1939,6 @@ class UserTerminal {
 		}
 		mc.field.text = str;
 		mc.field.textColor = col;
-		mc.field._width = mc.field.textWidth+5;
 		wid+=mc.field.textWidth;
 		mc._x = Math.round(mc._x - wid*0.5);
 
@@ -2051,6 +2117,8 @@ class UserTerminal {
 //
 //		bmc._x = x;
 //		bmc._y = y;
+		bmc.title.anchor.set(0, 0);
+		bmc.field.anchor.set(0, 0);
 		if ( title!=null )
 			bmc.title.text = title;
 		else
@@ -2060,17 +2128,11 @@ class UserTerminal {
 		var totHei = bmc.field.textHeight + bmc.title.textHeight;
 		bmc.title._y = -Math.round(totHei*0.5);
 		bmc.field._y = bmc.title._y+bmc.title.textHeight;
-		bmc.bg.on("complete", function() {
-			bmc.bg.width = 10 + maxWid;
-			bmc.bg.height = 10 + bmc.field.height + bmc.title.height;
-			bmc.l.height = bmc.bg.height+6;
-			bmc.r.height = bmc.l.height;
-			bmc.r._x = bmc.bg.width+5;
-		});
-		bmc.field._width = bmc.field.textWidth+5;
-		bmc.field._height = bmc.field.textHeight+5;
-		bmc.title._width = bmc.title.textWidth+5;
-		bmc.title._height = bmc.title.textHeight+5;
+		bmc.bg.width = 12 + maxWid;
+		bmc.bg.height = 10 + bmc.field.textHeight + bmc.title.textHeight;
+		bmc.l.height = bmc.bg.height+6;
+		bmc.r.height = bmc.l.height;
+		bmc.r._x = bmc.bg.width+5;
 		updateBubble();
 
 		if ( !fl_lowq )
@@ -2126,6 +2188,8 @@ class UserTerminal {
 
 	public function askPass(f:FSNode) {
 		detachPass();
+		dock.lock();
+		dock.hide();
 		hideCmdLine();
 		attachMask(detachPass);
 
@@ -2146,10 +2210,17 @@ class UserTerminal {
 	}
 
 	function detachPass() {
+		var wasOpen = pwin!=null;
 		ffield = null;
 		pwin?.removeMovieClip();
 		pwin = null;
 		detachMask();
+		if ( wasOpen ) {
+			if ( fs!=null )
+				dock.unlock();
+			if ( !fl_end )
+				dock.show();
+		}
 		showCmdLine();
 	}
 
@@ -2196,7 +2267,8 @@ class UserTerminal {
 	public function attachCmdLine() {
 		if ( !fl_leet )
 			return;
-		cmdLine.removeMovieClip();
+		if ( cmdLine!=null )
+			cmdLine.removeMovieClip();
 		cmdLine = cast Manager.DM.attach("cmdLine", Data.DP_TOPTOP);
 		cmdLine._x = 16;
 		cmdLine._y = Data.HEI-cmdLine._height+2;
@@ -2248,6 +2320,10 @@ class UserTerminal {
 			for (v in VirusXml.getCategory("hidden", gameLevel, true))
 				if ( v.id.toLowerCase().indexOf(virusId)==0 && v.target!="_net" )
 					clist.add(v.id);
+			// aliases
+			for (from in aliases.keys())
+				if ( from.toLowerCase().indexOf(virusId)==0 )
+					clist.add(from);
 		}
 		else {
 			// fichiers
@@ -2255,10 +2331,6 @@ class UserTerminal {
 				if ( !f.fl_deleted && !f.hasEffect(E_Masked) && f.name.toLowerCase().indexOf(target)==0 )
 					clist.add(f.name);
 		}
-
-		// aliases
-		for (from in aliases.keys())
-			clist.add(from);
 
 		// on vire les doublons
 		for (a in clist) {
@@ -2582,8 +2654,8 @@ class UserTerminal {
 		var me = this;
 		if ( !fl_permanent )
 			a.cb = function() {
-				me.startAnim(A_FadeRemove,mc,str,-2.5);
-				a.spd *= if(fl_long) 0.2 else 1;
+				var a2 = me.startAnim(A_FadeRemove,mc,str,-2.5);
+				a2.spd *= if(fl_long) 0.2 else 1;
 			}
 		return a;
 	}
@@ -2860,7 +2932,12 @@ class UserTerminal {
 	}
 
 	function onWheel(e: js.html.WheelEvent) {
-		if (fl_end || apps.length > 0 || popMC != null || pwin != null) return;
+		if (fl_end || popMC != null || pwin != null) return;
+		if (apps.length > 0) {
+			apps.last().onMouseWheel(e.deltaY > 0 ? -3 : 3);
+			e.preventDefault();
+			return;
+		}
 		if (fs != null) {
 			fs.onMouseWheel(e.deltaY > 0 ? -3 : 3);
 			e.preventDefault();
@@ -2913,14 +2990,19 @@ class UserTerminal {
 		if ( gameLevel>=9 )
 			d += Std.int(ALARM_DURATION*0.5);
 		alarmOrigin = node;
+		alarmDuration = d;
 		alarmTimer = d+1;
 	}
 
 	public function stopAlarm() {
 		playSound("alarm_01");
 		var me = this;
-		haxe.Timer.delay(
-			function() { me.bigLog(Lang.get.AlarmStop, true, 60); },
+		Manager.delay(
+			function() {
+				if ( me.fl_end || (Manager.ME!=null && Manager.ME.disposed) )
+					return;
+				me.bigLog(Lang.get.AlarmStop, true, 60);
+			},
 			Std.int(DateTools.seconds(1))
 		);
 		alarmOrigin = null;
@@ -2953,6 +3035,8 @@ class UserTerminal {
 
 	// m�thode appel�e 1x par seconde si le timer est actif
 	function onTick() {
+		if ( fl_busted || fl_dead || fl_end )
+			return;
 		tick++;
 		vman.onTick(tick);
 		// regen mana
@@ -2969,7 +3053,7 @@ class UserTerminal {
 			// feedback (son + msg)
 			if ( alarmTimer%10 == 0 ) {
 				bigLog( Lang.fmt.AlarmStatus({_n:alarmTimer}), 60 );
-				if ( alarmTimer ==ALARM_DURATION )
+				if ( alarmTimer == alarmDuration )
 					playSound("alarm_01");
 				playSound("alarm_02");
 			}
@@ -3442,8 +3526,11 @@ class UserTerminal {
 			updateTimer();		
 			dock.update();	
 			// virus & antivirus
+			var hadEndTurn = !vman.endTurn.isEmpty() || !avman.endTurn.isEmpty();
 			vman.onEndTurn();
 			avman.onEndTurn();
+			if ( hadEndTurn )
+				checkMission();
 		}
 		// NOTE 1 : attention, log et timer d�plac�s avant cinematics ! pas de bug � signaler ?
 		// NOTE 2 : net.update et dock.update se trouvaient juste apr�s Progress.update !

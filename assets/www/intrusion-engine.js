@@ -156,10 +156,10 @@ AntivirMan.prototype = {
 		list.remove(file);
 		file.av = null;
 		if(old == data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"mask")) {
-			if(!this.parentContains(this.term.fs.curFolder,old)) {
+			if(this.term.fs.curFolder != null && !this.parentContains(this.term.fs.curFolder,old)) {
 				this.term.fs.unmaskFolder();
 			}
-			this.term.fs.recursiveRemoveEffect(this.term.fs.curFolder,EffectType.E_Masked);
+			this.term.fs.recursiveRemoveEffect(file.parent,EffectType.E_Masked);
 		}
 		var fl_last = !this.systemContains(old);
 		if(fl_last) {
@@ -450,40 +450,46 @@ AntivirMan.prototype = {
 		if(this.term.fs == null) {
 			return;
 		}
-		if(this.folderContains(this.term.fs.curFolder,data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"eject"))) {
+		if(f != null && f.parent == this.term.fs.curFolder && this.folderContains(this.term.fs.curFolder,data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"eject"))) {
 			var _g_head = this.getAllByFolder(this.term.fs.curFolder,data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"eject")).h;
 			while(_g_head != null) {
 				var val = _g_head.item;
 				_g_head = _g_head.next;
-				var f = val;
+				var fe = val;
 				this.endTurn.add((function(_g,f) {
 					return function() {
 						_g[0].onEject(f[0]);
 					};
-				})([this],[f]));
+				})([this],[fe]));
 			}
 		}
 		this.queueAttackAll(data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"tique"));
 	}
 	,onExplodeBomb: function(f) {
-		if(f.life <= 0) {
+		if(f == null || f.fl_deleted || f.life <= 0 || f.av == null) {
 			return;
 		}
 		if(f.hasEffect(EffectType.E_SkipAction)) {
 			f.removeEffect(EffectType.E_SkipAction);
+			f.clearEffect(EffectType.E_Counter);
 			this.term.log((_$Lang_AllTextsFormat.getText(Lang.fmt,"AntivirusBlocked"))({ _name : f.name, _av : f.av.key.toUpperCase()}));
 			return;
 		}
 		var bomb = data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"bomb");
 		var dmg = f.getAttackModified(bomb);
 		if(dmg > 0) {
+			this.endTurn.add((function(_g,f) {
+				return function() {
+					_g[0].onAttackSuccessful(f[0]);
+				};
+			})([this],[f]));
 			this.logDamage(f.name,f.av,dmg);
 			this.term.damage(dmg);
 		}
 		f.clearEffect(EffectType.E_Counter);
 	}
 	,onEject: function(f) {
-		if(f.life <= 0) {
+		if(this.term.fs == null || f == null || f.fl_deleted || f.life <= 0 || f.av == null) {
 			return;
 		}
 		if(f.hasEffect(EffectType.E_SkipAction)) {
@@ -491,10 +497,17 @@ AntivirMan.prototype = {
 			this.term.log((_$Lang_AllTextsFormat.getText(Lang.fmt,"AntivirusBlocked"))({ _name : f.name, _av : f.av.key.toUpperCase()}));
 			return;
 		}
+		if(this.term.hasEffect(UserEffectType.UE_Furtivity)) {
+			this.logDodge(f);
+			return;
+		}
 		this.term.log((_$Lang_AllTextsFormat.getText(Lang.fmt,"Ejected"))({ _name : f.name, _av : f.av.key.toUpperCase()}));
 		this.term.disconnectFS();
 	}
 	,onAttackSuccessful: function(f) {
+		if(f == null || f.fl_deleted || f.life <= 0 || f.av == null) {
+			return;
+		}
 		if(f.hasEffect(EffectType.E_Revenge)) {
 			f.removeEffect(EffectType.E_Revenge);
 			var p = data__$VirusXml_AllData.getVirus(data_VirusXml.get,"reveng").power;
@@ -895,11 +908,14 @@ Dock.prototype = {
 		}
 		return false;
 	}
+	,canSwitchDeck: function() {
+		return this.decks.length > 1;
+	}
 	,switchDeck: function(n) {
 		if(n == this.currentDeck) {
 			return;
 		}
-		if(!this.swButton.visible) {
+		if(this.swButton == null || !this.swButton.visible) {
 			return;
 		}
 		if(n == null) {
@@ -910,6 +926,7 @@ Dock.prototype = {
 		}
 		this.detach();
 		this.currentDeck = n;
+		this.term.clearEffect(UserEffectType.UE_SwitchDeck);
 		this.term.playSound("absorb_02");
 		this.term.log((_$Lang_AllTextsFormat.getText(Lang.fmt,"Log_ChangedDeck"))({ _name : this.decks[this.currentDeck].name}));
 		this.attach();
@@ -1022,15 +1039,20 @@ Dock.prototype = {
 				continue;
 			}
 			var targetMc = [ds.mc];
+			var slotVirus = [ds.virus];
 			var url = Manager.PARAMS._iconsUrl + ds.virus.id + ".png?v=" + Manager.PARAMS._iconsVer;
 			var promise = PIXI.Texture.fromURL(url);
-			var promise1 = (function(targetMc) {
+			var promise1 = (function(targetMc,slotVirus) {
 				return function(texture) {
 					if(targetMc[0] != null && targetMc[0]._name != null && targetMc[0].get_smc() != null) {
-						return targetMc[0].get_smc().attachBitmap(texture,1);
+						var res = targetMc[0].get_smc().attachBitmap(texture,1);
+						if(slotVirus[0].uses == 0) {
+							targetMc[0].get_smc().set__alpha(0);
+						}
+						return res;
 					}
 				};
-			})(targetMc);
+			})(targetMc,slotVirus);
 			var promise2 = promise.then(promise1);
 		}
 	}
@@ -1044,8 +1066,9 @@ Dock.prototype = {
 		} else {
 			var d = data_VirusXml.getDesc(v,this.term.countEffect(UserEffectType.UE_Combo));
 			var i = "";
-			if(v.cc > 0) {
-				i += (_$Lang_AllTextsFormat.getText(Lang.fmt,"ManaCost"))({ _n : v.cc}) + "\n";
+			var cc = this.term.vman.getManaCost(v);
+			if(cc > 0) {
+				i += (_$Lang_AllTextsFormat.getText(Lang.fmt,"ManaCost"))({ _n : cc}) + "\n";
 			}
 			if(v.uses != null) {
 				i += (_$Lang_AllTextsFormat.getText(Lang.fmt,"ChargeRemaining"))({ _n : v.uses}) + "\n";
@@ -1073,7 +1096,7 @@ Dock.prototype = {
 		this.hideSwitcher();
 	}
 	,show: function() {
-		if(this.term.fs == null) {
+		if(this.term.fs == null || this.term.hasEffect(UserEffectType.UE_SwitchDeck)) {
 			this.showSwitcher();
 		}
 		var _this = this.root;
@@ -1209,6 +1232,10 @@ Dock.prototype = {
 			this.clearPending();
 		}
 		if(Progress.isRunning()) {
+			return;
+		}
+		if(ds.virus.uses == 0) {
+			this.term.popUp(_$Lang_AllTexts.getText(Lang.get,"NoCharge"));
 			return;
 		}
 		if(ds.virus.target == "_none") {
@@ -1604,13 +1631,14 @@ FSNode.prototype = {
 				this.content = TD.texts.get("crimeLog");
 			}
 			if(this.av == data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"passwd")) {
-				TD.texts.set("content",FSNode.term.fs.mpass);
+				var mp = this.fs != null ? this.fs.mpass : (FSNode.term.fs != null ? FSNode.term.fs.mpass : "");
+				TD.texts.set("content",mp);
 				this.content = TD.texts.get("fileSettings");
 			}
 			if(this.key == "inv.game") {
 				this.content = TD.texts.get("inventory");
 			}
-			if(this.key == "money.game") {
+			if(this.key == "money.game" || this.key == "gold.game") {
 				this.content = TD.texts.get("gold");
 			}
 			if(this.key == "stats.game") {
@@ -1619,10 +1647,10 @@ FSNode.prototype = {
 			if(this.key == "file.control") {
 				this.content = TD.texts.get("controlFile");
 			}
-			if(this.key == "file.video") {
+			if(this.key == "file.video" || this.ext("video") || this.key == "tvprog.data") {
 				this.content = TD.texts.get("videoFile");
 			}
-			if(this.key == "file.image") {
+			if(this.key == "file.image" || this.ext("image")) {
 				this.content = TD.texts.get("imageFile");
 			}
 			if(this.key == "file.rar") {
@@ -1701,7 +1729,9 @@ FSNode.prototype = {
 			++_g;
 			emc.removeMovieClip();
 		}
-		this.mc.removeMovieClip();
+		if(this.mc != null) {
+			this.mc.removeMovieClip();
+		}
 	}
 	,updateIcon: function() {
 		if(this.fl_folder) {
@@ -1758,7 +1788,10 @@ FSNode.prototype = {
 		MCFile.get_icon(this.mc).stop();
 		MCFile.get_icon2(this.mc).gotoAndStop(MCFile.get_icon(this.mc)._currentframe);
 	}
-	,damage: function(base,fl_canBeBoosted,fl_ignoreShield,fl_canSpread) {
+	,damage: function(base,fl_canBeBoosted,fl_ignoreShield,fl_canSpread,fl_applyBrute) {
+		if(fl_applyBrute == null) {
+			fl_applyBrute = true;
+		}
 		if(fl_canSpread == null) {
 			fl_canSpread = true;
 		}
@@ -1768,8 +1801,11 @@ FSNode.prototype = {
 		if(fl_canBeBoosted == null) {
 			fl_canBeBoosted = true;
 		}
+		if(this.fl_deleted || this.life <= 0) {
+			return 0;
+		}
 		var dmg = base;
-		if(FSNode.term.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"brute"))) {
+		if(fl_applyBrute && FSNode.term.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"brute"))) {
 			dmg = Math.round(VirusMan.BRUTE_DMG * dmg);
 		}
 		var extra = "";
@@ -1777,19 +1813,16 @@ FSNode.prototype = {
 			FSNode.term.popUp(_$Lang_AllTexts.getText(Lang.get,"NotNow"));
 			return 0;
 		}
-		if(FSNode.term.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"scout"))) {
-			if(this.key == "file.guardian" || this.key == "file.core") {
-				dmg = 0;
-				extra = _$Lang_AllTexts.getText(Lang.get,"Immune");
-			}
-		}
 		if(fl_canBeBoosted) {
 			if(FSNode.term.hasEffect(UserEffectType.UE_DamageBurst)) {
 				dmg += FSNode.term.getEffectSource(UserEffectType.UE_DamageBurst).power;
-				FSNode.term.vman.addEndEvent(function() {
-					FSNode.term.removeEffect(UserEffectType.UE_DamageBurst);
-					return 0;
-				});
+				if(!FSNode.term.vman.burstUsed) {
+					FSNode.term.vman.burstUsed = true;
+					FSNode.term.vman.addEndEvent(function() {
+						FSNode.term.removeEffect(UserEffectType.UE_DamageBurst);
+						return 0;
+					});
+				}
 			}
 			if(FSNode.term.hasEffect(UserEffectType.UE_Charge)) {
 				dmg *= FSNode.term.countEffect(UserEffectType.UE_Charge);
@@ -1814,28 +1847,36 @@ FSNode.prototype = {
 				extra = (_$Lang_AllTextsFormat.getText(Lang.fmt,"Shielded"))({ _n : a});
 			}
 		}
+		if(FSNode.term.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"scout"))) {
+			if(this.key == "file.guardian" || this.key == "file.core") {
+				dmg = 0;
+				extra = _$Lang_AllTexts.getText(Lang.get,"Immune");
+			}
+		}
 		if(this.hasEffect(EffectType.E_Immune)) {
 			dmg = 0;
 			extra = _$Lang_AllTexts.getText(Lang.get,"Immune");
 		}
-		if(FSNode.term.hasEffect(UserEffectType.UE_Charge)) {
+		if(fl_canBeBoosted && FSNode.term.hasEffect(UserEffectType.UE_Charge)) {
 			extra += " [x" + FSNode.term.countEffect(UserEffectType.UE_Charge) + "]";
 		}
 		var final_dmg = Math.floor(dmg);
 		this.life = Math.max(0,this.life - final_dmg) | 0;
 		if(fl_canSpread && final_dmg > 0 && this.hasEffect(EffectType.E_Tag)) {
-			var sdamage = Math.floor(base * this.countEffect(EffectType.E_Tag) / 100);
-			var _g = 0;
-			var _g1 = FSNode.term.fs.getFilesByEffect(EffectType.E_Tag);
-			while(_g < _g1.length) {
-				var neig = _g1[_g];
-				++_g;
-				if(neig != this) {
-					FSNode.term.vman.addEndEvent((function(_g,fl_canSpread,fl_ignoreShield,fl_canBeBoosted,base) {
-						return function() {
-							return _g[0].damage(base[0],fl_canBeBoosted[0],fl_ignoreShield[0],fl_canSpread[0]);
-						};
-					})([neig],[false],[false],[true],[sdamage]));
+			var sdamage = Math.floor(final_dmg * this.countEffect(EffectType.E_Tag) / 100);
+			if(sdamage > 0) {
+				var _g = 0;
+				var _g1 = FSNode.term.fs.getFilesByEffect(EffectType.E_Tag);
+				while(_g < _g1.length) {
+					var neig = _g1[_g];
+					++_g;
+					if(neig != this) {
+						FSNode.term.vman.addEndEvent((function(_g,base) {
+							return function() {
+								return _g[0].damage(base[0],false,false,false,false);
+							};
+						})([neig],[sdamage]));
+					}
 				}
 			}
 		}
@@ -1867,18 +1908,20 @@ FSNode.prototype = {
 			}
 			if(this.hasEffect(EffectType.E_Splash) && !this.fl_deleted) {
 				var sdamage = Math.floor(dmg * this.countEffect(EffectType.E_Splash) / 100);
-				var _g = 0;
-				var _g1 = FSNode.term.fs.getFolderFiles(this.parent);
-				while(_g < _g1.length) {
-					var neig = _g1[_g];
-					++_g;
-					if(neig.key == "file.core" || neig.key == "file.guardian" || neig.av != null) {
-						if(neig != this && !neig.fl_folder && !neig.fl_deleted) {
-							FSNode.term.vman.addEndEvent((function(_g,fl_canSpread,fl_ignoreShield,fl_canBeBoosted,base) {
-								return function() {
-									return _g[0].damage(base[0],fl_canBeBoosted[0],fl_ignoreShield[0],fl_canSpread[0]);
-								};
-							})([neig],[true],[false],[true],[sdamage]));
+				if(sdamage > 0) {
+					var _g = 0;
+					var _g1 = FSNode.term.fs.getFolderFiles(this.parent);
+					while(_g < _g1.length) {
+						var neig = _g1[_g];
+						++_g;
+						if(neig.key == "file.core" || neig.key == "file.guardian" || neig.av != null) {
+							if(neig != this && !neig.fl_folder && !neig.fl_deleted) {
+								FSNode.term.vman.addEndEvent((function(_g,base) {
+									return function() {
+										return _g[0].damage(base[0],false,false,true,false);
+									};
+								})([neig],[sdamage]));
+							}
 						}
 					}
 				}
@@ -1920,7 +1963,7 @@ FSNode.prototype = {
 	,disableAV: function() {
 		this.addEffect(EffectType.E_Disabled,1,1);
 		FSNode.term.avman.unregister(this);
-		if(this.mc._name != null) {
+		if(this.mc != null && this.mc._name != null) {
 			FSNode.term.startAnim(AnimType.A_FadeIn,this.mc);
 			FSNode.term.addIconRain(FSNode.term.fs.sdm,null,null,this.mc);
 			this.redraw();
@@ -2010,11 +2053,13 @@ FSNode.prototype = {
 		var c = this.getContent();
 		if(c != null) {
 			FSNode.term.printSide(this.name,c,this);
-			FSNode.term.fs.logEvent((_$Lang_AllTextsFormat.getText(Lang.fmt,"TraceAccess"))({ _name : this.name}));
-			if(this.key == "file.video") {
+			if(FSNode.term.fs != null && FSNode.term.fs.target == this) {
+				FSNode.term.fs.logEvent((_$Lang_AllTextsFormat.getText(Lang.fmt,"TraceAccess"))({ _name : this.name}));
+			}
+			if(this.key == "file.video" || this.ext("video") || this.key == "tvprog.data") {
 				Live.loadVideo(this);
 			}
-			if(this.key == "file.image") {
+			if(this.key == "file.image" || this.ext("image")) {
 				Live.loadImage(this);
 			}
 		}
@@ -2125,22 +2170,23 @@ FSNode.prototype = {
 		if(cpt == null) {
 			cpt = 1;
 		}
-		if(cpt > max) {
-			cpt = max;
-		}
 		var _g_head = this.effects.h;
 		while(_g_head != null) {
 			var val = _g_head.item;
 			_g_head = _g_head.next;
 			var e = val;
 			if(e.type == et) {
+				var effectiveMax = e.cpt > max ? e.cpt : max;
 				e.cpt += cpt;
-				if(e.cpt > max) {
-					e.cpt = max;
+				if(e.cpt > effectiveMax) {
+					e.cpt = effectiveMax;
 				}
 				this.displayEffects();
 				return;
 			}
+		}
+		if(cpt > max) {
+			cpt = max;
 		}
 		this.effects.push({ type : et, cpt : cpt});
 		this.displayEffects();
@@ -2633,7 +2679,7 @@ GFileSystem.prototype = {
 		var genc = ((_this.seed = _this.seed * 16807 % 2147483647) & 1073741823) % 3;
 		this.encodeFiles("inv.game",genc);
 		this.encodeFiles("stats.game",genc);
-		this.encodeFiles("gold.game",genc);
+		this.encodeFiles("money.game",genc);
 		this.cleanUp();
 		this.buildTree();
 		this.applyNameUnicity();
@@ -2911,6 +2957,7 @@ GFileSystem.prototype = {
 		TD.texts.set("pass",this.mpass);
 		if(pf.ext("mail")) {
 			pf.forceMail(TD.texts.get("SysAdmin"),TD.texts.get("passwordMail"));
+			pf.key = "pass.mail";
 		} else {
 			var o = this.owner != null ? this.owner : TD.texts.get("sysadmin");
 			TD.texts.set("user",o);
@@ -3091,6 +3138,19 @@ GFileSystem.prototype = {
 			f.sortIndex = 2000 + Data.UNIQ++;
 		} else {
 			f.sortIndex = rep.sortIndex;
+		}
+		if(!f.fl_folder && f.av == null && this.term.avman.systemContains(data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"paladin"))) {
+			f.addEffect(EffectType.E_Immune,1,1);
+		}
+		var maskCount = 0;
+		var p = parent;
+		var maskAv = data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"mask");
+		while(p != null) {
+			maskCount += this.term.avman.getAllByFolder(p,maskAv).length;
+			p = p.parent;
+		}
+		if(maskCount > 0) {
+			f.addEffect(EffectType.E_Masked,maskCount);
 		}
 		this.buildTree();
 		this.attachFolder(this.curFolder,false);
@@ -3454,7 +3514,7 @@ GFileSystem.prototype = {
 			return;
 		}
 		var old = this.target;
-		Manager.stopTimers();
+		Live.cancel();
 		if(this.target != null) {
 			this.target.onLoseTarget();
 		}
@@ -3521,7 +3581,7 @@ GFileSystem.prototype = {
 		this.corrupt();
 	}
 	,clearTarget: function() {
-		Manager.stopTimers();
+		Live.cancel();
 		this.term.detachCMenu();
 		var tmp = this.tmc;
 		if(tmp != null) {
@@ -3657,7 +3717,7 @@ GFileSystem.prototype = {
 		if(this.target == f) {
 			this.clearTarget();
 		}
-		if(a == null) {
+		if(a == null && f.mc != null) {
 			this.term.startAnim(AnimType.A_Delete,f.mc);
 		}
 		this.term.avman.onDeleteFile(f,fl_stealth);
@@ -5189,7 +5249,7 @@ GNetwork.prototype = {
 			var val = _g_head.item;
 			_g_head = _g_head.next;
 			var n = val;
-			if(n.type != NodeType.Empty && n.system.countFilesByExt(null,"mail") > 0 || n.system.countFilesByExt(null,"doc") > 0) {
+			if(n.type != NodeType.Empty && (n.system.countFilesByExt(null,"mail") > 0 || n.system.countFilesByExt(null,"doc") > 0)) {
 				pool.push(n);
 			}
 		}
@@ -5203,11 +5263,13 @@ GNetwork.prototype = {
 			var cc = val;
 			var _this = this.rseed;
 			var node = pool[((_this.seed = _this.seed * 16807 % 2147483647) & 1073741823) % pool.length];
-			var _this1 = this.rseed;
-			var files = ((_this1.seed = _this1.seed * 16807 % 2147483647) & 1073741823) % 2 == 0 ? node.system.getFilesByKey("file.mail") : node.system.getFilesByKey("file.doc");
+			var files = node.system.getFilesByKey("file.mail").concat(node.system.getFilesByKey("file.doc"));
 			files = Lambda.array(Lambda.filter(files,function(f) {
 				return !f.fl_target;
 			}));
+			if(files.length == 0) {
+				continue;
+			}
 			var _this2 = this.rseed;
 			var f = files[((_this2.seed = _this2.seed * 16807 % 2147483647) & 1073741823) % files.length];
 			if(f == null) {
@@ -5216,9 +5278,11 @@ GNetwork.prototype = {
 			TD.texts.set("card",cc);
 			if(f.ext("mail")) {
 				f.forceMail(TD.texts.get("sellerMail"),TD.texts.get("creditCardMail"),false);
+				f.key = "card.mail";
 			} else {
 				f.content = TD.texts.get("creditCardDoc");
 				f.name = TD.fsNames.get("creditCard.doc");
+				f.key = "card.doc";
 			}
 		}
 	}
@@ -5748,7 +5812,10 @@ GNetwork.prototype = {
 		case 10:
 			var owner = _g.owner;
 			var sender = _g.sender;
-			var list = fn.system.getFilesByExt(null,"mail");
+			var list = fn.system.getFilesByKey("file.mail");
+			if(list.length == 0) {
+				list = fn.system.getFilesByExt(null,"mail");
+			}
 			var _this = this.rseed;
 			var mail = list[((_this.seed = _this.seed * 16807 % 2147483647) & 1073741823) % list.length];
 			mail.fl_target = true;
@@ -5757,7 +5824,10 @@ GNetwork.prototype = {
 		case 11:
 			var owner = _g.owner;
 			var n = _g.n;
-			var list = fn.system.getFilesByExt(null,"mail");
+			var list = fn.system.getFilesByKey("file.mail");
+			if(list.length < n) {
+				list = fn.system.getFilesByExt(null,"mail");
+			}
 			if(list.length < n) {
 				Manager.fatal("not enough file for mission _MFindMails");
 			}
@@ -5926,7 +5996,11 @@ GNetwork.prototype = {
 			while(_g1 < _g2.length) {
 				var f = _g2[_g1];
 				++_g1;
-				f.name = TD.names.get("hotProg");
+				var pname = TD.names.get("hotProg");
+				if(!StringTools.endsWith(pname.toLowerCase(),".data")) {
+					pname += ".data";
+				}
+				f.name = pname;
 				f.setOwner("mission");
 			}
 			break;
@@ -5944,10 +6018,10 @@ GNetwork.prototype = {
 				var ntv = val;
 				var tmp = tv + " " + TD.texts.get("roman") + "-";
 				var _this = this.rseed;
-				ntv.system.name = tmp + (((_this.seed = _this.seed * 16807 % 2147483647) & 1073741823) % 9 + 1);
+				ntv.system.forceRootName(tmp + (((_this.seed = _this.seed * 16807 % 2147483647) & 1073741823) % 9 + 1));
 			}
 			var f = fn.system.getOneFile("tvprog.data");
-			f.name = program;
+			f.name = StringTools.endsWith(program.toLowerCase(),".data") ? program : program + ".data";
 			f.fl_target = true;
 			var _this = this.rseed;
 			f.addEffect(EffectType.E_Encoded,((_this.seed = _this.seed * 16807 % 2147483647) & 1073741823) % 4);
@@ -7013,19 +7087,9 @@ JSMain.prototype = {
 				return;
 			}
 		}
-		var form = window.document.createElement("form");
-		form.method = "post";
-		form.action = url;
-		var input = window.document.createElement("input");
-		input.type = "text";
-		input.name = "msg";
-		var serializer = new haxe_Serializer();
-		serializer.serialize(msg);
-		input.value = serializer.toString();
-		form.appendChild(input);
-		window.document.body.appendChild(form);
-		form.submit();
-		cb(msg);
+		if(cb != null) {
+			cb(msg);
+		}
 	}
 	,nextTutoStep: function() {
 		Tutorial.onAutoNext();
@@ -8375,8 +8439,21 @@ Manager.stopLoading = function() {
 	Manager.mcLoading = null;
 };
 Manager.getParams = function() {
+	Manager.OWNED_VIRUSES = null;
 	var cfg = window.__INTRUSION_CONFIG__;
 	if(cfg != null) {
+		if(cfg.ownedViruses != null) {
+			Manager.OWNED_VIRUSES = new haxe_ds_StringMap();
+			var ovKeys = Reflect.fields(cfg.ownedViruses);
+			var _ov = 0;
+			while(_ov < ovKeys.length) {
+				var k = ovKeys[_ov++];
+				var cnt = Reflect.field(cfg.ownedViruses,k) | 0;
+				if(cnt > 0) {
+					Manager.OWNED_VIRUSES.h[k] = cnt;
+				}
+			}
+		}
 		var profileCfg = cfg.profile != null ? cfg.profile : { };
 		var adult = profileCfg.adult != null ? profileCfg.adult == true : true;
 		var lang = profileCfg.lang != null ? Std.string(profileCfg.lang) : Manager.LANG;
@@ -8401,6 +8478,7 @@ Manager.getParams = function() {
 				mdata._cards.add(Std.string(c));
 			}
 		}
+		var isChallenge = cfg.isChallenge == true;
 		var decks = new haxe_ds_List();
 		if(cfg.decks != null) {
 			var rawDecks = cfg.decks;
@@ -8419,10 +8497,13 @@ Manager.getParams = function() {
 					}
 				}
 				decks.add({ _name : d.name != null ? Std.string(d.name) : "Deck", _content : arr});
+				if(isChallenge) {
+					break;
+				}
 			}
 		}
 		var chip = cfg.chipset == null || cfg.chipset == "" || cfg.chipset == "none" ? null : Std.string(cfg.chipset);
-		return { _sfxVer : 1, _musicVer : 2, _startUrl : "", _endUrl : "/api/missions/end", _errorUrl : "/", _iconsUrl : Manager.ASSET_ROOT + "img/dockicons/", _iconsVer : 1, _sfxUrl : Manager.ASSET_ROOT + "sfx/", _seed : seed, _gl : gl, _m : mdata, _decks : decks, _chip : chip, _c : cfg.isChallenge == true, _bios : cfg.biosLevel != null ? cfg.biosLevel | 0 : 1, _profile : { _uname : profileCfg.username != null ? Std.string(profileCfg.username) : "Haxxor", _low : false, _adult : adult, _ulevel : profileCfg.level != null ? profileCfg.level | 0 : 1, _leet : profileCfg.leet == true, _cfg : profileCfg.cfg != null ? Std.string(profileCfg.cfg) : "", _sfx : profileCfg.sfx != null ? profileCfg.sfx == true : true, _ambiant : profileCfg.ambiant != null ? profileCfg.ambiant == true : true, _beat : profileCfg.beat != null ? profileCfg.beat == true : true}};
+		return { _sfxVer : 1, _musicVer : 2, _startUrl : "", _endUrl : "/api/missions/end", _errorUrl : "/", _iconsUrl : Manager.ASSET_ROOT + "img/dockicons/", _iconsVer : 1, _sfxUrl : Manager.ASSET_ROOT + "sfx/", _seed : seed, _gl : gl, _m : mdata, _decks : decks, _chip : chip, _c : isChallenge, _bios : cfg.biosLevel != null ? cfg.biosLevel | 0 : 1, _profile : { _uname : profileCfg.username != null ? Std.string(profileCfg.username) : "Haxxor", _low : false, _adult : adult, _ulevel : profileCfg.level != null ? profileCfg.level | 0 : 1, _leet : profileCfg.leet == true, _cfg : profileCfg.cfg != null ? Std.string(profileCfg.cfg) : "", _sfx : profileCfg.sfx != null ? profileCfg.sfx == true : true, _ambiant : profileCfg.ambiant != null ? profileCfg.ambiant == true : true, _beat : profileCfg.beat != null ? profileCfg.beat == true : true}};
 	}
 	var p = null;
 	try {
@@ -8432,10 +8513,19 @@ Manager.getParams = function() {
 		haxe_NativeStackTrace.lastError = _g;
 		Manager.fatal("init failed");
 	}
+	if(p != null && p._c && p._decks != null && p._decks.length > 1) {
+		var firstDeck = p._decks.first();
+		p._decks = new haxe_ds_List();
+		if(firstDeck != null) {
+			p._decks.add(firstDeck);
+		}
+	}
 	return p;
 };
 Manager.delay = function(cb,d) {
-	Manager.timers.add(haxe_Timer.delay(cb,d | 0));
+	var t = haxe_Timer.delay(cb,d | 0);
+	Manager.timers.add(t);
+	return t;
 };
 Manager.stopTimers = function() {
 	var _g_head = Manager.timers.h;
@@ -8457,6 +8547,12 @@ Manager.prototype = {
 		data_ValuablesXml.init(Manager.LANG);
 		data_ChipsetsXml.init(Manager.LANG);
 		Manager.PARAMS = Manager.getParams();
+		Lang.reinit();
+		Tutorial.reinit();
+		data_VirusXml.init(Manager.LANG);
+		data_AntivirusXml.init();
+		data_ValuablesXml.init(Manager.LANG);
+		data_ChipsetsXml.init(Manager.LANG);
 		this.term = new UserTerminal();
 		Manager.stopLoading();
 	}
@@ -8779,6 +8875,11 @@ StringTools.lpad = function(s,c,l) {
 	buf_b += s == null ? "null" : "" + s;
 	return buf_b;
 };
+StringTools.endsWith = function(s,end) {
+	var elen = end.length;
+	var slen = s.length;
+	return slen >= elen && s.indexOf(end,slen - elen) == slen - elen;
+};
 StringTools.replace = function(s,sub,by) {
 	return s.split(sub).join(by);
 };
@@ -8885,6 +8986,10 @@ Lang.init = function() {
 	}
 	return h;
 };
+Lang.reinit = function() {
+	Lang.TEXTS = Lang.init();
+	Lang.get = _$Lang_AllTexts._new(($_=Lang.TEXTS,$bind($_,$_.get)));
+};
 Lang.parse = function(str) {
 	str = StringTools.replace(str,"&quot;","\"");
 	str = StringTools.replace(str,"&apos;","'");
@@ -8916,26 +9021,38 @@ Lang.replaceVars = function(str,data) {
 var Live = function() { };
 $hxClasses["Live"] = Live;
 Live.__name__ = "Live";
+Live.timer = null;
+Live.cancel = function() {
+	if(Live.timer != null) {
+		Live.timer.stop();
+		Live.timer.run = null;
+		Live.timer = null;
+	}
+};
 Live.loadVideo = function(f) {
+	Live.cancel();
 	var gif = Live.CINE_GIFS[f.id % Live.CINE_GIFS.length];
 	f.embedData = "video|" + gif;
 	if(Live.term != null) {
 		Live.term.updateCopies(f);
 	}
-	Manager.delay(function() {
-		if(Live.term != null && Live.term.fs != null && Live.term.fs.target == f) {
+	Live.timer = Manager.delay(function() {
+		Live.timer = null;
+		if(Live.term != null && (Live.term.fs == null || Live.term.fs.target == f)) {
 			UserTerminal.jsMain.embedVideo(f.name,gif);
 		}
 	},450);
 };
 Live.loadImage = function(f) {
+	Live.cancel();
 	var img = Live.CINE_IMGS[f.id % Live.CINE_IMGS.length];
 	f.embedData = "image|" + img + "|" + img;
 	if(Live.term != null) {
 		Live.term.updateCopies(f);
 	}
-	Manager.delay(function() {
-		if(Live.term != null && Live.term.fs != null && Live.term.fs.target == f) {
+	Live.timer = Manager.delay(function() {
+		Live.timer = null;
+		if(Live.term != null && (Live.term.fs == null || Live.term.fs.target == f)) {
 			UserTerminal.jsMain.embedImage(f.name,img,img);
 		}
 	},400);
@@ -9081,6 +9198,12 @@ MissionGen.getTutorial = function(mdata) {
 MissionGen.isType = function(mdata,mtype) {
 	return mdata._type._hx_index == mtype._hx_index;
 };
+MissionGen.ensureDataExt = function(s) {
+	if(s == null) {
+		return ".data";
+	}
+	return StringTools.endsWith(s.toLowerCase(),".data") ? s : s + ".data";
+};
 MissionGen.isTutorial = function(mdata) {
 	return mdata._gl <= 3;
 };
@@ -9153,7 +9276,7 @@ MissionGen.prototype = {
 			list = list.concat([_$MissionPattern._MDeleteAll(this.names.get("musername",rseed),"doc"),_$MissionPattern._MModerate(this.names.get("musername",rseed)),_$MissionPattern._MOverwriteFiles(this.names.get("musername",rseed),"doc"),_$MissionPattern._MOverwriteFiles(this.names.get("musername",rseed),"mail")]);
 		}
 		if(glevel >= 7) {
-			list = list.concat([_$MissionPattern._MFindMails(this.names.get("musername",rseed),((rseed.seed = rseed.seed * 16807 % 2147483647) & 1073741823) % 3 + 2),_$MissionPattern._MCompromiseMail(this.names.get("musername",rseed)),_$MissionPattern._MTV(this.names.get("hotTv",rseed),this.names.get("badTv",rseed)),_$MissionPattern._MTVTheft(this.names.get("tv",rseed),this.names.get("tvProgTheft",rseed)),_$MissionPattern._MTVTheft(this.names.get("hotTv",rseed),this.names.get("hotProgTheft",rseed)),_$MissionPattern._MTVCrash(this.names.get("tv",rseed)),_$MissionPattern._MCrashDB(this.fsNames.get("/sys_db",rseed))]);
+			list = list.concat([_$MissionPattern._MFindMails(this.names.get("musername",rseed),((rseed.seed = rseed.seed * 16807 % 2147483647) & 1073741823) % 3 + 2),_$MissionPattern._MCompromiseMail(this.names.get("musername",rseed)),_$MissionPattern._MTV(this.names.get("hotTv",rseed),this.names.get("badTv",rseed)),_$MissionPattern._MTVTheft(this.names.get("tv",rseed),MissionGen.ensureDataExt(this.names.get("tvProgTheft",rseed))),_$MissionPattern._MTVTheft(this.names.get("hotTv",rseed),MissionGen.ensureDataExt(this.names.get("hotProgTheft",rseed))),_$MissionPattern._MTVCrash(this.names.get("tv",rseed)),_$MissionPattern._MCrashDB(this.fsNames.get("/sys_db",rseed))]);
 		}
 		if(glevel >= 8) {
 			list = list.concat([_$MissionPattern._MSpyCam,_$MissionPattern._MCleanSecurity,_$MissionPattern._MCamRec(this.fsNames.get("archive.video",rseed)),_$MissionPattern._MGameHack(this.names.get("gameName",rseed),this.names.get("gameServer",rseed),this.names.get("gameChar",rseed))]);
@@ -9907,6 +10030,10 @@ Tutorial.initXml = function() {
 	}
 	return h;
 };
+Tutorial.reinit = function() {
+	Tutorial.ALL = Tutorial.initXml();
+	Tutorial.get = _$Tutorial_AllData._new(($_=Tutorial.ALL,$bind($_,$_.get)));
+};
 Tutorial.start = function(t) {
 	Tutorial.end();
 	Tutorial.current = t;
@@ -10531,9 +10658,13 @@ var UserTerminal = function() {
 	this.soundContainer = Manager.DM.empty(Data.DP_BG);
 	this.speed = this.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"turbo")) ? 1.5 : 1;
 	this.dspeed = this.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"turbo")) ? 1.5 : 1;
-	if(Manager.PARAMS._bios < 4) {
-		this.speed += Manager.PARAMS._bios;
-		this.dspeed += Manager.PARAMS._bios * 0.6;
+	var bios = Math.min(4,Math.max(0,Manager.PARAMS._bios)) | 0;
+	if(bios < 4) {
+		this.speed += bios;
+		this.dspeed += bios * 0.6;
+	} else {
+		this.speed += 3.5;
+		this.dspeed += 4 * 0.6;
 	}
 	var tmp;
 	switch(this.gameLevel) {
@@ -10657,6 +10788,7 @@ UserTerminal.prototype = {
 	,timerLimit: null
 	,tick: null
 	,alarmTimer: null
+	,alarmDuration: null
 	,alarmOrigin: null
 	,kills: null
 	,life: null
@@ -10749,20 +10881,70 @@ UserTerminal.prototype = {
 				if(missionVirus != null) {
 					this.virList.add(missionVirus);
 				}
+				var activeDecks = [];
 				var _g_head = Manager.PARAMS._decks.h;
 				while(_g_head != null) {
 					var val = _g_head.item;
 					_g_head = _g_head.next;
-					var deck = val;
+					activeDecks.push(val);
+					if(Manager.PARAMS._c) {
+						break;
+					}
+				}
+				var maxInDeck = new haxe_ds_StringMap();
+				var _di = 0;
+				while(_di < activeDecks.length) {
+					var deck0 = activeDecks[_di++];
+					var counts = new haxe_ds_StringMap();
+					var _ci = 0;
+					var _content0 = deck0._content;
+					while(_ci < _content0.length) {
+						var vid0 = _content0[_ci++];
+						var c0 = Object.prototype.hasOwnProperty.call(counts.h,vid0) ? counts.h[vid0] + 1 : 1;
+						counts.h[vid0] = c0;
+						if(!Object.prototype.hasOwnProperty.call(maxInDeck.h,vid0) || c0 > maxInDeck.h[vid0]) {
+							maxInDeck.h[vid0] = c0;
+						}
+					}
+				}
+				var pools = new haxe_ds_StringMap();
+				var cursors = new haxe_ds_StringMap();
+				var mkeys = Object.keys(maxInDeck.h);
+				var _mk = 0;
+				while(_mk < mkeys.length) {
+					var id0 = mkeys[_mk++];
+					var count = maxInDeck.h[id0];
+					if(!Manager.PARAMS._c && Manager.OWNED_VIRUSES != null && Object.prototype.hasOwnProperty.call(Manager.OWNED_VIRUSES.h,id0)) {
+						count = Manager.OWNED_VIRUSES.h[id0];
+					}
+					if(count == null || count < 1) {
+						count = 1;
+					}
+					var pool = [];
+					var _pi = 0;
+					while(_pi < count) {
+						++_pi;
+						var inst = data_VirusXml.createInstance(id0);
+						pool.push(inst);
+						this.virList.add(inst);
+					}
+					pools.h[id0] = pool;
+					cursors.h[id0] = 0;
+				}
+				var _di2 = 0;
+				while(_di2 < activeDecks.length) {
+					var deck = activeDecks[_di2++];
 					var dvList = new haxe_ds_List();
 					var _g = 0;
 					var _g1 = deck._content;
 					while(_g < _g1.length) {
 						var id = _g1[_g];
 						++_g;
-						var v = data_VirusXml.createInstance(id);
+						var pool1 = pools.h[id];
+						var cur = cursors.h[id];
+						var v = pool1[cur % pool1.length];
+						cursors.h[id] = cur + 1;
 						dvList.add(v);
-						this.virList.add(v);
 					}
 					if(missionVirus != null) {
 						dvList.add(missionVirus);
@@ -10886,7 +11068,13 @@ UserTerminal.prototype = {
 		if(this.chipset != null) {
 			this.log((_$Lang_AllTextsFormat.getText(Lang.fmt,"Log_Chipset"))({ _c : this.chipset.name.toUpperCase(), _id : this.chipset.id.toLowerCase()}));
 		}
-		haxe_Timer.delay($bind(this,this.onStartGameDelayed),1000);
+		var me = this;
+		Manager.delay(function() {
+			if(me.fl_end || (Manager.ME != null && Manager.ME.disposed)) {
+				return;
+			}
+			me.onStartGameDelayed();
+		},1000);
 	}
 	,onStartGameDelayed: function() {
 		this.bigLog(_$Lang_AllTexts.getText(Lang.get,"BigConnected"));
@@ -10931,8 +11119,8 @@ UserTerminal.prototype = {
 			var k = this.kills;
 			var data = { _init : Manager.PARAMS, _success : !fl_abandon && this.checkMissionStatus(), _kills : k, _rt : (this.timerLimit - (HxOverrides.now() / 1000 * 1000 - this.gtimer)) / 1000 | 0, _valuables : vfList, _storage : slist, _goals : glist, _fps : this.fpsAvg | 0};
 			var msg = _$Message.MISSION_RESULT(data);
-			UserTerminal.jsMain.send(Manager.PARAMS._endUrl,msg,$bind(this,this.onEndData));
 			this.fl_end = true;
+			UserTerminal.jsMain.send(Manager.PARAMS._endUrl,msg,$bind(this,this.onEndData));
 			this.stopAllSounds(false);
 			this.bigLog(_$Lang_AllTexts.getText(Lang.get,"BigEnd"),true,null,true);
 		} catch( _g ) {
@@ -10990,32 +11178,36 @@ UserTerminal.prototype = {
 	}
 	,parseConfig: function(cfg) {
 		this.aliases = new haxe_ds_StringMap();
+		if(cfg == null) {
+			return;
+		}
 		var _g = 0;
 		var _g1 = cfg.split("\n");
 		while(_g < _g1.length) {
 			var line = _g1[_g];
 			++_g;
 			line = StringTools.replace(line,"\t"," ");
+			line = StringTools.replace(line,"\u00A0"," ");
 			line = StringTools.replace(line,"\r","");
-			line = Data.trim(line," ");
-			while(line.indexOf("  ") >= 0) line = StringTools.replace(line,"  "," ");
-			if(line.length == 0) {
-				continue;
-			}
-			var original = line;
+			var original = Data.trim(line," ");
 			if(line.indexOf("#") >= 0) {
 				line = HxOverrides.substr(line,0,line.indexOf("#"));
 			}
+			line = Data.trim(line," ");
+			while(line.indexOf("  ") >= 0) line = StringTools.replace(line,"  "," ");
 			if(line.length == 0) {
 				continue;
 			}
 			var command = line.split(" ")[0].toLowerCase();
 			var params = HxOverrides.substr(line,command.length + 1,null);
 			if(command == "alias") {
-				var from = Data.trimSpaces(params.split("=")[0]);
-				var to = Data.trimSpaces(params.split("=")[1]);
-				if(from != null && to != null) {
-					this.aliases.h[from] = to;
+				var eq = params.indexOf("=");
+				if(eq >= 0) {
+					var from = Data.trimSpaces(HxOverrides.substr(params,0,eq)).toLowerCase();
+					var to = Data.trimSpaces(HxOverrides.substr(params,eq + 1,null));
+					if(from != null && to != null && from.length > 0 && to.length > 0) {
+						this.aliases.h[from] = to;
+					}
 				}
 			} else {
 				Manager.fatal(_$Lang_AllTexts.getText(Lang.get,"InvalidConfigFile") + "\n" + original);
@@ -11411,12 +11603,15 @@ UserTerminal.prototype = {
 			if(n.system.fl_crashed) {
 				return false;
 			}
+			var _g2 = n.system.getTargetFiles(null,true);
+			if(_g2.length == 0) {
+				return false;
+			}
 			var _g1 = 0;
-			var _g2 = n.system.getFilesByKey("archive.video");
 			while(_g1 < _g2.length) {
 				var f = _g2[_g1];
 				++_g1;
-				if(!f.hasEffect(EffectType.E_Mission)) {
+				if(f.fl_deleted || !f.hasEffect(EffectType.E_Mission)) {
 					return false;
 				}
 			}
@@ -11487,12 +11682,15 @@ UserTerminal.prototype = {
 			while(_g1 < mnodes.length) {
 				var n1 = mnodes[_g1];
 				++_g1;
+				if(n1.system.fl_crashed) {
+					return false;
+				}
 				var _g2 = 0;
-				var _g3 = n1.system.getTargetFiles();
+				var _g3 = n1.system.getTargetFiles(null,true);
 				while(_g2 < _g3.length) {
 					var f = _g3[_g2];
 					++_g2;
-					if(f.ext(ext) && !f.hasEffect(EffectType.E_Mission) && !f.fl_deleted) {
+					if(f.ext(ext) && (f.fl_deleted || !f.hasEffect(EffectType.E_Mission))) {
 						return false;
 					}
 				}
@@ -11505,12 +11703,15 @@ UserTerminal.prototype = {
 			if(n.system.fl_crashed) {
 				return false;
 			}
+			var _g2 = n.system.getTargetFiles(null,true);
+			if(_g2.length == 0) {
+				return false;
+			}
 			var _g1 = 0;
-			var _g2 = n.system.getTargetFiles();
 			while(_g1 < _g2.length) {
 				var f = _g2[_g1];
 				++_g1;
-				if(!f.hasEffect(EffectType.E_Mission)) {
+				if(f.fl_deleted || !f.hasEffect(EffectType.E_Mission)) {
 					return false;
 				}
 			}
@@ -11552,19 +11753,23 @@ UserTerminal.prototype = {
 		case 29:
 			var tf = _g.tvFrom;
 			var tt = _g.tvTo;
-			var list = n.system.getFilesByKey("tvprog.data");
-			if(list.length == 0) {
+			if(n.system.fl_crashed) {
 				return false;
 			}
+			var found = 0;
 			var _g1 = 0;
-			while(_g1 < list.length) {
-				var f = list[_g1];
+			var _g2 = n.system.rawTree;
+			while(_g1 < _g2.length) {
+				var f = _g2[_g1];
 				++_g1;
-				if(f.fl_deleted || !f.hasEffect(EffectType.E_Mission)) {
-					return false;
+				if(f.key == "tvprog.data") {
+					++found;
+					if(f.fl_deleted || !f.hasEffect(EffectType.E_Mission)) {
+						return false;
+					}
 				}
 			}
-			return true;
+			return found > 0;
 		case 30:
 			var tv = _g.tv;
 			var _g_head = this.net.getNodes(NodeType.Tv).h;
@@ -11626,8 +11831,8 @@ UserTerminal.prototype = {
 		while(_g < _g1.length) {
 			var f = _g1[_g];
 			++_g;
-			if(f.id == uf.id) {
-				f.copyData(uf);
+			if(f != uf && f.fs == uf.fs && f.id == uf.id) {
+				uf.copyData(f);
 			}
 		}
 	}
@@ -11644,7 +11849,7 @@ UserTerminal.prototype = {
 		while(_g < _g1.length) {
 			var f = _g1[_g];
 			++_g;
-			if(file.name == f.name && file.id == f.id) {
+			if(file.fs == f.fs && file.id == f.id) {
 				return true;
 			}
 		}
@@ -11726,13 +11931,17 @@ UserTerminal.prototype = {
 			return;
 		}
 		this.fl_disconnecting = true;
+		this.vman.onEndTurn();
 		this.avman.onEndTurn();
 		if(!fl_stealth) {
 			this.avman.onDisconnect();
 			this.avman.onEndTurn();
+			this.vman.onEndTurn();
+			this.avman.onEndTurn();
 		}
 		this.avman.endTurn = new haxe_ds_List();
 		this.vman.endTurn = new haxe_ds_List();
+		this.vman.burstUsed = false;
 		this.log(_$Lang_AllTexts.getText(Lang.get,"Disconnected"));
 		if(fl_stealth && this.life > 0) {
 			this.log(_$Lang_AllTexts.getText(Lang.get,"Log_Stealth"));
@@ -11749,6 +11958,8 @@ UserTerminal.prototype = {
 		this.net.refresh();
 		this.clearEffect(UserEffectType.UE_Furtivity);
 		this.clearEffect(UserEffectType.UE_MoveFurtivity);
+		this.clearEffect(UserEffectType.UE_SwitchDeck);
+		this.checkMission();
 		this.bigLog(_$Lang_AllTexts.getText(Lang.get,"BigDisconnected"),null,-30);
 		this.fl_disconnecting = false;
 	}
@@ -11862,7 +12073,7 @@ UserTerminal.prototype = {
 		this.lastTimer = null;
 		this.updateTimer();
 		this.log((_$Lang_AllTextsFormat.getText(Lang.fmt,"Log_GainedTime"))({ _n : s}),7584759);
-		this.popNumber(null,null,s," secondes",this.manaBar.x + this.manaBar.width * 0.5,this.manaBar.y - 20);
+		this.popNumber(null,null,s,Manager.LANG == "en" ? " seconds" : " secondes",this.manaBar.x + this.manaBar.width * 0.5,this.manaBar.y - 20);
 	}
 	,gainLife: function(n) {
 		this.life += n;
@@ -11943,22 +12154,26 @@ UserTerminal.prototype = {
 		if(et == UserEffectType.UE_Combo) {
 			max = this.maxCombo;
 		}
-		if(cpt > max) {
-			cpt = max;
-		}
 		var _g_head = this.ueffects.h;
 		while(_g_head != null) {
 			var val = _g_head.item;
 			_g_head = _g_head.next;
 			var e = val;
 			if(e.type == et) {
+				var effectiveMax = e.cpt > max ? e.cpt : max;
 				e.cpt += cpt;
-				if(e.cpt > max) {
-					e.cpt = max;
+				if(e.cpt > effectiveMax) {
+					e.cpt = effectiveMax;
+				}
+				if(source != null) {
+					e.source = source;
 				}
 				this.dock.displayEffects();
 				return;
 			}
+		}
+		if(cpt > max) {
+			cpt = max;
 		}
 		this.ueffects.push({ source : source, type : et, cpt : cpt});
 		this.dock.displayEffects();
@@ -12310,9 +12525,7 @@ UserTerminal.prototype = {
 		}
 		MCField.get_field(mc).text = str;
 		MCField.get_field(mc).set_textColor(col);
-		var _this = MCField.get_field(mc);
-		_this.width = MCField.get_field(mc).width + 5;
-		wid += MCField.get_field(mc).width;
+		wid += MCField.get_field(mc).get_textWidth();
 		var _this = mc;
 		_this.x = Math.round(mc.x - wid * 0.5);
 		if(str.length < 5) {
@@ -12497,24 +12710,17 @@ UserTerminal.prototype = {
 			BubbleMC.get_title(this.bmc).text = "";
 		}
 		BubbleMC.get_field(this.bmc).text = str;
-		var maxWid = Math.max(BubbleMC.get_field(this.bmc).width,BubbleMC.get_title(this.bmc).width);
+		var maxWid = Math.max(BubbleMC.get_field(this.bmc).get_textWidth(),BubbleMC.get_title(this.bmc).get_textWidth());
 		var totHei = BubbleMC.get_field(this.bmc).get_textHeight() + BubbleMC.get_title(this.bmc).get_textHeight();
 		var _this = BubbleMC.get_title(this.bmc);
 		_this.y = -Math.round(totHei * 0.5);
 		var _this = BubbleMC.get_field(this.bmc);
 		_this.y = BubbleMC.get_title(this.bmc).y + BubbleMC.get_title(this.bmc).get_textHeight();
-		var resizeBubbleBg = function() {
-			if (_gthis.bmc == null) return;
-			BubbleMC.get_bg(_gthis.bmc).width = 12 + maxWid;
-			var tmp = 10 + BubbleMC.get_field(_gthis.bmc).get_textHeight();
-			BubbleMC.get_bg(_gthis.bmc).height = tmp + BubbleMC.get_title(_gthis.bmc).get_textHeight();
-			BubbleMC.get_l(_gthis.bmc).height = BubbleMC.get_bg(_gthis.bmc).height + 6;
-			BubbleMC.get_r(_gthis.bmc).height = BubbleMC.get_l(_gthis.bmc).height;
-			var _this = BubbleMC.get_r(_gthis.bmc);
-			_this.x = BubbleMC.get_bg(_gthis.bmc).width + 5;
-		};
-		resizeBubbleBg();
-		BubbleMC.get_bg(this.bmc).on("complete", resizeBubbleBg);
+		BubbleMC.get_bg(this.bmc).width = 12 + maxWid;
+		BubbleMC.get_bg(this.bmc).height = 10 + totHei;
+		BubbleMC.get_l(this.bmc).height = BubbleMC.get_bg(this.bmc).height + 6;
+		BubbleMC.get_r(this.bmc).height = BubbleMC.get_l(this.bmc).height;
+		BubbleMC.get_r(this.bmc).x = BubbleMC.get_bg(this.bmc).width + 5;
 		this.updateBubble();
 		if(!this.fl_lowq) {
 			this.startAnim(AnimType.A_BubbleIn,this.bmc,null,d);
@@ -12578,6 +12784,8 @@ UserTerminal.prototype = {
 	}
 	,askPass: function(f) {
 		this.detachPass();
+		this.dock.lock();
+		this.dock.hide();
 		this.hideCmdLine();
 		this.attachMask($bind(this,this.detachPass));
 		this.passFile = f;
@@ -12599,6 +12807,7 @@ UserTerminal.prototype = {
 		this.playSound("bleep_07");
 	}
 	,detachPass: function() {
+		var wasOpen = this.pwin != null;
 		this.ffield = null;
 		var tmp = this.pwin;
 		if(tmp != null) {
@@ -12606,6 +12815,14 @@ UserTerminal.prototype = {
 		}
 		this.pwin = null;
 		this.detachMask();
+		if(wasOpen) {
+			if(this.fs != null) {
+				this.dock.unlock();
+			}
+			if(!this.fl_end) {
+				this.dock.show();
+			}
+		}
 		this.showCmdLine();
 	}
 	,validatePass: function(str,pf) {
@@ -12667,7 +12884,9 @@ UserTerminal.prototype = {
 		if(!this.fl_leet) {
 			return;
 		}
-		this.cmdLine.removeMovieClip();
+		if(this.cmdLine != null) {
+			this.cmdLine.removeMovieClip();
+		}
 		this.cmdLine = Manager.DM.attach("cmdLine",Data.DP_TOPTOP);
 		var _this = this.cmdLine;
 		_this.x = 16;
@@ -12726,6 +12945,16 @@ UserTerminal.prototype = {
 					clist.add(v.id);
 				}
 			}
+			var h = this.aliases.h;
+			var from_keys = Object.keys(h);
+			var from_length = from_keys.length;
+			var from_current = 0;
+			while(from_current < from_length) {
+				var from = from_keys[from_current++];
+				if(from.toLowerCase().indexOf(virusId) == 0) {
+					clist.add(from);
+				}
+			}
 		} else {
 			var _g = 0;
 			var _g1 = this.fs.getFolderFiles(parent);
@@ -12736,15 +12965,6 @@ UserTerminal.prototype = {
 					clist.add(f.name);
 				}
 			}
-		}
-		var h = this.aliases.h;
-		var from_h = h;
-		var from_keys = Object.keys(h);
-		var from_length = from_keys.length;
-		var from_current = 0;
-		while(from_current < from_length) {
-			var from = from_keys[from_current++];
-			clist.add(from);
 		}
 		var _g_head = clist.h;
 		while(_g_head != null) {
@@ -13128,8 +13348,8 @@ UserTerminal.prototype = {
 		var me = this;
 		if(!fl_permanent) {
 			a.cb = function() {
-				me.startAnim(AnimType.A_FadeRemove,mc,str,-2.5);
-				a.spd *= fl_long ? 0.2 : 1;
+				var a2 = me.startAnim(AnimType.A_FadeRemove,mc,str,-2.5);
+				a2.spd *= fl_long ? 0.2 : 1;
 			};
 		}
 		return a;
@@ -13426,7 +13646,12 @@ UserTerminal.prototype = {
 		}
 	}
 	,onWheel: function(e) {
-		if(this.fl_end || this.apps.length > 0 || this.popMC != null || this.pwin != null) {
+		if(this.fl_end || this.popMC != null || this.pwin != null) {
+			return;
+		}
+		if(this.apps.length > 0) {
+			this.apps.last().onMouseWheel(e.deltaY > 0 ? -3 : 3);
+			e.preventDefault();
 			return;
 		}
 		if(this.fs != null) {
@@ -13505,12 +13730,16 @@ UserTerminal.prototype = {
 			d += UserTerminal.ALARM_DURATION * 0.5 | 0;
 		}
 		this.alarmOrigin = node;
+		this.alarmDuration = d;
 		this.alarmTimer = d + 1;
 	}
 	,stopAlarm: function() {
 		this.playSound("alarm_01");
 		var me = this;
-		haxe_Timer.delay(function() {
+		Manager.delay(function() {
+			if(me.fl_end || (Manager.ME != null && Manager.ME.disposed)) {
+				return;
+			}
 			me.bigLog(_$Lang_AllTexts.getText(Lang.get,"AlarmStop"),true,60);
 		},1000);
 		this.alarmOrigin = null;
@@ -13543,6 +13772,9 @@ UserTerminal.prototype = {
 		this.popUp(_$Lang_AllTexts.getText(Lang.get,"YouAreDead"));
 	}
 	,onTick: function() {
+		if(this.fl_busted || this.fl_dead || this.fl_end) {
+			return;
+		}
 		this.tick++;
 		this.vman.onTick(this.tick);
 		if(this.tick % 5 == 0 && this.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"regen"))) {
@@ -13557,7 +13789,7 @@ UserTerminal.prototype = {
 		if(this.alarmTimer != null && !this.fl_busted) {
 			if(this.alarmTimer % 10 == 0) {
 				this.bigLog((_$Lang_AllTextsFormat.getText(Lang.fmt,"AlarmStatus"))({ _n : this.alarmTimer}),null,60);
-				if(this.alarmTimer == UserTerminal.ALARM_DURATION) {
+				if(this.alarmTimer == this.alarmDuration) {
 					this.playSound("alarm_01");
 				}
 				this.playSound("alarm_02");
@@ -14088,8 +14320,12 @@ UserTerminal.prototype = {
 			this.updateLog();
 			this.updateTimer();
 			this.dock.update();
+			var hadEndTurn = !this.vman.endTurn.isEmpty() || !this.avman.endTurn.isEmpty();
 			this.vman.onEndTurn();
 			this.avman.onEndTurn();
+			if(hadEndTurn) {
+				this.checkMission();
+			}
 		}
 		var _g_head = this.apps.h;
 		while(_g_head != null) {
@@ -14150,6 +14386,7 @@ _$Com._anotherTip = function() {
 var VirusMan = function(t) {
 	this.term = t;
 	this.endTurn = new haxe_ds_List();
+	this.burstUsed = false;
 };
 $hxClasses["VirusMan"] = VirusMan;
 VirusMan.__name__ = "VirusMan";
@@ -14157,6 +14394,30 @@ VirusMan.prototype = {
 	term: null
 	,virus: null
 	,endTurn: null
+	,burstUsed: false
+	,getManaCost: function(v) {
+		var cc = v.cc;
+		if(v.cat == "damage" && this.term.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"brute"))) {
+			cc = Math.round(VirusMan.BRUTE_CC * cc);
+		}
+		if(this.term.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"thief"))) {
+			if(v.id == "fmove1") {
+				cc -= Math.floor(v.cc * 0.3);
+			} else if(v.id == "fmove2") {
+				cc -= Math.floor(v.cc * 0.4);
+			} else if(v.id == "invis") {
+				cc -= Math.floor(v.cc * 0.6);
+			}
+		}
+		if(this.term.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"deciph"))) {
+			if(v.id == "unmask" || v.id == "dec1") {
+				cc -= Math.floor(v.cc * 0.5);
+			} else if(v.id == "dec2" || v.id == "dec3") {
+				cc -= Math.floor(v.cc * 0.6);
+			}
+		}
+		return cc < 0 ? 0 : cc;
+	}
 	,exec: function(v,f,n) {
 		if(Progress.isRunning()) {
 			return;
@@ -14175,16 +14436,18 @@ VirusMan.prototype = {
 			if(v.uses == 0) {
 				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"NoCharge"));
 			}
-			var cc = v.cc;
-			if(v.cat == "damage" && this.term.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"brute"))) {
-				cc = Math.round(VirusMan.BRUTE_CC * cc);
-			}
+			var cc = this.getManaCost(v);
 			if(this.term.mana < cc) {
 				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"NotEnoughMana"));
 			}
+			if(this.virus.target != "_none" && f == null && n == null) {
+				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"InvalidTarget"));
+			}
 			if(this.term.fs != null && this.virus.target != "_net") {
 				if(this.virus == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"cd")) {
-					this.term.fs.logEvent((_$Lang_AllTextsFormat.getText(Lang.fmt,"TraceCD"))({ _name : f.name}));
+					if(f != null) {
+						this.term.fs.logEvent((_$Lang_AllTextsFormat.getText(Lang.fmt,"TraceCD"))({ _name : f.name}));
+					}
 				} else {
 					this.term.fs.logEvent((_$Lang_AllTextsFormat.getText(Lang.fmt,"TraceVirus"))({ _name : this.virus.name, _id : this.virus.id}));
 				}
@@ -14236,30 +14499,20 @@ VirusMan.prototype = {
 		if(str == null) {
 			throw haxe_Exception.thrown(null);
 		}
-		str = Data.trimSpaces(str);
 		str = StringTools.replace(str,"\t"," ");
+		str = StringTools.replace(str,"\u00A0"," ");
+		str = Data.trimSpaces(str);
 		while(str.length > 0 && str.indexOf("  ") >= 0) str = StringTools.replace(str,"  "," ");
 		if(str.length == 0) {
 			throw haxe_Exception.thrown(null);
 		}
 		var words = str.split(" ");
-		var h = this.term.aliases.h;
-		var from_h = h;
-		var from_keys = Object.keys(h);
-		var from_length = from_keys.length;
-		var from_current = 0;
-		while(from_current < from_length) {
-			var from = from_keys[from_current++];
-			var _g = 0;
-			var _g1 = words.length;
-			while(_g < _g1) {
-				var i = _g++;
-				if(words[i].toLowerCase() == from) {
-					words[i] = this.term.aliases.h[from];
-				}
-			}
+		var firstKey = words[0].toLowerCase();
+		if(Object.prototype.hasOwnProperty.call(this.term.aliases.h,firstKey)) {
+			words[0] = this.term.aliases.h[firstKey];
+			str = words.join(" ");
+			while(str.indexOf("  ") >= 0) str = StringTools.replace(str,"  "," ");
 		}
-		str = words.join(" ");
 		var v = null;
 		var end = str.indexOf(" ");
 		if(end < 0) {
@@ -14306,7 +14559,9 @@ VirusMan.prototype = {
 				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"FileNotFound"));
 			}
 		}
-		this.term.fs.focus(f.mcIndex);
+		if(f != null) {
+			this.term.fs.focus(f.mcIndex);
+		}
 		this.exec(v,f);
 	}
 	,check: function() {
@@ -14385,11 +14640,7 @@ VirusMan.prototype = {
 					me.term.log((_$Lang_AllTextsFormat.getText(Lang.fmt,"RemainingFurtivity"))({ _n : me.term.countEffect(UserEffectType.UE_Furtivity)}));
 				});
 			}
-			if(me.virus.cat == "damage" && me.term.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"brute"))) {
-				me.term.loseMana(Math.round(me.virus.cc * VirusMan.BRUTE_CC));
-			} else {
-				me.term.loseMana(me.virus.cc);
-			}
+			me.term.loseMana(me.getManaCost(me.virus));
 		},this.virus.name,ct >= 3 ? BarAnim.BA_Slow : BarAnim.BA_Normal);
 		this.term.detachBubble();
 	}
@@ -14417,6 +14668,7 @@ VirusMan.prototype = {
 				fn();
 			}
 		}
+		this.burstUsed = false;
 	}
 	,onTick: function(t) {
 		if(this.term.fs == null) {
@@ -14431,7 +14683,7 @@ VirusMan.prototype = {
 				++_g;
 				if(f.hasEffect(EffectType.E_Dot)) {
 					hit = true;
-					f.damage(f.countEffect(EffectType.E_Dot));
+					f.damage(f.countEffect(EffectType.E_Dot),false);
 					f.removeEffect(EffectType.E_DotLength);
 					if(!f.hasEffect(EffectType.E_DotLength)) {
 						f.clearEffect(EffectType.E_Dot);
@@ -14565,11 +14817,21 @@ VirusMan.prototype = {
 			break;
 		case 16:
 			var name = _g.name;
-			if(!f.ext("coeur")) {
-				throw haxe_Exception.thrown((_$Lang_AllTextsFormat.getText(Lang.fmt,"NeedExt"))({ _ext : "COEUR"}));
+			if(f.key != "file.core") {
+				throw haxe_Exception.thrown((_$Lang_AllTextsFormat.getText(Lang.fmt,"NeedExt"))({ _ext : Manager.LANG == "en" ? "CORE" : "COEUR"}));
 			}
 			if(f.hasEffect(EffectType.E_CShield)) {
 				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"CoreProtected"));
+			}
+			if(f.hasEffect(EffectType.E_Mission)) {
+				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"AlreadyDone"));
+			}
+			break;
+		case 17:
+			var owner0 = _g.owner;
+			var curNode0 = this.term.net.getNodeBySys(this.term.fs);
+			if(curNode0 == null || !curNode0.fl_target || this.term.fs.curFolder.key != "/mail") {
+				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"NotThisFolder"));
 			}
 			break;
 		case 18:
@@ -14581,12 +14843,26 @@ VirusMan.prototype = {
 			len = n * 0.75;
 			break;
 		case 19:
-			if(!f.ext("coeur")) {
-				throw haxe_Exception.thrown((_$Lang_AllTextsFormat.getText(Lang.fmt,"NeedExt"))({ _ext : "COEUR"}));
+			if(f.key != "file.core") {
+				throw haxe_Exception.thrown((_$Lang_AllTextsFormat.getText(Lang.fmt,"NeedExt"))({ _ext : Manager.LANG == "en" ? "CORE" : "COEUR"}));
+			}
+			if(f.hasEffect(EffectType.E_Mission)) {
+				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"AlreadyDone"));
+			}
+			break;
+		case 20:
+			var name0 = _g.name;
+			var curNode1 = this.term.net.getNodeBySys(this.term.fs);
+			if(curNode1 == null || !curNode1.fl_target || this.term.fs.curFolder.key != "/subcrimedata") {
+				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"NotThisFolder"));
 			}
 			break;
 		case 21:
 			var place = _g.place;
+			var curNode2 = this.term.net.getNodeBySys(this.term.fs);
+			if(curNode2 == null || !curNode2.fl_target || this.term.fs.curFolder.key != "/playlist") {
+				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"NotThisFolder"));
+			}
 			len = 4;
 			break;
 		case 22:
@@ -14613,6 +14889,9 @@ VirusMan.prototype = {
 			var v = _g.v;
 			if(!f.ext("control")) {
 				throw haxe_Exception.thrown((_$Lang_AllTextsFormat.getText(Lang.fmt,"NeedExt"))({ _ext : "CONTROL"}));
+			}
+			if(f.hasEffect(EffectType.E_Mission)) {
+				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"AlreadyDone"));
 			}
 			break;
 		case 25:
@@ -14646,7 +14925,9 @@ VirusMan.prototype = {
 				var file = _g.file;
 				var to = _g.to;
 				f = t.fs.uploadFile(null,"secret.doc");
+				f.name = file;
 				f.addEffect(EffectType.E_Encoded,6 + Std.random(4));
+				f.redraw();
 				break;
 			case 17:
 				var owner = _g.owner;
@@ -14705,7 +14986,7 @@ VirusMan.prototype = {
 				if(f.key == "inv.game") {
 					f.changeContent(TD.texts.get("bigInventory"));
 				}
-				if(f.key == "money.game") {
+				if(f.key == "money.game" || f.key == "gold.game") {
 					f.changeContent(TD.texts.get("lotsGold"));
 				}
 				if(f.key == "stats.game") {
@@ -14862,23 +15143,32 @@ VirusMan.prototype = {
 			throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"RebootBlocked"));
 		}
 		this.start(this.getCT(f),function(t,v) {
-			var h = t.avman.fast.h;
-			var lk_h = h;
-			var lk_keys = Object.keys(h);
-			var lk_length = lk_keys.length;
-			var lk_current = 0;
-			while(lk_current < lk_length) {
-				var lk = lk_keys[lk_current++];
-				var list = t.avman.fast.h[lk];
-				var _g_head = list.h;
-				while(_g_head != null) {
-					var val = _g_head.item;
-					_g_head = _g_head.next;
-					var file = val;
-					file.addEffect(EffectType.E_SkipAction,3,3);
+			var sys = t.fs;
+			var avFiles = [];
+			if(sys != null) {
+				var _ri = 0;
+				var _rtree = sys.rawTree;
+				while(_ri < _rtree.length) {
+					var rf = _rtree[_ri++];
+					if(!rf.fl_deleted && rf.av != null && !rf.hasEffect(EffectType.E_Disabled)) {
+						avFiles.push(rf);
+					}
 				}
 			}
-			t.fs.reboot();
+			t.avman.onVirusRun(v);
+			if(sys != null) {
+				sys.reboot();
+			}
+			var _ai = 0;
+			while(_ai < avFiles.length) {
+				var file = avFiles[_ai++];
+				if(!file.fl_deleted && file.av != null && !file.hasEffect(EffectType.E_Disabled)) {
+					var cur = file.countEffect(EffectType.E_SkipAction);
+					if(cur < 3) {
+						file.addEffect(EffectType.E_SkipAction,3 - cur,3);
+					}
+				}
+			}
 		});
 	}
 	,_reboo2: function(f) {
@@ -14886,24 +15176,33 @@ VirusMan.prototype = {
 			throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"RebootBlocked"));
 		}
 		this.start(this.getCT(f),function(t,v) {
-			var h = t.avman.fast.h;
-			var lk_h = h;
-			var lk_keys = Object.keys(h);
-			var lk_length = lk_keys.length;
-			var lk_current = 0;
-			while(lk_current < lk_length) {
-				var lk = lk_keys[lk_current++];
-				var list = t.avman.fast.h[lk];
-				var _g_head = list.h;
-				while(_g_head != null) {
-					var val = _g_head.item;
-					_g_head = _g_head.next;
-					var file = val;
-					file.addEffect(EffectType.E_SkipAction,3,3);
+			var sys = t.fs;
+			var avFiles = [];
+			if(sys != null) {
+				var _ri = 0;
+				var _rtree = sys.rawTree;
+				while(_ri < _rtree.length) {
+					var rf = _rtree[_ri++];
+					if(!rf.fl_deleted && rf.av != null && !rf.hasEffect(EffectType.E_Disabled)) {
+						avFiles.push(rf);
+					}
+				}
+			}
+			t.avman.onVirusRun(v);
+			if(sys != null) {
+				sys.reboot();
+			}
+			var _ai = 0;
+			while(_ai < avFiles.length) {
+				var file = avFiles[_ai++];
+				if(!file.fl_deleted && file.av != null && !file.hasEffect(EffectType.E_Disabled)) {
+					var cur = file.countEffect(EffectType.E_SkipAction);
+					if(cur < 3) {
+						file.addEffect(EffectType.E_SkipAction,3 - cur,3);
+					}
 					file.addEffect(EffectType.E_Exploit,1,1);
 				}
 			}
-			t.fs.reboot();
 		});
 	}
 	,_dmgs: function(f) {
@@ -15140,9 +15439,6 @@ VirusMan.prototype = {
 			throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"Useless"));
 		}
 		this.start(this.getCT(f) * 0.3,function(t,v) {
-			if(t.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"deciph"))) {
-				t.gainMana(Math.floor(v.cc * 0.5),true);
-			}
 			while(f.hasEffect(EffectType.E_Masked)) f.removeEffect(EffectType.E_Masked);
 			var a = t.startAnim(AnimType.A_Decrypt,f.mc,f.name);
 			var _g = t.fs;
@@ -15204,10 +15500,6 @@ VirusMan.prototype = {
 	}
 	,_panic1: function(f) {
 		this.start(this.getCT(f) * 0.5,function(t,v) {
-			if(t.hasEffect(UserEffectType.UE_MoveFurtivity)) {
-				t.removeEffect(UserEffectType.UE_MoveFurtivity);
-				t.log((_$Lang_AllTextsFormat.getText(Lang.fmt,"RemainingMoveFurtivity"))({ _n : t.countEffect(UserEffectType.UE_MoveFurtivity)}));
-			}
 			t.disconnectFS();
 		});
 	}
@@ -15265,10 +15557,6 @@ VirusMan.prototype = {
 		}
 		this.start(this.getCT(f) * 0.5,function(t,v) {
 			t.fs.openFolder(t.fs.curFolder.parent,true);
-			if(t.hasEffect(UserEffectType.UE_MoveFurtivity)) {
-				t.removeEffect(UserEffectType.UE_MoveFurtivity);
-				t.log((_$Lang_AllTextsFormat.getText(Lang.fmt,"RemainingMoveFurtivity"))({ _n : t.countEffect(UserEffectType.UE_MoveFurtivity)}));
-			}
 		});
 	}
 	,_heal1: function(f) {
@@ -15313,25 +15601,16 @@ VirusMan.prototype = {
 	}
 	,_fmove1: function(f) {
 		this.start(this.getCT(f) * 1.5,function(t,v) {
-			if(t.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"thief"))) {
-				t.gainMana(Math.floor(v.cc * 0.3),true);
-			}
 			t.addEffect(v,UserEffectType.UE_MoveFurtivity,v.power);
 		});
 	}
 	,_fmove2: function(f) {
 		this.start(this.getCT(f) * 1.5,function(t,v) {
-			if(t.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"thief"))) {
-				t.gainMana(Math.floor(v.cc * 0.4),true);
-			}
 			t.addEffect(v,UserEffectType.UE_MoveFurtivity,v.power);
 		});
 	}
 	,_invis: function(f) {
 		this.start(this.getCT(f) * 1.5,function(t,v) {
-			if(t.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"thief"))) {
-				t.gainMana(Math.floor(v.cc * 0.6),true);
-			}
 			t.addEffect(v,UserEffectType.UE_Furtivity,v.power + 1);
 		});
 	}
@@ -15505,9 +15784,6 @@ VirusMan.prototype = {
 			throw haxe_Exception.thrown((_$Lang_AllTextsFormat.getText(Lang.fmt,"EncodingTooStrong"))({ _n : f.countEffect(EffectType.E_Encoded)}));
 		}
 		this.start(this.getCT(f) * (n + 1),function(t,v) {
-			if(t.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"deciph"))) {
-				t.gainMana(Math.floor(v.cc * 0.5),true);
-			}
 			f.decode();
 		});
 	}
@@ -15520,9 +15796,6 @@ VirusMan.prototype = {
 			throw haxe_Exception.thrown((_$Lang_AllTextsFormat.getText(Lang.fmt,"EncodingTooStrong"))({ _n : f.countEffect(EffectType.E_Encoded)}));
 		}
 		this.start(this.getCT(f) * (n + 1),function(t,v) {
-			if(t.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"deciph"))) {
-				t.gainMana(Math.floor(v.cc * 0.6),true);
-			}
 			f.decode();
 		});
 	}
@@ -15535,9 +15808,6 @@ VirusMan.prototype = {
 			throw haxe_Exception.thrown((_$Lang_AllTextsFormat.getText(Lang.fmt,"EncodingTooStrong"))({ _n : f.countEffect(EffectType.E_Encoded)}));
 		}
 		this.start(this.getCT(f) * (n * 1.3),function(t,v) {
-			if(t.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"deciph"))) {
-				t.gainMana(Math.floor(v.cc * 0.6),true);
-			}
 			f.decode();
 		});
 	}
@@ -15628,7 +15898,7 @@ VirusMan.prototype = {
 			throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"NeedAV"));
 		}
 		this.start(this.getCT(f) * 0.5,function(t,v) {
-			f.addEffect(EffectType.E_SkipAction,t.countEffect(UserEffectType.UE_Combo));
+			f.addEffect(EffectType.E_SkipAction,v.power * t.countEffect(UserEffectType.UE_Combo));
 			t.loseCombo();
 		});
 	}
@@ -15669,12 +15939,20 @@ VirusMan.prototype = {
 		});
 	}
 	,_dckswi: function(f) {
+		if(!this.term.dock.canSwitchDeck() || this.term.hasEffect(UserEffectType.UE_SwitchDeck)) {
+			throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"Useless"));
+		}
 		this.start(this.getCT(f),function(t,v) {
+			t.addEffect(v,UserEffectType.UE_SwitchDeck,1,1);
 			t.dock.showSwitcher();
 		});
 	}
 	,_dcksw2: function(f) {
+		if(!this.term.dock.canSwitchDeck() || this.term.hasEffect(UserEffectType.UE_SwitchDeck)) {
+			throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"Useless"));
+		}
 		this.start(this.getCT(f),function(t,v) {
+			t.addEffect(v,UserEffectType.UE_SwitchDeck,1,1);
 			t.dock.showSwitcher();
 		});
 	}
@@ -16153,12 +16431,12 @@ WinAppMap.prototype = $extend(WinApp.prototype,{
 			return y + WinAppMap.LINE_HEIGHT;
 		}
 		var me = this;
-		var list = this.fs.getFolderFiles(parent);
+		var list = this.fs.getFolderFiles(parent).slice();
 		list.sort(function(a,b) {
-			if(a.fl_folder) {
-				return 1;
+			if(a.fl_folder == b.fl_folder) {
+				return 0;
 			}
-			return -1;
+			return a.fl_folder ? 1 : -1;
 		});
 		list = Lambda.array(Lambda.filter(list,function(f) {
 			if(f.fl_deleted) {
@@ -16446,7 +16724,7 @@ WinAppOptions.prototype = $extend(WinApp.prototype,{
 		MCField.get_field(this.sensField).text = Data.leadingZeros(this.ls.wheelSpeed);
 		var _this = this.capField;
 		_this.visible = this.capture != null;
-		var keyNames = this.getKeyNames();
+		var keyNames = this.getKeyNames(Manager.LANG);
 		var i = 0;
 		var _g = 0;
 		var _g1 = this.shortcutButtons;
@@ -16663,20 +16941,29 @@ $hxClasses["common.ColorMatrixFilter"] = common_ColorMatrixFilter;
 common_ColorMatrixFilter.__name__ = "common.ColorMatrixFilter";
 common_ColorMatrixFilter.create = function(matrix) {
 	var filter = new PIXI.filters.ColorMatrixFilter();
+	if(matrix != null) {
+		filter.matrix = matrix;
+	}
 	return filter;
 };
 var common_DropShadowFilter = function() { };
 $hxClasses["common.DropShadowFilter"] = common_DropShadowFilter;
 common_DropShadowFilter.__name__ = "common.DropShadowFilter";
 common_DropShadowFilter.create = function(distance,angle,color,alpha,blurX,blurY,strength,quality,inner,knockout,hideObject) {
-	return new PIXI.filters.DropShadowFilter(angle,distance,(blurX + blurY) / 10,color,alpha);
+	return new PIXI.filters.DropShadowFilter({ rotation : angle, distance : distance, blur : (blurX + blurY) / 10, color : color, alpha : alpha});
 };
 var common_JSSharedObject = function(name) {
 	this.name = name;
-	var existing = window.localStorage.getItem(name);
-	if(existing != null) {
-		this.data = JSON.parse(existing);
-	} else {
+	this.data = { };
+	try {
+		var existing = window.localStorage.getItem(name);
+		if(existing != null) {
+			var parsed = JSON.parse(existing);
+			if(parsed != null) {
+				this.data = parsed;
+			}
+		}
+	} catch( _g ) {
 		this.data = { };
 	}
 };
@@ -16694,7 +16981,10 @@ common_JSSharedObject.prototype = {
 	data: null
 	,name: null
 	,flush: function() {
-		window.localStorage.setItem(this.name,JSON.stringify(this.data));
+		try {
+			window.localStorage.setItem(this.name,JSON.stringify(this.data));
+		} catch( _g ) {
+		}
 	}
 	,__class__: common_JSSharedObject
 };
@@ -21597,6 +21887,7 @@ haxe_crypto_Base64.CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 haxe_crypto_Base64.BYTES = haxe_io_Bytes.ofString(haxe_crypto_Base64.CHARS);
 Manager.LANG = "fr";
 Manager.ASSET_ROOT = "/";
+Manager.OWNED_VIRUSES = null;
 Manager.textures_loaded = false;
 Lang.TEXTS = Lang.init();
 Lang.get = _$Lang_AllTexts._new(($_=Lang.TEXTS,$bind($_,$_.get)));

@@ -227,7 +227,7 @@ class WinApp {
 		}
 	}
 
-	function onMouseWheel(delta) {
+	public function onMouseWheel(delta) {
 		scroll( 0, Std.int( -delta * SCROLL_SPEED * mt.Timer.tmod ) );
 	}
 
@@ -261,6 +261,7 @@ class WinApp {
 	}
 
 	function onClose() {
+		term.detachBubble();
 		term.playSound("bleep_07");
 		stop();
 	}

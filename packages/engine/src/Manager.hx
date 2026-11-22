@@ -17,6 +17,7 @@ class Manager {
 	public static var ME		: Manager;
 	public static var DM		: mt.DepthManager;
 	public static var PARAMS	: PInit;
+	public static var OWNED_VIRUSES : Hash<Int> = null;
 	//public static var fc 		: mt.flash.FastCrypt = null;
 
 	static var xmlData			: Hash<String>;
@@ -77,6 +78,13 @@ class Manager {
 		data.ChipsetsXml.init(Manager.LANG);
 
 		PARAMS = getParams();
+		Lang.reinit();
+		Tutorial.reinit();
+		data.VirusXml.init(Manager.LANG);
+		data.AntivirusXml.init();
+		data.ValuablesXml.init(Manager.LANG);
+		data.ChipsetsXml.init(Manager.LANG);
+
 		term = new UserTerminal();
 		stopLoading();
 	}
@@ -138,8 +146,16 @@ class Manager {
 
 
 	static function getParams() : PInit {
+		OWNED_VIRUSES = null;
 		var cfg: Dynamic = untyped js.Browser.window.__INTRUSION_CONFIG__;
 		if (cfg != null) {
+			if (cfg.ownedViruses != null) {
+				OWNED_VIRUSES = new Hash();
+				for (k in Reflect.fields(cfg.ownedViruses)) {
+					var cnt = Std.int(Reflect.field(cfg.ownedViruses, k));
+					if (cnt > 0) OWNED_VIRUSES.set(k, cnt);
+				}
+			}
 			var profileCfg: Dynamic = cfg.profile != null ? cfg.profile : {};
 			var adult: Bool = profileCfg.adult != null ? (profileCfg.adult == true) : true;
 			var lang: String = profileCfg.lang != null ? Std.string(profileCfg.lang) : Manager.LANG;
@@ -165,6 +181,7 @@ class Manager {
 				}
 			}
 
+			var isChallenge: Bool = cfg.isChallenge == true;
 			var decks = new List<{_name: String, _content: Array<String>}>();
 			if (cfg.decks != null) {
 				var rawDecks: Array<Dynamic> = cast cfg.decks;
@@ -178,6 +195,7 @@ class Manager {
 						_name: d.name != null ? Std.string(d.name) : "Deck",
 						_content: arr
 					});
+					if (isChallenge) break;
 				}
 			}
 
@@ -292,14 +310,21 @@ class Manager {
 				fatal("init failed");
 			#end
 		}
+		if (p != null && p._c && p._decks != null && p._decks.length > 1) {
+			var firstDeck = p._decks.first();
+			p._decks = new List();
+			if (firstDeck != null) p._decks.add(firstDeck);
+		}
 		return p;
 	}
 
 
 
 
-	public static function delay( cb:Void->Void, d:Float ) {
-		timers.add( haxe.Timer.delay(cb,Std.int(d)) );
+	public static function delay( cb:Void->Void, d:Float ) : haxe.Timer {
+		var t = haxe.Timer.delay(cb,Std.int(d));
+		timers.add(t);
+		return t;
 	}
 
 	public static function stopTimers() {

@@ -31,6 +31,8 @@ export default defineConfig({
       '/design.css': 'http://127.0.0.1:8001',
       '/style.css': 'http://127.0.0.1:8001',
       '/fonts.css': 'http://127.0.0.1:8001',
+      '/intrusion-engine.js': 'http://127.0.0.1:8001',
+      '/client_img': 'http://127.0.0.1:8001',
     },
   },
 });

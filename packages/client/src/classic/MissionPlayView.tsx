@@ -48,11 +48,26 @@ export function MissionPlayView({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const completedRef = useRef(false);
+  const onCompleteRef = useRef(onComplete);
+
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
 
   useEffect(() => {
     let cancelled = false;
     completedRef.current = false;
 
+    const clearEngineDom = () => {
+      for (const id of ['tutorial', 'sideContent', 'briefingContent', 'clientTipContent']) {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = '';
+      }
+      const tipBox = document.getElementById('clientTip');
+      if (tipBox) tipBox.style.display = 'none';
+    };
+
+    clearEngineDom();
     window.__INTRUSION_CONFIG__ = init;
     window.__INTRUSION_ON_END__ = (raw: EngineRawSummary) => {
       if (completedRef.current) return;
@@ -60,7 +75,17 @@ export function MissionPlayView({
 
       const remSec = Math.max(0, Math.floor(raw.remainingSec ?? 0));
       const kills = Math.max(0, Math.floor(raw.kills ?? 0));
-      const valuables = Array.isArray(raw.valuables) ? raw.valuables : [];
+      const isScout = init.chipset === 'scout';
+      const canSaveLoot = Boolean(raw.success) && !isScout;
+      const rawValuables = Array.isArray(raw.valuables) ? raw.valuables : [];
+      const valuables = canSaveLoot ? rawValuables : [];
+      const copiedFiles = canSaveLoot
+        ? (raw.copiedFiles ?? []).map((f) => ({
+            name: f.name,
+            content: f.content,
+            embed: f.embed ?? null,
+          }))
+        : [];
       const score = raw.success
         ? 1000 + remSec * 5 + kills * 40 + valuables.length * 100
         : kills * 15;
@@ -70,22 +95,18 @@ export function MissionPlayView({
         seed: init.seed,
         gl: init.gl,
         isChallenge: init.isChallenge,
-        scoutRun: init.chipset === 'scout',
+        scoutRun: isScout,
         success: Boolean(raw.success),
         kills,
         remainingSec: remSec,
         valuables,
-        copiedFiles: (raw.copiedFiles ?? []).map((f) => ({
-          name: f.name,
-          content: f.content,
-          embed: f.embed ?? null,
-        })),
+        copiedFiles,
         stolenCards: [],
         goals: raw.goals ?? {},
         score,
       };
 
-      onComplete(summary);
+      onCompleteRef.current(summary);
     };
 
     (async () => {
@@ -104,6 +125,7 @@ export function MissionPlayView({
       if (window.IntrusionEngine) {
         window.IntrusionEngine.unmount();
       }
+      clearEngineDom();
     };
   }, [init]);
 

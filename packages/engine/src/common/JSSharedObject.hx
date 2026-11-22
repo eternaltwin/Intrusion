@@ -12,17 +12,22 @@ class JSSharedObject {
 
 	public function new(name:String) {
 		this.name = name;
-
-		var existing = Browser.window.localStorage.getItem(name);
-		if (existing != null) {
-			this.data = Json.parse(existing);
-		} else {
+		this.data = {};
+		try {
+			var existing = Browser.window.localStorage.getItem(name);
+			if (existing != null) {
+				var parsed: Dynamic = Json.parse(existing);
+				if (parsed != null) this.data = parsed;
+			}
+		} catch (e: Dynamic) {
 			this.data = {};
 		}
 	}
 
 	public function flush() {
-		Browser.window.localStorage.setItem(name, Json.stringify(data));
+		try {
+			Browser.window.localStorage.setItem(name, Json.stringify(data));
+		} catch (e: Dynamic) {}
 	}
 
 	static public function getLocal(name:String):Dynamic {

@@ -1,7 +1,4 @@
-import haxe.Serializer;
 import js.Browser;
-import js.html.FormElement;
-import js.html.InputElement;
 import Protocol;
 
 class JSMain {
@@ -119,20 +116,7 @@ class JSMain {
             }
         }
 
-        // Legacy fallback form submit
-        var form: FormElement = cast js.Browser.document.createElement('form');
-        form.method = "post";
-        form.action = url;
-        var input: InputElement = cast js.Browser.document.createElement('input');
-        input.type = "text";
-        input.name = "msg";
-        var serializer = new Serializer();
-        serializer.serialize(msg);
-        input.value = serializer.toString();
-        form.appendChild(input);
-        js.Browser.document.body.appendChild(form);
-        form.submit();
-        cb(msg);
+        if (cb != null) cb(msg);
     }
 
     public function nextTutoStep() {

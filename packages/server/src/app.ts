@@ -38,8 +38,16 @@ import {
 
 export const BIOS_COSTS = [0, 0, 6000, 15000, 35000] as const; // index = target bios level (2, 3, 4)
 const SESSION_COOKIE = 'intrusion_sid';
-const MISSION_EXPIRY_MS = 24 * 60 * 60 * 1000;
 const DAILY_PACK_QUOTA = 20;
+const ALLOWED_CLIENT_GOALS = new Set([
+  'av',
+  'crash',
+  'corrup',
+  'log',
+  'passwd',
+  'eextra',
+  'mextra',
+]);
 
 type AppVariables = {
   userId: number;
@@ -52,8 +60,52 @@ export interface CreateAppOptions {
   clientDistDir?: string;
 }
 
-function todayDateStr(): string {
-  return new Date().toISOString().slice(0, 10);
+function todayDateStr(nowMs = Date.now()): string {
+  const d = new Date(nowMs);
+  const yyyy = String(d.getFullYear());
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function parseTutorialLevel(missionKey: string): number | null {
+  if (missionKey === 'tuto_1') return 1;
+  if (missionKey === 'tuto_2') return 2;
+  if (missionKey === 'tuto_3') return 3;
+  return null;
+}
+
+function buildOwnedVirusCounts(player: PlayerDto): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const vid of player.viruses) {
+    counts[vid] = (counts[vid] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function buildClassicMissionCards(
+  userId: number,
+  seed: number,
+  level: number,
+  corp: string
+): Array<{ id: string; holder: string; number: string; amount: number }> {
+  if (level < 4) return [];
+  const cardRng = Rand.fromSeed(seed ^ 0x51a9c3);
+  const out: Array<{ id: string; holder: string; number: string; amount: number }> = [];
+  for (let i = 0; i < 3; i++) {
+    const p1 = String(1000 + cardRng.random(9000));
+    const p2 = String(1000 + cardRng.random(9000));
+    const p3 = String(1000 + cardRng.random(9000));
+    const num = `4971-${p1}-${p2}-${p3}`;
+    const amount = Math.min(5000, (2 + cardRng.random(level * 2)) * 100);
+    out.push({
+      id: `cc_${userId}_${seed}_${i}`,
+      holder: corp,
+      number: num,
+      amount,
+    });
+  }
+  return out;
 }
 
 function dailySeedFromDate(dateStr: string): number {
@@ -219,14 +271,83 @@ export function createApp(opts: CreateAppOptions) {
       startOfTodayMs
     );
 
-    // Purge any stale rows from an older batch if a newer batch exists (e.g. after level-up or partial refresh)
     if (player.level >= 4) {
+      // Purge stale level >= 4 rows from an older batch if a newer level >= 4 batch exists
       db.prepare(
-        'DELETE FROM missions WHERE user_id = ? AND created_at < (SELECT MAX(created_at) FROM missions WHERE user_id = ?)'
+        'DELETE FROM missions WHERE user_id = ? AND level >= 4 AND created_at < (SELECT MAX(created_at) FROM missions WHERE user_id = ? AND level >= 4)'
       ).run(userId, userId);
+
+      // If existing non-completed rows are all leftover from level < 4 (before 3 -> 4 level-up), clear them
+      const nonCompleted = db
+        .prepare(
+          "SELECT level FROM missions WHERE user_id = ? AND status IN ('available', 'active')"
+        )
+        .all(userId) as Array<{ level: number }>;
+      if (nonCompleted.length > 0 && nonCompleted.every((r) => r.level < 4)) {
+        db.prepare(
+          "DELETE FROM missions WHERE user_id = ? AND status IN ('available', 'active') AND level < 4"
+        ).run(userId);
+      }
     }
 
-    let rows = db
+    const batchSize = player.level < 4 ? 1 : 9;
+    let shouldGenerate = false;
+
+    if (player.level < 4) {
+      const openRow = db
+        .prepare(
+          "SELECT COUNT(*) as cnt FROM missions WHERE user_id = ? AND status IN ('available', 'active')"
+        )
+        .get(userId) as { cnt: number };
+      shouldGenerate = openRow.cnt === 0;
+    } else {
+      const openLvl4Row = db
+        .prepare(
+          "SELECT COUNT(*) as cnt FROM missions WHERE user_id = ? AND status IN ('available', 'active') AND level >= 4"
+        )
+        .get(userId) as { cnt: number };
+      const totalLvl4Row = db
+        .prepare('SELECT COUNT(*) as cnt FROM missions WHERE user_id = ? AND level >= 4')
+        .get(userId) as { cnt: number };
+      shouldGenerate = openLvl4Row.cnt === 0 && totalLvl4Row.cnt < batchSize;
+    }
+
+    if (shouldGenerate) {
+      if (player.level >= 4) {
+        db.prepare(
+          "DELETE FROM missions WHERE user_id = ? AND status IN ('available', 'active')"
+        ).run(userId);
+      }
+      const bundle = getCatalog(opts.assetsDir, lang);
+      const insertStmt = db.prepare(
+        "INSERT OR IGNORE INTO missions (mission_key, user_id, seed, level, prime, status, tries, created_at) VALUES (?, ?, ?, ?, ?, 'available', 0, ?)"
+      );
+      const seenKeys = new Set<string>(
+        (
+          db
+            .prepare('SELECT mission_key FROM missions WHERE user_id = ?')
+            .all(userId) as Array<{ mission_key: string }>
+        ).map((r) => r.mission_key)
+      );
+      let inserted = 0;
+      let attempts = 0;
+      while (inserted < batchSize && attempts < batchSize * 20) {
+        attempts++;
+        const seed = Math.floor(100000 + Math.random() * 8900000);
+        const rawLvl =
+          player.level < 4
+            ? player.level
+            : Math.max(4, Math.min(9, player.level + Math.floor(Math.random() * 3) - 1));
+        const mkey = `m_${seed}_${rawLvl}`;
+        if (seenKeys.has(mkey)) continue;
+        const mdata = generateMission(bundle, rawLvl, seed, player.settings.adult);
+        const res = insertStmt.run(mkey, userId, seed, rawLvl, mdata.prime, now);
+        seenKeys.add(mkey);
+        if (res.changes > 0) inserted++;
+      }
+    }
+
+    const rows = db
       .prepare("SELECT * FROM missions WHERE user_id = ? AND status = 'available' ORDER BY created_at ASC")
       .all(userId) as Array<{
       mission_key: string;
@@ -236,38 +357,6 @@ export function createApp(opts: CreateAppOptions) {
       tries: number;
       created_at: number;
     }>;
-
-    const totalBatchRow = db
-      .prepare('SELECT COUNT(*) as cnt FROM missions WHERE user_id = ?')
-      .get(userId) as { cnt: number };
-
-    const batchSize = player.level < 4 ? 1 : 9;
-    const shouldGenerate =
-      rows.length === 0 && (player.level < 4 || totalBatchRow.cnt < batchSize);
-
-    if (shouldGenerate) {
-      if (player.level >= 4) {
-        db.prepare('DELETE FROM missions WHERE user_id = ?').run(userId);
-      }
-      const bundle = getCatalog(opts.assetsDir, lang);
-      const count = batchSize;
-      const insertStmt = db.prepare(
-        "INSERT INTO missions (mission_key, user_id, seed, level, prime, status, tries, created_at) VALUES (?, ?, ?, ?, ?, 'available', 0, ?)"
-      );
-      for (let i = 0; i < count; i++) {
-        const seed = Math.floor(100000 + Math.random() * 8900000);
-        const rawLvl =
-          player.level < 4
-            ? player.level
-            : Math.max(4, Math.min(9, player.level + Math.floor(Math.random() * 3) - 1));
-        const mdata = generateMission(bundle, rawLvl, seed, player.settings.adult);
-        const mkey = `m_${seed}_${rawLvl}`;
-        insertStmt.run(mkey, userId, seed, rawLvl, mdata.prime, now);
-      }
-      rows = db
-        .prepare("SELECT * FROM missions WHERE user_id = ? AND status = 'available' ORDER BY created_at ASC")
-        .all(userId) as typeof rows;
-    }
     return rows;
   }
 
@@ -333,7 +422,7 @@ export function createApp(opts: CreateAppOptions) {
 
     const tutorials = [1, 2, 3].map((lvl) => {
       const tSeed = 1000 + lvl * 111;
-      const mdata = generateMission(bundle, lvl, tSeed, true);
+      const mdata = generateMission(bundle, lvl, tSeed, player.settings.adult);
       return {
         missionKey: `tuto_${lvl}`,
         seed: tSeed,
@@ -367,10 +456,32 @@ export function createApp(opts: CreateAppOptions) {
     if (player.money < refreshCost) {
       return c.json({ error: 'Crédits insuffisants.' }, 400);
     }
-    db.prepare('UPDATE users SET money = money - ? WHERE id = ?').run(refreshCost, userId);
-    db.prepare('DELETE FROM missions WHERE user_id = ?').run(userId);
-    const updatedPlayer = buildPlayerDto(db, userId) ?? { ...player, money: player.money - refreshCost };
-    const availableRows = ensureAvailableMissions(userId, updatedPlayer, updatedPlayer.settings.lang);
+
+    let updatedPlayer: PlayerDto;
+    let availableRows: ReturnType<typeof ensureAvailableMissions>;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const moneyRow = db
+        .prepare('SELECT money FROM users WHERE id = ?')
+        .get(userId) as { money: number } | undefined;
+      if (!moneyRow || moneyRow.money < refreshCost) {
+        db.exec('ROLLBACK');
+        return c.json({ error: 'Crédits insuffisants.' }, 400);
+      }
+      db.prepare('UPDATE users SET money = money - ? WHERE id = ?').run(refreshCost, userId);
+      db.prepare('DELETE FROM missions WHERE user_id = ?').run(userId);
+      updatedPlayer = buildPlayerDto(db, userId) ?? { ...player, money: moneyRow.money - refreshCost };
+      availableRows = ensureAvailableMissions(userId, updatedPlayer, updatedPlayer.settings.lang);
+      db.exec('COMMIT');
+    } catch (err) {
+      try {
+        db.exec('ROLLBACK');
+      } catch {
+        // ignore rollback error
+      }
+      throw err;
+    }
+
     const bundle = getCatalog(opts.assetsDir, updatedPlayer.settings.lang);
     return c.json({
       available: availableRows.map((r) => formatMissionRow(bundle, updatedPlayer, r)),
@@ -389,15 +500,23 @@ export function createApp(opts: CreateAppOptions) {
     let tries = 0;
 
     if (missionKey.startsWith('tuto_')) {
-      level = Math.max(1, Math.min(3, parseInt(missionKey.split('_')[1] ?? '1', 10)));
+      const tutoLvl = parseTutorialLevel(missionKey);
+      if (tutoLvl === null) {
+        return c.json({ error: 'Mission tutoriel invalide.' }, 400);
+      }
+      level = tutoLvl;
       seed = 1000 + level * 111;
     } else {
       const row = db
         .prepare('SELECT * FROM missions WHERE user_id = ? AND mission_key = ?')
         .get(userId, missionKey) as
-        | { seed: number; level: number; status: string; tries: number }
+        | { seed: number; level: number; status: string; tries: number; created_at: number }
         | undefined;
       if (!row) return c.json({ error: 'Mission introuvable.' }, 404);
+      if (row.created_at < getStartOfTodayMs()) {
+        db.prepare('DELETE FROM missions WHERE user_id = ? AND mission_key = ?').run(userId, missionKey);
+        return c.json({ error: 'Mission expirée.' }, 400);
+      }
       if (row.status === 'completed') return c.json({ error: 'Mission déjà accomplie.' }, 400);
       if (row.status === 'available') {
         db.prepare("UPDATE missions SET status = 'active' WHERE user_id = ? AND mission_key = ?").run(
@@ -413,23 +532,9 @@ export function createApp(opts: CreateAppOptions) {
     const mdata = generateMission(bundle, level, seed, player.settings.adult);
 
     // Deterministic credit cards embedded in target network mails/docs via GNetwork.dispatchCards
-    const cardStrings: string[] = [];
-    if (level >= 4) {
-      const cardRng = Rand.fromSeed(seed ^ 0x51a9c3);
-      const insertCard = db.prepare(`
-        INSERT OR IGNORE INTO stolen_cards (id, user_id, holder, card_number, amount, redeemed)
-        VALUES (?, ?, ?, ?, ?, 0)
-      `);
-      for (let i = 0; i < 3; i++) {
-        const p1 = String(1000 + cardRng.random(9000));
-        const p2 = String(1000 + cardRng.random(9000));
-        const p3 = String(1000 + cardRng.random(9000));
-        const num = `4971-${p1}-${p2}-${p3}`;
-        const amount = (2 + cardRng.random(level * 2)) * 100;
-        cardStrings.push(num);
-        insertCard.run(`cc_${userId}_${seed}_${i}`, userId, mdata.corp, num, Math.min(5000, amount));
-      }
-    }
+    // Never insert into stolen_cards on /start — only persist when mission succeeds on /end!
+    const classicCards = buildClassicMissionCards(userId, seed, level, mdata.corp);
+    const cardStrings = classicCards.map((card) => card.number);
 
     const init: MissionInitParams = {
       missionKey,
@@ -438,6 +543,7 @@ export function createApp(opts: CreateAppOptions) {
       mission: mdata,
       cards: cardStrings,
       decks: buildOrderedDecks(player),
+      ownedViruses: buildOwnedVirusCounts(player),
       chipset: player.activeChipset,
       isChallenge: false,
       biosLevel: player.biosLevel,
@@ -465,27 +571,46 @@ export function createApp(opts: CreateAppOptions) {
     const end = c.req.valid('json');
     const bundle = getCatalog(opts.assetsDir, player.settings.lang);
 
+    const isScoutRun = Boolean(end.scoutRun && player.activeChipset === 'scout');
     const isTutorial = missionKey.startsWith('tuto_');
-    const row = isTutorial
-      ? {
-          seed: end.seed,
-          level: end.gl,
-          prime: generateMission(bundle, end.gl, end.seed, true).prime,
-          status: 'active',
-          tries: 0,
+
+    if (isTutorial) {
+      const tutoLvl = parseTutorialLevel(missionKey);
+      if (tutoLvl === null) {
+        return c.json({ error: 'Mission tutoriel invalide.' }, 400);
+      }
+      // Replayable tutorials in Apprentissage must never grant money, XP, goals, valuables, files, or cards
+      return c.json({
+        earnedMoney: 0,
+        earnedXp: 0,
+        scoutRun: isScoutRun,
+        player: buildPlayerDto(db, userId),
+      });
+    }
+
+    const row = db
+      .prepare('SELECT * FROM missions WHERE user_id = ? AND mission_key = ?')
+      .get(userId, missionKey) as
+      | {
+          seed: number;
+          level: number;
+          prime: number;
+          status: string;
+          tries: number;
+          created_at: number;
         }
-      : (db
-          .prepare('SELECT * FROM missions WHERE user_id = ? AND mission_key = ?')
-          .get(userId, missionKey) as
-          | { seed: number; level: number; prime: number; status: string; tries: number }
-          | undefined);
+      | undefined;
 
     if (!row) return c.json({ error: 'Mission introuvable.' }, 404);
+    if (row.created_at < getStartOfTodayMs()) {
+      db.prepare('DELETE FROM missions WHERE user_id = ? AND mission_key = ?').run(userId, missionKey);
+      return c.json({ error: 'Mission expirée.' }, 400);
+    }
+    if (row.status !== 'active') {
+      return c.json({ error: 'Cette mission n’est pas active.' }, 400);
+    }
 
-    let earnedMoney = 0;
-    let earnedXp = 0;
-
-    if (end.scoutRun) {
+    if (isScoutRun) {
       // Scout chipset: exploratory run — does not consume tries or complete mission
       return c.json({
         earnedMoney: 0,
@@ -495,67 +620,108 @@ export function createApp(opts: CreateAppOptions) {
       });
     }
 
-    if (end.success && row.status !== 'completed') {
-      earnedMoney = getAdjustedPrime(row.prime, row.tries);
-      earnedXp = isTutorial ? 0 : 1;
+    let earnedMoney = 0;
+    let earnedXp = 0;
 
-      db.prepare('UPDATE users SET money = money + ?, xp = xp + ? WHERE id = ?').run(
-        earnedMoney,
-        earnedXp,
-        userId
-      );
-
-      if (!isTutorial) {
-        db.prepare(
-          "UPDATE missions SET status = 'completed', completed_at = ? WHERE user_id = ? AND mission_key = ?"
-        ).run(Date.now(), userId, missionKey);
-      }
-
-      // Goals
-      const upsertGoal = db.prepare(`
-        INSERT INTO user_goals (user_id, goal_id, value) VALUES (?, ?, ?)
-        ON CONFLICT(user_id, goal_id) DO UPDATE SET value = value + excluded.value
-      `);
-      upsertGoal.run(userId, 'missions_fulfilled', 1);
-      if (row.tries === 0 && !isTutorial) {
-        upsertGoal.run(userId, 'firsttry', 1);
-      }
-      for (const [gid, count] of Object.entries(end.goals)) {
-        if (count > 0) upsertGoal.run(userId, gid, count);
-      }
-
-      // Valuables
-      const upsertValuable = db.prepare(`
-        INSERT INTO user_valuables (user_id, valuable_id, quantity) VALUES (?, ?, 1)
-        ON CONFLICT(user_id, valuable_id) DO UPDATE SET quantity = quantity + 1
-      `);
-      for (const vid of end.valuables) {
-        if (bundle.valuables.has(vid)) {
-          upsertValuable.run(userId, vid);
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (end.success) {
+        const markDone = db
+          .prepare(
+            "UPDATE missions SET status = 'completed', completed_at = ? WHERE user_id = ? AND mission_key = ? AND status = 'active'"
+          )
+          .run(Date.now(), userId, missionKey);
+        if (markDone.changes === 0) {
+          db.exec('ROLLBACK');
+          return c.json({ error: 'Mission déjà accomplie.' }, 400);
         }
-      }
 
-      // Stolen files
-      const insertFile = db.prepare(
-        'INSERT INTO stolen_files (id, user_id, name, content, embed) VALUES (?, ?, ?, ?, ?)'
-      );
-      for (const sf of end.copiedFiles.slice(0, 20)) {
-        insertFile.run(randomUUID(), userId, sf.name, sf.content, sf.embed);
-      }
+        earnedMoney = getAdjustedPrime(row.prime, row.tries);
+        earnedXp = 1;
 
-      // Stolen credit cards
-      const insertCard = db.prepare(`
-        INSERT OR IGNORE INTO stolen_cards (id, user_id, holder, card_number, amount, redeemed)
-        VALUES (?, ?, ?, ?, ?, 0)
-      `);
-      for (const card of end.stolenCards.slice(0, 5)) {
-        insertCard.run(card.id, userId, card.holder, card.number, Math.min(5000, card.amount));
+        db.prepare('UPDATE users SET money = money + ?, xp = xp + ? WHERE id = ?').run(
+          earnedMoney,
+          earnedXp,
+          userId
+        );
+
+        // Goals (strictly whitelisted + clamped)
+        const upsertGoal = db.prepare(`
+          INSERT INTO user_goals (user_id, goal_id, value) VALUES (?, ?, ?)
+          ON CONFLICT(user_id, goal_id) DO UPDATE SET value = value + excluded.value
+        `);
+        upsertGoal.run(userId, 'missions_fulfilled', 1);
+        if (row.tries === 0) {
+          upsertGoal.run(userId, 'firsttry', 1);
+        }
+        for (const [gid, count] of Object.entries(end.goals)) {
+          if (!ALLOWED_CLIENT_GOALS.has(gid)) continue;
+          const clampedCount = Math.min(200, Math.max(0, Math.floor(count)));
+          if (clampedCount > 0) upsertGoal.run(userId, gid, clampedCount);
+        }
+
+        // Valuables
+        const upsertValuable = db.prepare(`
+          INSERT INTO user_valuables (user_id, valuable_id, quantity) VALUES (?, ?, 1)
+          ON CONFLICT(user_id, valuable_id) DO UPDATE SET quantity = quantity + 1
+        `);
+        for (const vid of end.valuables.slice(0, 50)) {
+          if (bundle.valuables.has(vid)) {
+            upsertValuable.run(userId, vid);
+          }
+        }
+
+        // Stolen files
+        const insertFile = db.prepare(
+          'INSERT INTO stolen_files (id, user_id, name, content, embed) VALUES (?, ?, ?, ?, ?)'
+        );
+        for (const sf of end.copiedFiles.slice(0, 20)) {
+          insertFile.run(randomUUID(), userId, sf.name, sf.content, sf.embed);
+        }
+
+        // Stolen credit cards (only persisted on completed level >= 4 non-tutorial missions)
+        if (row.level >= 4) {
+          const mdata = generateMission(bundle, row.level, row.seed, player.settings.adult);
+          const classicCards = buildClassicMissionCards(userId, row.seed, row.level, mdata.corp);
+          const insertCard = db.prepare(`
+            INSERT OR IGNORE INTO stolen_cards (id, user_id, holder, card_number, amount, redeemed)
+            VALUES (?, ?, ?, ?, ?, 0)
+          `);
+          for (const cc of classicCards) {
+            insertCard.run(cc.id, userId, cc.holder, cc.number, Math.min(5000, cc.amount));
+          }
+
+          const normalizeNum = (s: string) => s.replace(/[\s-]+/g, '').toUpperCase();
+          const validMissionCards = [...mdata.cards, ...classicCards];
+          for (const clientCard of end.stolenCards.slice(0, 5)) {
+            const clientNorm = normalizeNum(clientCard.number);
+            const matched = validMissionCards.find(
+              (vc) => vc.id === clientCard.id || normalizeNum(vc.number) === clientNorm
+            );
+            if (matched) {
+              insertCard.run(
+                matched.id,
+                userId,
+                matched.holder,
+                matched.number,
+                Math.min(5000, Math.max(0, matched.amount))
+              );
+            }
+          }
+        }
+      } else {
+        db.prepare(
+          "UPDATE missions SET tries = tries + 1 WHERE user_id = ? AND mission_key = ? AND status = 'active'"
+        ).run(userId, missionKey);
       }
-    } else if (!end.success && !isTutorial && row.status === 'active') {
-      db.prepare('UPDATE missions SET tries = tries + 1 WHERE user_id = ? AND mission_key = ?').run(
-        userId,
-        missionKey
-      );
+      db.exec('COMMIT');
+    } catch (err) {
+      try {
+        db.exec('ROLLBACK');
+      } catch {
+        // ignore rollback error
+      }
+      throw err;
     }
 
     return c.json({
@@ -620,7 +786,8 @@ export function createApp(opts: CreateAppOptions) {
       seed,
       gl,
       mission: mdata,
-      decks: buildOrderedDecks(player),
+      decks: buildOrderedDecks(player).slice(0, 1),
+      ownedViruses: buildOwnedVirusCounts(player),
       chipset: player.activeChipset,
       isChallenge: true,
       biosLevel: player.biosLevel,
@@ -646,38 +813,69 @@ export function createApp(opts: CreateAppOptions) {
     const dateStr = todayDateStr();
     const end = c.req.valid('json');
 
-    const alreadyRanked = db
-      .prepare('SELECT id FROM challenge_runs WHERE challenge_date = ? AND user_id = ? AND is_ranked = 1')
-      .get(dateStr, userId);
+    if (end.scoutRun && player.activeChipset === 'scout') {
+      return c.json({
+        isRanked: false,
+        rewardMoney: 0,
+        score: 0,
+        scoutRun: true,
+        player: buildPlayerDto(db, userId),
+      });
+    }
 
-    const isRanked = alreadyRanked ? 0 : 1;
-    db.prepare(
-      `INSERT INTO challenge_runs (challenge_date, user_id, username, score, success, remaining_sec, kills, is_ranked)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      dateStr,
-      userId,
-      player.username,
-      end.score,
-      end.success ? 1 : 0,
-      end.remainingSec,
-      end.kills,
-      isRanked
-    );
+    const clampedRemSec = Math.min(600, Math.max(0, end.remainingSec));
+    const clampedKills = Math.min(100, Math.max(0, end.kills));
+    const clampedValCount = Math.min(30, end.valuables.length);
+    const computedScore = end.success
+      ? 1000 + clampedRemSec * 5 + clampedKills * 40 + clampedValCount * 100
+      : clampedKills * 15;
 
+    let isRanked = 0;
     let rewardMoney = 0;
-    if (isRanked === 1 && end.success) {
-      rewardMoney = 1500;
-      db.prepare('UPDATE users SET money = money + ?, xp = xp + 2 WHERE id = ?').run(
-        rewardMoney,
-        userId
+
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const alreadyRanked = db
+        .prepare('SELECT id FROM challenge_runs WHERE challenge_date = ? AND user_id = ? AND is_ranked = 1')
+        .get(dateStr, userId);
+
+      isRanked = alreadyRanked ? 0 : 1;
+      db.prepare(
+        `INSERT INTO challenge_runs (challenge_date, user_id, username, score, success, remaining_sec, kills, is_ranked)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        dateStr,
+        userId,
+        player.username,
+        computedScore,
+        end.success ? 1 : 0,
+        clampedRemSec,
+        clampedKills,
+        isRanked
       );
+
+      if (isRanked === 1 && end.success) {
+        rewardMoney = 1500;
+        db.prepare('UPDATE users SET money = money + ?, xp = xp + 2 WHERE id = ?').run(
+          rewardMoney,
+          userId
+        );
+      }
+      db.exec('COMMIT');
+    } catch (err) {
+      try {
+        db.exec('ROLLBACK');
+      } catch {
+        // ignore rollback error
+      }
+      throw err;
     }
 
     return c.json({
       isRanked: isRanked === 1,
       rewardMoney,
-      score: end.score,
+      score: computedScore,
+      scoutRun: false,
       player: buildPlayerDto(db, userId),
     });
   });
@@ -688,6 +886,7 @@ export function createApp(opts: CreateAppOptions) {
     const player = c.get('player');
     const deckId = c.req.param('deckId');
     const body = c.req.valid('json');
+    const bundle = getCatalog(opts.assetsDir, player.settings.lang);
 
     const deck = player.decks.find((d) => d.id === deckId);
     if (!deck) return c.json({ error: 'Deck introuvable.' }, 404);
@@ -713,6 +912,10 @@ export function createApp(opts: CreateAppOptions) {
     const requestedCounts = new Map<string, number>();
     const validatedContent: string[] = [];
     for (const vid of body.content) {
+      const vDef = bundle.viruses.get(vid);
+      if (!vDef || vDef.cat === 'hidden' || vDef.cat === 'specials') {
+        return c.json({ error: `Programme ${vid} interdit dans un deck.` }, 400);
+      }
       const owned = ownedCounts.get(vid) ?? 0;
       if (owned <= 0) {
         return c.json({ error: `Programme ${vid} non possédé.` }, 400);
@@ -769,7 +972,9 @@ export function createApp(opts: CreateAppOptions) {
 
     if (req.kind === 'virus') {
       const v = bundle.viruses.get(req.id);
-      if (!v || v.price <= 0) return c.json({ error: 'Programme indisponible.' }, 400);
+      if (!v || v.price <= 0 || v.cat === 'hidden' || v.cat === 'specials') {
+        return c.json({ error: 'Programme indisponible.' }, 400);
+      }
       if (player.level < v.level) return c.json({ error: `Niveau ${v.level} requis.` }, 400);
       if (player.money < v.price) return c.json({ error: 'Crédits insuffisants.' }, 400);
 
@@ -972,20 +1177,47 @@ export function createApp(opts: CreateAppOptions) {
     const player = c.get('player');
     const patch = c.req.valid('json');
 
+    let normalizedCfg: string | undefined = undefined;
     if (patch.cfg !== undefined) {
-      // Validate .hackrc syntax
-      for (const rawLine of patch.cfg.split(/\r?\n/)) {
-        const clean = rawLine.split('#')[0].trim();
-        if (!clean) continue;
-        if (!/^alias\s+[a-zA-Z0-9_-]+\s*=\s*.+$/i.test(clean)) {
+      // Replace non-breaking spaces with ASCII space and validate strict .hackrc syntax
+      const sanitizedRaw = patch.cfg.replace(/\u00A0/g, ' ');
+      const normalizedLines: string[] = [];
+      for (const rawLine of sanitizedRaw.split(/\r?\n/)) {
+        const commentIdx = rawLine.indexOf('#');
+        const codePartRaw = commentIdx >= 0 ? rawLine.slice(0, commentIdx) : rawLine;
+        const commentPart = commentIdx >= 0 ? rawLine.slice(commentIdx).replace(/^[ \t]+/, '') : '';
+
+        // Reject exotic Unicode whitespace / vertical tabs / form feeds that break Classic engine
+        if (/[\v\f\u0085\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]/.test(codePartRaw)) {
           return c.json({ error: `Erreur de syntaxe .hackrc : "${rawLine}"` }, 400);
         }
+
+        const clean = codePartRaw.replace(/^[ \t]+|[ \t]+$/g, '');
+        if (!clean) {
+          normalizedLines.push(commentPart ? commentPart : '');
+          continue;
+        }
+
+        const m = /^alias[ \t]+([a-zA-Z0-9_-]+)[ \t]*=[ \t]*([^=\r\n]+)$/i.exec(clean);
+        if (!m) {
+          return c.json({ error: `Erreur de syntaxe .hackrc : "${rawLine}"` }, 400);
+        }
+        const aliasKey = m[1].toLowerCase();
+        const aliasTarget = m[2].replace(/^[ \t]+|[ \t]+$/g, '');
+        if (!aliasTarget) {
+          return c.json({ error: `Erreur de syntaxe .hackrc : "${rawLine}"` }, 400);
+        }
+        normalizedLines.push(
+          `alias ${aliasKey} = ${aliasTarget}${commentPart ? ` ${commentPart}` : ''}`
+        );
       }
+      normalizedCfg = normalizedLines.join('\n');
     }
 
     const updatedSettings = {
       ...player.settings,
       ...patch,
+      ...(normalizedCfg !== undefined ? { cfg: normalizedCfg } : {}),
     };
     db.prepare('UPDATE users SET settings_json = ? WHERE id = ?').run(
       JSON.stringify(updatedSettings),
@@ -995,10 +1227,15 @@ export function createApp(opts: CreateAppOptions) {
   });
 
   // --- Static Assets (/assets/*) ---
+  const assetsRoot = path.resolve(opts.assetsDir);
   app.get('/assets/*', async (c, next) => {
     const rel = c.req.path.replace(/^\/assets\/?/, '');
-    const resolved = path.resolve(opts.assetsDir, rel);
-    if (!resolved.startsWith(path.resolve(opts.assetsDir)) || !fs.existsSync(resolved) || fs.statSync(resolved).isDirectory()) {
+    const resolved = path.resolve(assetsRoot, rel);
+    if (
+      (resolved !== assetsRoot && !resolved.startsWith(assetsRoot + path.sep)) ||
+      !fs.existsSync(resolved) ||
+      fs.statSync(resolved).isDirectory()
+    ) {
       return next();
     }
     const ext = path.extname(resolved).toLowerCase();
@@ -1019,7 +1256,7 @@ export function createApp(opts: CreateAppOptions) {
       if (!rel || rel === 'index.html') return next();
       const resolved = path.resolve(classicWwwDir, rel);
       if (
-        !resolved.startsWith(classicWwwDir) ||
+        (resolved !== classicWwwDir && !resolved.startsWith(classicWwwDir + path.sep)) ||
         !fs.existsSync(resolved) ||
         fs.statSync(resolved).isDirectory()
       ) {
@@ -1040,10 +1277,11 @@ export function createApp(opts: CreateAppOptions) {
     app.get('*', (c) => {
       const reqRel = c.req.path === '/' ? 'index.html' : c.req.path.replace(/^\//, '');
       const candidate = path.resolve(distRoot, reqRel);
-      const targetFile =
-        candidate.startsWith(distRoot) && fs.existsSync(candidate) && !fs.statSync(candidate).isDirectory()
-          ? candidate
-          : path.join(distRoot, 'index.html');
+      const isSafeCandidate =
+        (candidate === distRoot || candidate.startsWith(distRoot + path.sep)) &&
+        fs.existsSync(candidate) &&
+        !fs.statSync(candidate).isDirectory();
+      const targetFile = isSafeCandidate ? candidate : path.join(distRoot, 'index.html');
 
       if (!fs.existsSync(targetFile)) return c.notFound();
       const ext = path.extname(targetFile).toLowerCase();

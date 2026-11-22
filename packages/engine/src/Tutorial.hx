@@ -105,6 +105,11 @@ class Tutorial {
 
 	public static var get = new AllData(ALL.get);
 
+	public static function reinit() {
+		ALL = initXml();
+		get = new AllData(ALL.get);
+	}
+
 
 	// *** GESTION
 

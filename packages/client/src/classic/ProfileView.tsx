@@ -64,9 +64,9 @@ export function ProfileView({
                     </td>
                     <td>
                       <ul className="virusList">
-                        {d.content.map((vid) => (
+                        {d.content.map((vid, idx) => (
                           <li
-                            key={vid}
+                            key={`${vid}_${idx}`}
                             onMouseEnter={() => showVirus(vid)}
                             onMouseLeave={() => hideVirus(vid)}
                           >

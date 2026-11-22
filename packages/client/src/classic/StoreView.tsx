@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ChipsetDef, PlayerDto, VirusDef } from '@intrusion/shared';
 import { api } from '../api/client';
 import { useVirusTooltip } from './TooltipContext';
@@ -29,6 +29,15 @@ export function StoreView({
   const [tab, setTab] = useState<StoreTab>('home');
   const [busyId, setBusyId] = useState<string | null>(null);
   const { showVirus, hideVirus } = useVirusTooltip();
+
+  useEffect(() => {
+    return () => hideVirus();
+  }, [hideVirus]);
+
+  const switchTab = (next: StoreTab) => {
+    hideVirus();
+    setTab(next);
+  };
 
   const buyVirus = async (v: VirusDef) => {
     setBusyId(v.id);
@@ -156,27 +165,27 @@ export function StoreView({
     <div className="shop">
       <ul className="tabs">
         <li id="tab_home" className={tab === 'home' ? 'active' : ''}>
-          <a onClick={() => setTab('home')}>[Accueil]</a>
+          <a onClick={() => switchTab('home')}>[Accueil]</a>
         </li>
         <li id="tab_dmg" className={tab === 'dmg' ? 'active' : ''}>
-          <a onClick={() => setTab('dmg')}>Virus Dégâts</a>
+          <a onClick={() => switchTab('dmg')}>Virus Dégâts</a>
         </li>
         <li id="tab_debuff" className={tab === 'debuff' ? 'active' : ''}>
-          <a onClick={() => setTab('debuff')}>Virus Afflictions</a>
+          <a onClick={() => switchTab('debuff')}>Virus Afflictions</a>
         </li>
         <li id="tab_combo" className={tab === 'combo' ? 'active' : ''}>
-          <a onClick={() => setTab('combo')}>Virus Combo</a>
+          <a onClick={() => switchTab('combo')}>Virus Combo</a>
         </li>
         <li id="tab_utils" className={tab === 'utils' ? 'active' : ''}>
-          <a onClick={() => setTab('utils')}>Virus Utilitaires</a>
+          <a onClick={() => switchTab('utils')}>Virus Utilitaires</a>
         </li>
         <li id="tab_chipset" className={tab === 'chipset' ? 'active' : ''}>
-          <a onClick={() => setTab('chipset')}>
+          <a onClick={() => switchTab('chipset')}>
             <img src="/img/icons/chip.png" alt="" /> Chipsets
           </a>
         </li>
         <li id="tab_bios" className={tab === 'bios' ? 'active' : ''}>
-          <a onClick={() => setTab('bios')}>
+          <a onClick={() => switchTab('bios')}>
             <img src="/img/icons/uc.png" alt="" /> BIOS
           </a>
         </li>

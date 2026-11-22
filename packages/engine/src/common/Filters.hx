@@ -59,18 +59,24 @@ class BlurFilter  {
 class ColorMatrixFilter  {
     static public function create(matrix: Array<Float>): PixiColorMatrixFilter {
         var filter = new PixiColorMatrixFilter();
+        if (matrix != null) filter.matrix = matrix;
         return filter;
     }
 }
 
 @:native("PIXI.filters.DropShadowFilter")
 extern class PixiDropShadowFilter extends Filter {
-	function new(rotation: Float, distance:Float, blur: Float, color: Int, alpha: Float);
+	function new(options: Dynamic);
 }
 
 class DropShadowFilter {
     static public function create(distance:Float, angle:Float, color:Int, alpha:Float, blurX:Float, blurY:Float, ?strength:Float, ?quality:Float, ?inner:Bool, ?knockout:Bool, ?hideObject:Bool):PixiDropShadowFilter {
-    // 3, 1.3
-        return new PixiDropShadowFilter(angle, distance, (blurX + blurY) / 10, color, alpha);
+        return new PixiDropShadowFilter({
+            rotation: angle,
+            distance: distance,
+            blur: (blurX + blurY) / 10,
+            color: color,
+            alpha: alpha
+        });
     }
 }

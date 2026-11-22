@@ -38,10 +38,12 @@ export function CyberdeckShell({
   onLogout,
 }: CyberdeckShellProps) {
   const [activeApp, setActiveApp] = useState<AppId>('contracts');
+  const [error, setError] = useState<string | null>(null);
   const viewHeadingRef = useRef<HTMLHeadingElement>(null);
 
   function navigateApp(next: AppId) {
     if (next === activeApp) return;
+    setError(null);
     const anyDoc = document as Document & {
       startViewTransition?: (cb: () => void) => { finished: Promise<void> };
     };
@@ -59,19 +61,29 @@ export function CyberdeckShell({
   }
 
   async function toggleLang() {
-    const nextLang: LangCode = player.settings.lang === 'fr' ? 'en' : 'fr';
-    const res = await api.updateProfile({ lang: nextLang });
-    onPlayerUpdate(res.player);
+    setError(null);
+    try {
+      const nextLang: LangCode = player.settings.lang === 'fr' ? 'en' : 'fr';
+      const res = await api.updateProfile({ lang: nextLang });
+      onPlayerUpdate(res.player);
+    } catch (err: any) {
+      setError(err.message || 'Impossible de modifier la langue.');
+    }
   }
 
   async function toggleMuteAll() {
-    const anyOn = player.settings.sfx || player.settings.ambiant || player.settings.beat;
-    const res = await api.updateProfile({
-      sfx: !anyOn,
-      ambiant: !anyOn,
-      beat: !anyOn,
-    });
-    onPlayerUpdate(res.player);
+    setError(null);
+    try {
+      const anyOn = player.settings.sfx || player.settings.ambiant || player.settings.beat;
+      const res = await api.updateProfile({
+        sfx: !anyOn,
+        ambiant: !anyOn,
+        beat: !anyOn,
+      });
+      onPlayerUpdate(res.player);
+    } catch (err: any) {
+      setError(err.message || 'Impossible de modifier les réglages audio.');
+    }
   }
 
   const navItems: Array<{ id: AppId; label: string; icon: any }> = [
@@ -176,6 +188,12 @@ export function CyberdeckShell({
           );
         })}
       </nav>
+
+      {error && (
+        <div className="border-b border-rose-500/40 bg-rose-950/60 px-4 py-1.5 font-mono text-xs text-rose-200">
+          {error}
+        </div>
+      )}
 
       {/* Active Application Workspace */}
       <main className="flex-1 overflow-hidden p-4">

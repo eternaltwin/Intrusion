@@ -243,6 +243,7 @@ export interface MissionInitParams {
   gl: number;
   mission: MissionData;
   cards?: string[];
+  ownedViruses?: Record<string, number>;
   decks: DeckLoadout[];
   chipset: string | null;
   isChallenge: boolean;

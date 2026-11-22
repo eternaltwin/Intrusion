@@ -101,7 +101,7 @@ class WinAppOptions extends WinApp {
 	function updateView() {
 		sensField.field.text = Data.leadingZeros(ls.wheelSpeed);
 		capField._visible = capture!=null;
-		var keyNames = getKeyNames();
+		var keyNames = getKeyNames(Manager.LANG);
 		var i = 0;
 		for (mc in shortcutButtons) {
 			mc.field.text = keyNames[ls.shortcuts[i]];

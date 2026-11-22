@@ -178,20 +178,21 @@ class FSNode {
 			if ( key=="crime.data" )
 				content = TD.texts.get("crimeLog");
 			if ( av==AntivirusXml.get.passwd ) {
-				TD.texts.set("content",term.fs.mpass);
+				var mp = fs!=null ? fs.mpass : (term.fs!=null ? term.fs.mpass : "");
+				TD.texts.set("content", mp);
 				content = TD.texts.get("fileSettings");
 			}
 			if ( key=="inv.game" )
 				content = TD.texts.get("inventory");
-			if ( key=="money.game" )
+			if ( key=="money.game" || key=="gold.game" )
 				content = TD.texts.get("gold");
 			if ( key=="stats.game" )
 				content = TD.texts.get("stats");
 			if ( key=="file.control" )
 				content = TD.texts.get("controlFile");
-			if ( key=="file.video" )
+			if ( key=="file.video" || ext("video") || key=="tvprog.data" )
 				content = TD.texts.get("videoFile");
-			if ( key=="file.image" )
+			if ( key=="file.image" || ext("image") )
 				content = TD.texts.get("imageFile");
 			if ( key=="file.rar" )
 				content = TD.texts.get("rarFile");
@@ -268,7 +269,8 @@ class FSNode {
 	public function detach() {
 		for (emc in emcList)
 			emc.removeMovieClip();
-		mc.removeMovieClip();
+		if ( mc!=null )
+			mc.removeMovieClip();
 	}
 
 	public static function attach(dm:mt.DepthManager, fl_anim:Bool, ?fnode:FSNode, ?index=0) {
@@ -442,9 +444,11 @@ class FSNode {
 //			return false;
 //	}
 
-	public function damage(base:Int, ?fl_canBeBoosted=true, ?fl_ignoreShield=false, ?fl_canSpread=true) {
+	public function damage(base:Int, ?fl_canBeBoosted=true, ?fl_ignoreShield=false, ?fl_canSpread=true, ?fl_applyBrute=true) {
+		if ( fl_deleted || life<=0 )
+			return 0;
 		var dmg : Float = base;
-		if ( term.hasChipset(data.ChipsetsXml.get.brute) )
+		if ( fl_applyBrute && term.hasChipset(data.ChipsetsXml.get.brute) )
 			dmg = Math.round(VirusMan.BRUTE_DMG*dmg);
 		var extra = "";
 
@@ -454,17 +458,15 @@ class FSNode {
 		}
 
 		// s�curit� mode Scout
-		if ( term.hasChipset(data.ChipsetsXml.get.scout) )
-			if ( key=="file.guardian" || key=="file.core" ) {
-				dmg = 0;
-				extra = Lang.get.Immune;
-			}
 
 		// multiplicateur de d�g�ts
 		if ( fl_canBeBoosted ) {
 			if ( term.hasEffect(UE_DamageBurst) ) {
 				dmg+=term.getEffectSource(UE_DamageBurst).power;
-				term.vman.addEndEvent( function() {term.removeEffect(UE_DamageBurst); return 0;} );
+				if ( !term.vman.burstUsed ) {
+					term.vman.burstUsed = true;
+					term.vman.addEndEvent( function() {term.removeEffect(UE_DamageBurst); return 0;} );
+				}
 			}
 			if ( term.hasEffect(UE_Charge) ) {
 				dmg*=term.countEffect(UE_Charge);
@@ -494,6 +496,12 @@ class FSNode {
 			}
 		}
 
+		if ( term.hasChipset(data.ChipsetsXml.get.scout) )
+			if ( key=="file.guardian" || key=="file.core" ) {
+				dmg = 0;
+				extra = Lang.get.Immune;
+			}
+
 		// paladin
 		if ( hasEffect(E_Immune) ) {
 			dmg = 0;
@@ -516,7 +524,7 @@ class FSNode {
 //		}
 
 		// affichage multiplicateur
-		if ( term.hasEffect(UE_Charge) )
+		if ( fl_canBeBoosted && term.hasEffect(UE_Charge) )
 			extra+=" [x"+term.countEffect(UE_Charge)+"]";
 
 		// display
@@ -524,10 +532,12 @@ class FSNode {
 		life = Std.int( Math.max(0, life-final_dmg) );
 
 		if ( fl_canSpread && final_dmg>0 && hasEffect(E_Tag) ) {
-			var sdamage = Math.floor( base * countEffect(E_Tag)/100 );
-			for (neig in term.fs.getFilesByEffect(E_Tag))
-				if ( neig!=this )
-					term.vman.addEndEvent( neig.damage.bind(sdamage, true, false, false) );
+			var sdamage = Math.floor( final_dmg * countEffect(E_Tag)/100 );
+			if ( sdamage>0 ) {
+				for (neig in term.fs.getFilesByEffect(E_Tag))
+					if ( neig!=this )
+						term.vman.addEndEvent( neig.damage.bind(sdamage, false, false, false, false) );
+			}
 		}
 
 		if ( mc!=null ) {
@@ -561,10 +571,12 @@ class FSNode {
 			// splash damage ! (librairie pi�g�e)
 			if ( hasEffect(E_Splash) && !fl_deleted ) {
 				var sdamage = Math.floor( dmg * countEffect(E_Splash)/100 );
-				for (neig in term.fs.getFolderFiles(parent))
-					if ( neig.key=="file.core" || neig.key=="file.guardian" || neig.av!=null )
-						if ( neig!=this && !neig.fl_folder && !neig.fl_deleted )
-							term.vman.addEndEvent( neig.damage.bind(sdamage, true, false, true) );
+				if ( sdamage>0 ) {
+					for (neig in term.fs.getFolderFiles(parent))
+						if ( neig.key=="file.core" || neig.key=="file.guardian" || neig.av!=null )
+							if ( neig!=this && !neig.fl_folder && !neig.fl_deleted )
+								term.vman.addEndEvent( neig.damage.bind(sdamage, false, false, true, false) );
+				}
 			}
 
 			var dmgNotified = false;
@@ -611,7 +623,7 @@ class FSNode {
 	public function disableAV() {
 		addEffect(E_Disabled,1,1);
 		term.avman.unregister(this);
-		if ( mc._name!=null ) {
+		if ( mc!=null && mc._name!=null ) {
 			term.startAnim(A_FadeIn, mc);
 			term.addIconRain(term.fs.sdm, mc);
 			redraw();
@@ -694,10 +706,11 @@ class FSNode {
 		var c = getContent();
 		if ( c!=null ) {
 			term.printSide(name,c,this);
-			term.fs.logEvent(Lang.fmt.TraceAccess({_name:name}));
-			if ( key=="file.video" )
+			if ( term.fs!=null && term.fs.target==this )
+				term.fs.logEvent(Lang.fmt.TraceAccess({_name:name}));
+			if ( key=="file.video" || ext("video") || key=="tvprog.data" )
 				Live.loadVideo(this);
-			if ( key=="file.image" )
+			if ( key=="file.image" || ext("image") )
 				Live.loadImage(this);
 		}
 	}
@@ -903,16 +916,17 @@ class FSNode {
 
 
 	public function addEffect(et:EffectType, ?cpt=1, ?max=100) {
-		if ( cpt>max )
-			cpt = max;
 		for (e in effects)
 			if ( e.type==et ) {
+				var effectiveMax = e.cpt>max ? e.cpt : max;
 				e.cpt+=cpt;
-				if ( e.cpt>max )
-					e.cpt = max;
+				if ( e.cpt>effectiveMax )
+					e.cpt = effectiveMax;
 				displayEffects();
 				return;
 			}
+		if ( cpt>max )
+			cpt = max;
 		effects.push({
 			type	: et,
 			cpt		: cpt,

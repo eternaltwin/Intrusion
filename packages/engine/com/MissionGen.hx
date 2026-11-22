@@ -189,6 +189,11 @@ class MissionGen {
 	}
 
 
+	static function ensureDataExt(s:String) : String {
+		if (s == null) return ".data";
+		return StringTools.endsWith(s.toLowerCase(), ".data") ? s : s + ".data";
+	}
+
 	function getMissionList(rseed:Rand,glevel) {
 		var list = new Array();
 		if ( glevel==1 )
@@ -251,8 +256,8 @@ class MissionGen {
 				_MFindMails(names.get("musername", rseed),rseed.random(3)+2),
 				_MCompromiseMail(names.get("musername", rseed)),
 				_MTV(names.get("hotTv", rseed),names.get("badTv", rseed)),
-				_MTVTheft(names.get("tv", rseed), names.get("tvProgTheft", rseed)),
-				_MTVTheft(names.get("hotTv", rseed), names.get("hotProgTheft", rseed)),
+				_MTVTheft(names.get("tv", rseed), ensureDataExt(names.get("tvProgTheft", rseed))),
+				_MTVTheft(names.get("hotTv", rseed), ensureDataExt(names.get("hotProgTheft", rseed))),
 				_MTVCrash(names.get("tv", rseed)),
 				_MCrashDB(fsNames.get("/sys_db", rseed)),
 			]);

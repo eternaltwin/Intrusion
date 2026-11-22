@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getAdjustedPrime, type MissionEndSummary, type MissionInitParams, type PlayerDto } from '@intrusion/shared';
 import { api, type CatalogResponse } from './api/client';
 import { VirusTooltipProvider } from './classic/TooltipContext';
@@ -38,6 +38,7 @@ export function App() {
   const [activeMission, setActiveMission] = useState<MissionInitParams | null>(null);
   const [debrief, setDebrief] = useState<DebriefState | null>(null);
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
+  const missionEndingRef = useRef(false);
 
   const notify = useCallback((text: string, error = false) => {
     setNotice({ text, error });
@@ -83,16 +84,72 @@ export function App() {
     [catalog]
   );
 
-  const navigate = useCallback((nextRoute: ClassicRoute) => {
-    runTransition(() => {
-      setActiveMission(null);
-      setDebrief(null);
-      setNotice(null);
-      setRoute(nextRoute);
-    });
+  const sendAbandonIfActive = useCallback(async (mission: MissionInitParams | null) => {
+    if (!mission || missionEndingRef.current) return;
+    missionEndingRef.current = true;
+    const abandonSummary: MissionEndSummary = {
+      missionKey: mission.missionKey,
+      seed: mission.seed,
+      gl: mission.gl,
+      isChallenge: mission.isChallenge,
+      scoutRun: mission.chipset === 'scout',
+      success: false,
+      kills: 0,
+      remainingSec: 0,
+      valuables: [],
+      copiedFiles: [],
+      stolenCards: [],
+      goals: {},
+      score: 0,
+    };
+    try {
+      if (mission.isChallenge) {
+        const res = await api.endChallenge(abandonSummary);
+        if (res?.player) setPlayer(res.player);
+      } else {
+        const res = await api.endMission(mission.missionKey, abandonSummary);
+        if (res?.player) setPlayer(res.player);
+      }
+    } catch {
+      // ignore if mission was already closed server-side
+    }
   }, []);
 
+  const navigate = useCallback(
+    (nextRoute: ClassicRoute) => {
+      const currentActive = activeMission;
+      if (currentActive && !missionEndingRef.current) {
+        void (async () => {
+          await sendAbandonIfActive(currentActive);
+          runTransition(() => {
+            setActiveMission(null);
+            setDebrief(null);
+            setNotice(null);
+            setRoute(nextRoute);
+          });
+        })();
+        return;
+      }
+      runTransition(() => {
+        setActiveMission(null);
+        setDebrief(null);
+        setNotice(null);
+        setRoute(nextRoute);
+      });
+    },
+    [activeMission, sendAbandonIfActive]
+  );
+
+  const handleQuitMission = useCallback(async () => {
+    const currentActive = activeMission;
+    await sendAbandonIfActive(currentActive);
+    setActiveMission(null);
+  }, [activeMission, sendAbandonIfActive]);
+
   const handleLogout = async () => {
+    if (activeMission && !missionEndingRef.current) {
+      await sendAbandonIfActive(activeMission);
+    }
     await api.logout().catch(() => {});
     setActiveMission(null);
     setDebrief(null);
@@ -103,6 +160,7 @@ export function App() {
     try {
       setNotice(null);
       const res = await api.startMission(missionKey);
+      missionEndingRef.current = false;
       setDebrief(null);
       setActiveMission(res.init);
     } catch (err: any) {
@@ -114,6 +172,7 @@ export function App() {
     try {
       setNotice(null);
       const res = await api.startChallenge();
+      missionEndingRef.current = false;
       setDebrief(null);
       setActiveMission(res.init);
     } catch (err: any) {
@@ -122,21 +181,22 @@ export function App() {
   };
 
   const handleCompleteMission = async (summary: MissionEndSummary) => {
-    if (!player || !activeMission) return;
+    if (!player || !activeMission || missionEndingRef.current) return;
+    missionEndingRef.current = true;
     const prevLevel = player.level;
     const prevTries = activeMission.tries;
     const basePrime = activeMission.mission.prime;
 
     try {
       if (summary.isChallenge) {
-        const res = await api.endChallenge(summary);
+        const res = await api.endChallenge({ ...summary, scoutRun: summary.scoutRun });
         setPlayer(res.player);
         setActiveMission(null);
         setDebrief({
-          summary,
+          summary: { ...summary, score: res.score ?? summary.score },
           earnedMoney: res.rewardMoney,
           earnedXp: res.isRanked && summary.success ? 2 : 0,
-          scoutRun: false,
+          scoutRun: res.scoutRun ?? summary.scoutRun,
           previousLevel: prevLevel,
           newLevel: res.player.level,
           nextRetryPrime: 0,
@@ -183,7 +243,10 @@ export function App() {
   }
 
   return (
-    <VirusTooltipProvider viruses={catalog.viruses}>
+    <VirusTooltipProvider
+      viruses={catalog.viruses}
+      resetKey={`${route}:${activeMission?.missionKey ?? ''}:${debrief ? 'debrief' : ''}`}
+    >
       <ClassicLayout
         player={player}
         route={route}
@@ -197,7 +260,7 @@ export function App() {
           <MissionPlayView
             init={activeMission}
             onComplete={handleCompleteMission}
-            onQuit={() => setActiveMission(null)}
+            onQuit={handleQuitMission}
           />
         ) : debrief ? (
           <MissionEndView
@@ -235,6 +298,7 @@ export function App() {
         ) : route === 'decks' ? (
           <DecksView
             player={player}
+            viruses={catalog.viruses}
             chipsets={catalog.chipsets}
             addDeckCost={catalog.addDeckCost}
             addSlotCost={catalog.addSlotCost}

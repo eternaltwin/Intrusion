@@ -45,6 +45,12 @@ class Lang {
 	}
 
 	public static var get = new AllTexts(TEXTS.get);
+
+	public static function reinit() {
+		TEXTS = init();
+		get = new AllTexts(TEXTS.get);
+	}
+
 	static function parse(str) {
 		str = StringTools.replace(str, "&quot;", "\"");
 		str = StringTools.replace(str, "&apos;", "'");

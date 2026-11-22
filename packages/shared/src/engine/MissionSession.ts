@@ -1,4 +1,4 @@
-import { formatLang, formatVirusDesc, type GameDataBundle } from '../data/xmlLoaders.js';
+import { formatLang, type GameDataBundle } from '../data/xmlLoaders.js';
 import {
   getMissionTimeMs,
   getTutorialTrack,
@@ -11,6 +11,7 @@ import {
   generateNetwork,
   SHIELD_ABSORB,
 } from '../generator/NetworkGen.js';
+import { Rand } from '../rng/Rand.js';
 import type {
   DeckLoadout,
   FileNodeState,
@@ -31,6 +32,8 @@ export interface ActiveCast {
   virusId: string;
   targetNodeId: number | null;
   targetFileId: number | null;
+  deckIndex?: number | null;
+  slotIndex?: number | null;
   elapsedMs: number;
   durationMs: number;
   label: string;
@@ -131,12 +134,24 @@ export class MissionSession {
 
   private endTurnQueue: Array<() => void> = [];
   private isDisconnecting = false;
+  private pendingFurtivityConsume = 0;
+  private burstConsumedThisTurn = false;
+  private slotChargeGroups = new WeakMap<
+    DockSlotState,
+    { remainingUses: number; slots: DockSlotState[] }
+  >();
 
   constructor(bundle: GameDataBundle, init: MissionInitParams) {
     this.bundle = bundle;
     this.init = init;
 
-    const generated = generateNetwork(bundle, init.mission, init.profile.adult);
+    const generated = generateNetwork(
+      bundle,
+      init.mission,
+      init.profile.adult,
+      init.profile.username || 'Haxxor',
+      init.cards
+    );
     this.entranceId = generated.entranceId;
     this.nodes = generated.nodes;
     this.missionCpt = generated.extraMissionCount;
@@ -152,23 +167,102 @@ export class MissionSession {
     this.parseHackrc(init.profile.cfg);
 
     // Build decks + inject custom mission virus ('cust') when required
-    this.decks = init.decks.length > 0 ? init.decks : [{ id: 'd0', name: 'Default', capacity: 3, isFavorite: true, content: ['dmgs', 'copy', 'scan1'] }];
+    const isTuto = isTutorialMission(init.mission);
+    const defaultDeck: DeckLoadout = {
+      id: 'd0',
+      name: 'Default',
+      capacity: 3,
+      isFavorite: true,
+      content: ['dmgs', 'copy', 'scan1'],
+    };
+    if (isTuto) {
+      this.decks = [
+        {
+          id: 'tuto',
+          name: 'Tutorial',
+          capacity: 3,
+          isFavorite: true,
+          content: ['dmgs', 'copy', 'scan1'],
+        },
+      ];
+    } else {
+      const sourceDecks = init.decks.length > 0 ? init.decks : [defaultDeck];
+      const rawDecks = init.isChallenge ? sourceDecks.slice(0, 1) : sourceDecks;
+      this.decks = rawDecks;
+    }
+
     const customVirus = this.buildCustomMissionVirus();
+
+    // Compute per-virus exemplar charge pools across decks in Normal mode
+    const maxInAnyDeck = new Map<string, number>();
+    for (const d of this.decks) {
+      const counts = new Map<string, number>();
+      for (const vid of d.content) {
+        counts.set(vid, (counts.get(vid) ?? 0) + 1);
+      }
+      for (const [vid, cnt] of counts.entries()) {
+        if (cnt > (maxInAnyDeck.get(vid) ?? 0)) {
+          maxInAnyDeck.set(vid, cnt);
+        }
+      }
+    }
+
+    const chargePools = new Map<string, Array<{ remainingUses: number; slots: DockSlotState[] }>>();
+    const chargeCursors = new Map<string, number>();
+    const getExemplarGroup = (
+      vid: string,
+      baseUses: number
+    ): { remainingUses: number; slots: DockSlotState[] } => {
+      let pool = chargePools.get(vid);
+      if (!pool) {
+        const rawOwned =
+          vid === 'cust'
+            ? 1
+            : !init.isChallenge && !isTuto && init.ownedViruses?.[vid] !== undefined
+              ? init.ownedViruses[vid]
+              : maxInAnyDeck.get(vid) ?? 1;
+        const ownedCount = Math.max(1, rawOwned);
+        pool = Array.from({ length: ownedCount }, () => ({
+          remainingUses: baseUses,
+          slots: [],
+        }));
+        chargePools.set(vid, pool);
+        chargeCursors.set(vid, 0);
+      }
+      const cur = chargeCursors.get(vid) ?? 0;
+      chargeCursors.set(vid, cur + 1);
+      return pool[cur % pool.length];
+    };
+
     this.deckSlots = this.decks.map((d) => {
       const slots: DockSlotState[] = [];
       for (const vid of d.content) {
         const base = bundle.viruses.get(vid);
         if (!base) continue;
-        slots.push(this.toSlotState(base, slots.length));
+        const slot = this.toSlotState(base, slots.length);
+        if (base.uses !== null && !init.isChallenge && !isTuto) {
+          const group = getExemplarGroup(vid, base.uses);
+          slot.remainingUses = group.remainingUses;
+          group.slots.push(slot);
+          this.slotChargeGroups.set(slot, group);
+        }
+        slots.push(slot);
       }
       if (customVirus) {
-        slots.push(this.toSlotState(customVirus, slots.length));
+        const custSlot = this.toSlotState(customVirus, slots.length);
+        if (customVirus.uses !== null) {
+          const group = getExemplarGroup('cust', customVirus.uses);
+          custSlot.remainingUses = group.remainingUses;
+          group.slots.push(custSlot);
+          this.slotChargeGroups.set(custSlot, group);
+        }
+        slots.push(custSlot);
       }
       return slots;
     });
 
     // Timers
-    const effectiveLeet = isTutorialMission(init.mission) ? false : init.profile.leet;
+    const effectiveLeet = isTuto ? false : init.profile.leet;
     this.hasTimer = hasMissionTimer(init.mission);
     this.timeLimitMs = getMissionTimeMs(init.mission, effectiveLeet);
 
@@ -187,15 +281,43 @@ export class MissionSession {
     this.emitSound({ kind: 'loop_start', id: 'menu', channel: 'beat' });
   }
 
+  public getEffectiveCc(v: VirusDef): number {
+    let cc = v.cc;
+    if (this.hasChipset('brute') && v.cat === 'damage') {
+      cc = Math.round(1.3 * cc);
+    }
+    if (this.hasChipset('thief')) {
+      if (v.id === 'fmove1') cc -= Math.floor(v.cc * 0.3);
+      else if (v.id === 'fmove2') cc -= Math.floor(v.cc * 0.4);
+      else if (v.id === 'invis') cc -= Math.floor(v.cc * 0.6);
+    }
+    if (this.hasChipset('deciph')) {
+      if (v.id === 'unmask' || v.id === 'dec1') cc -= Math.floor(v.cc * 0.5);
+      else if (v.id === 'dec2' || v.id === 'dec3') cc -= Math.floor(v.cc * 0.6);
+    }
+    return Math.max(0, cc);
+  }
+
   private toSlotState(v: VirusDef, index: number): DockSlotState {
-    const effectiveCc =
-      this.hasChipset('brute') && v.cat === 'damage' ? Math.round(1.3 * v.cc) : v.cc;
     return {
       index,
       virus: v,
       remainingUses: v.uses,
-      effectiveCc,
+      effectiveCc: this.getEffectiveCc(v),
     };
+  }
+
+  private consumeSlotCharge(slot: DockSlotState): void {
+    if (slot.remainingUses === null) return;
+    const group = this.slotChargeGroups.get(slot);
+    if (group) {
+      group.remainingUses = Math.max(0, group.remainingUses - 1);
+      for (const linked of group.slots) {
+        linked.remainingUses = group.remainingUses;
+      }
+    } else {
+      slot.remainingUses = Math.max(0, slot.remainingUses - 1);
+    }
   }
 
   private buildCustomMissionVirus(): VirusDef | null {
@@ -218,15 +340,14 @@ export class MissionSession {
       case 'DeliverFile':
       case 'CompromiseMail':
       case 'Arrest':
-        return make('CustUp', 'CustUpDesc', '_none', 1);
       case 'CorruptDisplay':
-        return make('CustUp', 'CustUpDesc', '_none', null);
+        return make('CustUp', 'CustUpDesc', '_none', 1);
       case 'FalsifyCam':
-        return make('CustVideo', 'CustVideoDesc', '_file', null);
+        return make('CustVideo', 'CustVideoDesc', '_none', null);
       case 'TV':
         return make('CustRep', 'CustRepDesc', '_file', null);
       case 'OverwriteFiles':
-        return make('CustOverwrite', 'CustOverwriteDesc', '_file', null, { ext: mp.ext.toUpperCase() });
+        return make('CustOverwrite', 'CustOverwriteDesc', '_none', null, { ext: mp.ext.toUpperCase() });
       case 'GameHack':
         return make('CustGame', 'CustGameDesc', '_file', null);
       case 'InfectNet':
@@ -351,6 +472,14 @@ export class MissionSession {
   }
 
   public isNodeShielded(node: NetNodeState): boolean {
+    if (
+      !this.isNodeUp(node) ||
+      node.type === 'Entrance' ||
+      node.type === 'LockServer' ||
+      node.type === 'LockServerLight'
+    ) {
+      return false;
+    }
     for (const peer of this.getNonEmptyNeighbours(node)) {
       if (!this.isNodeUp(peer)) continue;
       if (peer.type === 'LockServer' && peer.dist === node.dist) return true;
@@ -426,7 +555,13 @@ export class MissionSession {
     }
 
     // Chipset smana (-1 HP every 4s unblockable)
-    if (this.hasChipset('smana') && this.tickSeconds % 4 === 0) {
+    if (
+      this.hasChipset('smana') &&
+      this.tickSeconds % 4 === 0 &&
+      this.life > 0 &&
+      !this.busted &&
+      !this.ended
+    ) {
       this.damagePlayer(1, false);
     }
 
@@ -447,10 +582,14 @@ export class MissionSession {
     }
 
     this.drainEndTurn();
+    if (!this.busted && !this.ended) {
+      this.evaluateMissionObjective();
+    }
   }
 
   private triggerBusted(langKey: 'TimeOut' | 'AlarmEnd'): void {
     this.busted = true;
+    this.missionObjectiveCompleted = false;
     this.scannerState = null;
     this.cancelCast();
     if (this.connectedNodeId !== null) {
@@ -474,8 +613,13 @@ export class MissionSession {
   // --- Actions ---
   public connectToNode(nodeId: number): { ok: boolean; error?: string } {
     const ui = this.bundle.uiStrings;
+    if (this.activeCast) return this.failAction(formatLang(ui, 'Wait'));
     const node = this.nodes[nodeId];
     if (!node) return { ok: false, error: 'Unknown node' };
+
+    if (this.connectedNodeId !== null) {
+      return this.failAction(formatLang(ui, 'InvalidTarget'));
+    }
 
     if (node.type === 'Entrance') {
       return this.finishMission();
@@ -497,10 +641,14 @@ export class MissionSession {
   }
 
   public switchDeck(targetIndex?: number): boolean {
+    if (this.activeCast) return false;
     if (this.decks.length <= 1) return false;
     if (this.connectedNodeId !== null && !this.canSwitchDeckInFs) return false;
-    this.activeDeckIndex =
-      targetIndex !== undefined ? targetIndex % this.decks.length : (this.activeDeckIndex + 1) % this.decks.length;
+    const len = this.decks.length;
+    const rawNext = targetIndex !== undefined ? targetIndex : this.activeDeckIndex + 1;
+    const next = ((Math.trunc(rawNext) % len) + len) % len;
+    if (!Number.isFinite(next) || next === this.activeDeckIndex) return false;
+    this.activeDeckIndex = next;
     if (this.connectedNodeId !== null) {
       this.canSwitchDeckInFs = false;
     }
@@ -508,6 +656,24 @@ export class MissionSession {
     this.pushLog('info', formatLang(this.bundle.uiStrings, 'Log_ChangedDeck', { name: deckName }));
     this.emitSound({ kind: 'sfx', id: 'bleep_04' });
     return true;
+  }
+
+  private tryCollectCard(f: FileNodeState | null | undefined): void {
+    if (!f || f.deleted || f.isFolder || !f.cardData) return;
+    if ((f.effects.E_Encoded ?? 0) > 0 || (f.effects.E_Masked ?? 0) > 0) return;
+    if (
+      this.collectedCards.some(
+        (c) => c.id === f.cardData!.id || c.number === f.cardData!.number
+      )
+    ) {
+      return;
+    }
+    this.collectedCards.push(f.cardData);
+    this.pushLog(
+      'success',
+      `Credit card captured: ${f.cardData.number} (+${f.cardData.amount} CR)`
+    );
+    this.emitSound({ kind: 'sfx', id: 'bonus_01' });
   }
 
   public selectFile(fileId: number): void {
@@ -520,30 +686,38 @@ export class MissionSession {
 
     if (!f.isFolder) {
       this.appendSystemLog(sys, 'TraceAccess', f.name);
-      // Automatically collect stolen card if readable
-      if (f.cardData && !(f.effects.E_Encoded ?? 0) && !(f.effects.E_Masked ?? 0)) {
-        if (!this.collectedCards.some((c) => c.id === f.cardData!.id)) {
-          this.collectedCards.push(f.cardData);
-          this.pushLog('success', `Credit card captured: ${f.cardData.number} (+${f.cardData.amount} CR)`);
-          this.emitSound({ kind: 'sfx', id: 'bonus_01' });
-        }
-      }
+      this.tryCollectCard(f);
     }
     this.advanceTutorialIfAt('selectFile');
   }
 
   public openFolder(folderId: number): { ok: boolean; error?: string } {
+    const ui = this.bundle.uiStrings;
+    if (this.activeCast) return this.failAction(formatLang(ui, 'Wait'));
     const sys = this.currentSystem;
     if (!sys) return { ok: false };
     const folder = sys.files[folderId];
-    if (!folder || !folder.isFolder) return this.failAction(formatLang(this.bundle.uiStrings, 'NeedFolder'));
+    if (!folder || folder.deleted || !folder.isFolder) {
+      return this.failAction(formatLang(ui, 'NeedFolder'));
+    }
 
     // Check glue in current folder
     if (this.currentFolder && this.folderHasAv(sys, this.currentFolder.id, 'glue') && !this.isMoveFurtive()) {
-      return this.failAction(formatLang(this.bundle.uiStrings, 'CantGetOut'));
+      return this.failAction(formatLang(ui, 'CantGetOut'));
     }
 
-    if (folder.password !== null) {
+    // Verify no strict ancestor of target folder is still locked
+    let ancId = folder.parentId;
+    while (ancId !== null) {
+      const anc = sys.files[ancId];
+      if (!anc) break;
+      if (anc.password !== null || this.folderHasAv(sys, anc.id, 'passwd')) {
+        return this.failAction(formatLang(ui, 'MapLocked'));
+      }
+      ancId = anc.parentId;
+    }
+
+    if (folder.password !== null || this.folderHasAv(sys, folder.id, 'passwd')) {
       this.pendingPasswordFolderId = folder.id;
       return { ok: true };
     }
@@ -554,16 +728,29 @@ export class MissionSession {
   }
 
   public submitFolderPassword(passwordAttempt: string): boolean {
+    if (this.activeCast) return false;
     const sys = this.currentSystem;
     if (!sys || this.pendingPasswordFolderId === null) return false;
     const folder = sys.files[this.pendingPasswordFolderId];
     if (!folder) return false;
-    if (passwordAttempt.trim().toLowerCase() === (folder.password ?? '').toLowerCase()) {
-      const pw = folder.password!;
-      folder.password = null;
+    const expectedPw =
+      folder.password ?? (this.folderHasAv(sys, folder.id, 'passwd') ? sys.mpass : null);
+    if (expectedPw === null) {
       this.pendingPasswordFolderId = null;
-      if (!this.unlockedPasswords.has(pw)) {
-        this.unlockedPasswords.add(pw);
+      return false;
+    }
+    if (passwordAttempt.trim().toLowerCase() === expectedPw.toLowerCase()) {
+      folder.password = null;
+      for (const cid of folder.childrenIds) {
+        const cf = sys.files[cid];
+        if (cf && !cf.deleted && cf.avKey === 'passwd') {
+          this.unregisterAv(sys, cf);
+          cf.effects.E_Disabled = 1;
+        }
+      }
+      this.pendingPasswordFolderId = null;
+      if (!this.unlockedPasswords.has(expectedPw)) {
+        this.unlockedPasswords.add(expectedPw);
         this.incGoal('passwd', 1);
       }
       this.pushLog('success', formatLang(this.bundle.uiStrings, 'LoginSuccess'));
@@ -591,6 +778,7 @@ export class MissionSession {
   }
 
   public useDockSlot(slotIndex: number, explicitFileId?: number): { ok: boolean; error?: string } {
+    if (this.isLeetMode) return this.failAction('CLI required in Leet mode');
     const slot = this.currentDeck[slotIndex];
     if (!slot) return { ok: false, error: 'Empty slot' };
     return this.useVirusById(slot.virus.id, explicitFileId, slotIndex);
@@ -604,23 +792,47 @@ export class MissionSession {
     const ui = this.bundle.uiStrings;
     if (this.activeCast) return this.failAction(formatLang(ui, 'Wait'));
 
-    // Find in deck (prefer explicit slot or a copy that still has charges) or hidden viruses
-    const slot =
-      explicitSlotIndex !== undefined
-        ? this.currentDeck[explicitSlotIndex]
-        : this.currentDeck.find(
-            (s) =>
-              s.virus.id.toLowerCase() === virusId.toLowerCase() &&
-              (s.remainingUses === null || s.remainingUses > 0)
-          ) ?? this.currentDeck.find((s) => s.virus.id.toLowerCase() === virusId.toLowerCase());
-    const virus = slot?.virus ?? this.bundle.viruses.get(virusId.toLowerCase());
-    if (!virus) return this.failAction(formatLang(ui, 'UnknownVirus'));
+    // Find in deck (prefer explicit slot or a copy that still has charges) or hidden system actions
+    let resolvedSlotIndex: number | null = null;
+    let slot: DockSlotState | undefined;
+    if (explicitSlotIndex !== undefined) {
+      slot = this.currentDeck[explicitSlotIndex];
+      if (!slot) return this.failAction(formatLang(ui, 'UnknownVirus'));
+      resolvedSlotIndex = explicitSlotIndex;
+    } else {
+      const chargedIdx = this.currentDeck.findIndex(
+        (s) =>
+          s.virus.id.toLowerCase() === virusId.toLowerCase() &&
+          (s.remainingUses === null || s.remainingUses > 0)
+      );
+      if (chargedIdx >= 0) {
+        slot = this.currentDeck[chargedIdx];
+        resolvedSlotIndex = chargedIdx;
+      } else {
+        const anyIdx = this.currentDeck.findIndex(
+          (s) => s.virus.id.toLowerCase() === virusId.toLowerCase()
+        );
+        if (anyIdx >= 0) {
+          slot = this.currentDeck[anyIdx];
+          resolvedSlotIndex = anyIdx;
+        }
+      }
+    }
+
+    const fallback = this.bundle.viruses.get(virusId.toLowerCase());
+    if (!slot && fallback?.cat !== 'hidden') {
+      return this.failAction(formatLang(ui, 'UnknownVirus'));
+    }
+    const virus = slot ? slot.virus : fallback!;
+    if (virus.id === 'connec') {
+      return this.failAction(formatLang(ui, 'UnknownVirus'));
+    }
 
     if (slot && slot.remainingUses !== null && slot.remainingUses <= 0) {
       return this.failAction(formatLang(ui, 'NoCharge'));
     }
 
-    const ccCost = slot ? slot.effectiveCc : virus.cc;
+    const ccCost = slot ? slot.effectiveCc : this.getEffectiveCc(virus);
     if (this.mana < ccCost) {
       return this.failAction(formatLang(ui, 'NotEnoughMana'));
     }
@@ -633,12 +845,23 @@ export class MissionSession {
     const targetFileId = explicitFileId ?? this.selectedFileId;
     const targetFile = sys && targetFileId !== null ? sys.files[targetFileId] ?? null : null;
 
+    if (virus.id === 'cd') {
+      return targetFile ? this.openFolder(targetFile.id) : this.failAction(formatLang(ui, 'NeedFolder'));
+    }
+
     // Pre-cast validation
     const validationError = this.validateVirusPreconditions(virus, sys, targetFile);
     if (validationError) return this.failAction(validationError);
 
     const mult = this.getVirusCastMultiplier(virus, targetFile);
-    return this.startCast(virus.id, null, virus.target === '_none' ? null : targetFile?.id ?? null, mult);
+    return this.startCast(
+      virus.id,
+      null,
+      virus.target === '_none' ? null : targetFile?.id ?? null,
+      mult,
+      resolvedSlotIndex !== null ? this.activeDeckIndex : null,
+      resolvedSlotIndex
+    );
   }
 
   private getVirusCastMultiplier(v: VirusDef, f: FileNodeState | null): number {
@@ -708,8 +931,34 @@ export class MissionSession {
       case 'fmove2':
       case 'invis':
         return 1.5;
-      case 'cust':
+      case 'cust': {
+        const mp = this.init.mission.type;
+        if (mp.kind === 'FalsifyCam') {
+          const sys = this.currentSystem;
+          const cur = this.currentFolder;
+          const videoCount =
+            sys && cur
+              ? cur.childrenIds
+                  .map((cid) => sys.files[cid])
+                  .filter((cf) => cf && !cf.deleted && !cf.isFolder && cf.ext === 'video').length
+              : 1;
+          return Math.max(1, videoCount) * 0.75;
+        }
+        if (mp.kind === 'OverwriteFiles') {
+          const sys = this.currentSystem;
+          const cur = this.currentFolder;
+          const extCount =
+            sys && cur
+              ? cur.childrenIds
+                  .map((cid) => sys.files[cid])
+                  .filter((cf) => cf && !cf.deleted && !cf.isFolder && cf.ext === mp.ext).length
+              : 1;
+          return Math.max(1, extCount) * 0.5;
+        }
+        if (mp.kind === 'CorruptDisplay') return 4.0;
+        if (mp.kind === 'TV') return 1.2;
         return 2.0;
+      }
       case 'cbomb':
         return 4.5;
       case 'pbomb':
@@ -770,8 +1019,8 @@ export class MissionSession {
         if (f.ext === 'log') return formatLang(ui, 'CantCopyLog');
         if ((f.effects.E_Encoded ?? 0) > 0 || (f.effects.E_Masked ?? 0) > 0) return formatLang(ui, 'CantCopyCrypted');
         if ((f.effects.E_Copy ?? 0) > 0) return formatLang(ui, 'AlreadyDone');
-        if (f.avKey !== null) return formatLang(ui, 'InvalidTarget');
-        if (this.copiedFiles.length >= this.maxStorage) {
+        if (f.avKey !== null || (f.effects.E_Disabled ?? 0) > 0) return formatLang(ui, 'InvalidTarget');
+        if (!f.isMissionTarget && this.copiedFiles.length >= this.maxStorage) {
           return formatLang(ui, 'DiskFull', { max: this.maxStorage });
         }
         break;
@@ -795,7 +1044,7 @@ export class MissionSession {
         }
         break;
       case 'fdmg':
-        if (!f || f.avKey !== null) return formatLang(ui, 'InvalidTarget');
+        if (!f || f.avKey !== null || (f.effects.E_Disabled ?? 0) > 0) return formatLang(ui, 'InvalidTarget');
         break;
       case 'zone':
         if (!this.currentFolder || !this.folderHasAnyAv(sys, this.currentFolder.id)) {
@@ -838,30 +1087,135 @@ export class MissionSession {
       case 'cbomb':
         if (sys.corrupted) return formatLang(ui, 'Useless');
         break;
+      case 'heal1':
+      case 'heal2':
+        if (this.life >= this.lifeTotal) return formatLang(ui, 'Useless');
+        break;
+      case 'mana1':
+      case 'mana2':
+      case 'mana3':
+        if (this.mana >= this.manaTotal) return formatLang(ui, 'Useless');
+        break;
+      case 'dckswi':
+      case 'dcksw2':
+        if (this.decks.length <= 1 || this.canSwitchDeckInFs) return formatLang(ui, 'Useless');
+        break;
       case 'reboo1':
       case 'reboo2':
-        if (this.systemHasAv(sys, 'sysdef')) return formatLang(ui, 'RebootBlocked');
+        if (this.systemHasAv(sys, 'sysdef') || this.systemHasAv(sys, 'syslock')) {
+          return formatLang(ui, 'RebootBlocked');
+        }
         break;
       case 'rconv':
         if (this.life <= v.info) return formatLang(ui, 'WouldKillYou');
         break;
       case 'cust': {
         if (this.systemHasAv(sys, 'couveuse')) return formatLang(ui, 'Couveuse');
-        if (f && ((f.effects.E_Encoded ?? 0) > 0 || (f.effects.E_Masked ?? 0) > 0)) {
+        if (v.target === '_file' && f && ((f.effects.E_Encoded ?? 0) > 0 || (f.effects.E_Masked ?? 0) > 0)) {
           return formatLang(ui, 'Crypted');
         }
         const mp = this.init.mission.type;
-        if ((mp.kind === 'Spy' || mp.kind === 'SpyCam') && (!f || f.key !== 'file.core')) {
-          return formatLang(ui, 'NeedExt', { ext: 'CORE' });
-        }
-        if (mp.kind === 'Spy' && f && (f.effects.E_CShield ?? 0) > 0) {
-          return formatLang(ui, 'CoreProtected');
-        }
-        if (mp.kind === 'TV' && !this.tvCopiedProgram) {
-          return formatLang(ui, 'NeedTvCopy', { from: mp.tvFrom });
-        }
-        if (mp.kind === 'TV' && (!f || f.key !== 'tvprog.data')) {
-          return formatLang(ui, 'NeedTvProg');
+        const curNode = this.nodes[sys.nodeId];
+        const curFolder = this.currentFolder;
+
+        switch (mp.kind) {
+          case 'DeliverFile':
+            if (
+              !curNode?.isMissionTarget ||
+              curFolder?.key.toLowerCase() !== mp.parentKey.toLowerCase()
+            ) {
+              return formatLang(ui, 'NotThisFolder');
+            }
+            break;
+          case 'CompromiseMail':
+            if (!curNode?.isMissionTarget || curFolder?.key.toLowerCase() !== '/mail') {
+              return formatLang(ui, 'NotThisFolder');
+            }
+            break;
+          case 'Arrest':
+            if (!curNode?.isMissionTarget || curFolder?.key.toLowerCase() !== '/subcrimedata') {
+              return formatLang(ui, 'NotThisFolder');
+            }
+            break;
+          case 'CorruptDisplay':
+            if (!curNode?.isMissionTarget || curFolder?.key.toLowerCase() !== '/playlist') {
+              return formatLang(ui, 'NotThisFolder');
+            }
+            break;
+          case 'FalsifyCam':
+          case 'OverwriteFiles': {
+            if (!curNode?.isMissionTarget) return formatLang(ui, 'NotThisFolder');
+            const reqExt = mp.kind === 'FalsifyCam' ? 'video' : mp.ext;
+            const matching = curFolder
+              ? curFolder.childrenIds
+                  .map((cid) => sys.files[cid])
+                  .filter((cf) => cf && !cf.deleted && !cf.isFolder && cf.ext === reqExt)
+              : [];
+            if (matching.length === 0) {
+              return formatLang(ui, 'NeedInFolder', { ext: reqExt.toUpperCase() });
+            }
+            if (matching.every((cf) => (cf.effects.E_CustomInfected ?? 0) > 0)) {
+              return formatLang(ui, 'AlreadyDone');
+            }
+            if (
+              matching.some(
+                (cf) =>
+                  !(cf.effects.E_CustomInfected ?? 0) &&
+                  ((cf.effects.E_Encoded ?? 0) > 0 || (cf.effects.E_Masked ?? 0) > 0)
+              )
+            ) {
+              return formatLang(ui, 'Crypted');
+            }
+            break;
+          }
+          case 'Spy':
+          case 'SpyCam':
+            if (!f || f.key !== 'file.core') {
+              return formatLang(ui, 'NeedExt', { ext: 'CORE' });
+            }
+            if (!curNode?.isMissionTarget) return formatLang(ui, 'InvalidTarget');
+            if (mp.kind === 'Spy' && (f.effects.E_CShield ?? 0) > 0) {
+              return formatLang(ui, 'CoreProtected');
+            }
+            if ((f.effects.E_CustomInfected ?? 0) > 0) return formatLang(ui, 'AlreadyDone');
+            break;
+          case 'GameHack':
+            if (!f || f.ext !== 'game') {
+              return formatLang(ui, 'NeedExt', { ext: 'GAME' });
+            }
+            if (!curNode?.isMissionTarget || !f.isMissionTarget) {
+              return formatLang(ui, 'NotThisFolder');
+            }
+            if ((f.effects.E_CustomInfected ?? 0) > 0) return formatLang(ui, 'AlreadyDone');
+            break;
+          case 'InfectNet':
+            if (!f || f.key !== 'file.control') {
+              return formatLang(ui, 'NeedExt', { ext: 'CONTROL' });
+            }
+            if (!curNode?.isMissionTarget) return formatLang(ui, 'InvalidTarget');
+            if ((f.effects.E_CustomInfected ?? 0) > 0) return formatLang(ui, 'AlreadyDone');
+            break;
+          case 'GetVirus':
+            if (!f || f.ext !== mp.ext) {
+              return formatLang(ui, 'NeedExt', { ext: mp.ext.toUpperCase() });
+            }
+            if ((f.effects.E_CustomInfected ?? 0) > 0) return formatLang(ui, 'AlreadyDone');
+            if (!(f.effects.E_Target ?? 0)) {
+              return formatLang(ui, 'NotInfected', { vname: mp.v });
+            }
+            break;
+          case 'TV':
+            if (!this.tvCopiedProgram) {
+              return formatLang(ui, 'NeedTvCopy', { from: mp.tvFrom });
+            }
+            if (!f || f.key !== 'tvprog.data') {
+              return formatLang(ui, 'NeedTvProg');
+            }
+            if (!curNode?.isMissionTarget) return formatLang(ui, 'InvalidTarget');
+            if ((f.effects.E_CustomInfected ?? 0) > 0) return formatLang(ui, 'AlreadyDone');
+            break;
+          default:
+            break;
         }
         break;
       }
@@ -873,16 +1227,18 @@ export class MissionSession {
     virusId: string,
     targetNodeId: number | null,
     targetFileId: number | null,
-    multiplier: number
+    multiplier: number,
+    deckIndex: number | null = null,
+    slotIndex: number | null = null
   ): { ok: boolean } {
     const sys = this.currentSystem;
     const f = sys && targetFileId !== null ? sys.files[targetFileId] ?? null : null;
     const speed = this.getSpeed();
-    const fileSize = f ? f.size : 1;
+    const fileSize = f && !['cd', 'exit', 'target'].includes(virusId) ? f.size : 1;
 
     // Exact duration math from VirusMan.getCT + Progress.start
-    let dSec =
-      this.isLeetMode && virusId !== 'connec'
+    const dSec =
+      virusId === 'exit' || virusId === 'target' || (this.isLeetMode && virusId !== 'connec')
         ? 0.1 / speed
         : ((1.0 / speed) * fileSize * multiplier) / speed;
 
@@ -891,6 +1247,8 @@ export class MissionSession {
         virusId,
         targetNodeId,
         targetFileId,
+        deckIndex,
+        slotIndex,
         elapsedMs: 0,
         durationMs: 0,
         label: virusId.toUpperCase(),
@@ -904,6 +1262,8 @@ export class MissionSession {
       virusId,
       targetNodeId,
       targetFileId,
+      deckIndex,
+      slotIndex,
       elapsedMs: 0,
       durationMs,
       label: virusId.toUpperCase(),
@@ -919,8 +1279,9 @@ export class MissionSession {
 
     // Network connection cast
     if (cast.virusId === 'connec' && cast.targetNodeId !== null) {
+      if (this.life <= 0 || this.busted || this.mana <= 0) return;
       const node = this.nodes[cast.targetNodeId];
-      if (!node || !node.system) return;
+      if (!node || !node.system || node.system.crashed) return;
       this.connectedNodeId = node.id;
       this.currentFolderId = node.system.rootFolderId;
       this.selectedFileId = null;
@@ -944,33 +1305,24 @@ export class MissionSession {
     if (!sys) return;
 
     const slot =
-      this.currentDeck.find(
-        (s) => s.virus.id === cast.virusId && (s.remainingUses === null || s.remainingUses > 0)
-      ) ?? this.currentDeck.find((s) => s.virus.id === cast.virusId);
+      cast.deckIndex !== undefined &&
+      cast.deckIndex !== null &&
+      cast.slotIndex !== undefined &&
+      cast.slotIndex !== null
+        ? this.deckSlots[cast.deckIndex]?.[cast.slotIndex]
+        : this.currentDeck.find(
+            (s) => s.virus.id === cast.virusId && (s.remainingUses === null || s.remainingUses > 0)
+          ) ?? this.currentDeck.find((s) => s.virus.id === cast.virusId);
     const virus = slot?.virus ?? this.bundle.viruses.get(cast.virusId);
     if (!virus) return;
 
     const f = cast.targetFileId !== null ? sys.files[cast.targetFileId] ?? null : null;
 
     // Deduct mana & charge
-    const ccCost = slot ? slot.effectiveCc : virus.cc;
+    const ccCost = slot ? slot.effectiveCc : this.getEffectiveCc(virus);
     this.mana = Math.max(0, this.mana - ccCost);
-    if (slot && slot.remainingUses !== null) {
-      slot.remainingUses = Math.max(0, slot.remainingUses - 1);
-    }
-
-    // Chipset mana refunds ('thief' & 'deciph')
-    if (this.hasChipset('thief')) {
-      if (virus.id === 'fmove1') this.mana = Math.min(this.manaTotal, this.mana + Math.floor(virus.cc * 0.3));
-      if (virus.id === 'fmove2') this.mana = Math.min(this.manaTotal, this.mana + Math.floor(virus.cc * 0.4));
-      if (virus.id === 'invis') this.mana = Math.min(this.manaTotal, this.mana + Math.floor(virus.cc * 0.6));
-    }
-    if (this.hasChipset('deciph')) {
-      if (virus.id === 'unmask' || virus.id === 'dec1') {
-        this.mana = Math.min(this.manaTotal, this.mana + Math.floor(virus.cc * 0.5));
-      } else if (virus.id === 'dec2' || virus.id === 'dec3') {
-        this.mana = Math.min(this.manaTotal, this.mana + Math.floor(virus.cc * 0.6));
-      }
+    if (slot) {
+      this.consumeSlotCharge(slot);
     }
 
     const comboCount = this.userEffects.UE_Combo ?? 0;
@@ -992,7 +1344,6 @@ export class MissionSession {
         if (this.currentFolder && this.currentFolder.parentId !== null) {
           this.currentFolderId = this.currentFolder.parentId;
           this.selectedFileId = null;
-          this.consumeMoveFurtivity();
         }
         break;
       case 'target':
@@ -1148,10 +1499,14 @@ export class MissionSession {
         if (f) {
           delete f.effects.E_Encoded;
           this.emitSound({ kind: 'sfx', id: 'bleep_05' });
+          this.tryCollectCard(f);
         }
         break;
       case 'unmask':
-        if (f) delete f.effects.E_Masked;
+        if (f) {
+          delete f.effects.E_Masked;
+          this.tryCollectCard(f);
+        }
         break;
       case 'scan1':
       case 'scan2':
@@ -1192,10 +1547,14 @@ export class MissionSession {
         this.userEffects.UE_Charge = (this.userEffects.UE_Charge ?? 0) + (virus.id === 'chrge3' ? 3 : 2);
         break;
       case 'shld1':
-      case 'shld2':
-        this.userEffects.UE_Shield = Math.min(virus.power, (this.userEffects.UE_Shield ?? 0) + virus.power);
+      case 'shld2': {
+        const existing = this.userEffects.UE_Shield ?? 0;
+        const cap = virus.power;
+        const gain = virus.power;
+        this.userEffects.UE_Shield = Math.max(existing, Math.min(cap, existing + gain));
         this.emitSound({ kind: 'sfx', id: 'shield' });
         break;
+      }
       case 'rconv':
         this.damagePlayer(virus.info || 2, false);
         this.mana = Math.min(this.manaTotal, this.mana + virus.power);
@@ -1227,15 +1586,24 @@ export class MissionSession {
         this.canSwitchDeckInFs = true;
         break;
       case 'reboo1':
-      case 'reboo2':
-        for (const af of Object.values(sys.files)) {
-          if (!af.deleted && af.avKey) {
-            af.effects.E_SkipAction = Math.min(3, (af.effects.E_SkipAction ?? 0) + 3);
+      case 'reboo2': {
+        const capturedAvs = Object.values(sys.files).filter(
+          (af) => !af.deleted && af.avKey !== null && !(af.effects.E_Disabled ?? 0)
+        );
+        this.onVirusExecuted(sys, virus);
+        this.disconnectFromSystem(false);
+        for (const af of capturedAvs) {
+          if (!af.deleted && af.avKey !== null && !(af.effects.E_Disabled ?? 0)) {
+            af.effects.E_SkipAction = Math.max(af.effects.E_SkipAction ?? 0, 3);
             if (virus.id === 'reboo2') af.effects.E_Exploit = 1;
           }
         }
-        this.disconnectFromSystem(true);
+        if (this.mana <= 0 && this.life > 0) {
+          this.pushLog('danger', formatLang(ui, 'Log_OOM'));
+        }
+        this.evaluateMissionObjective();
         return;
+      }
       case 'cevi':
         this.userEffects.UE_DamageBurst = comboCount;
         break;
@@ -1245,13 +1613,14 @@ export class MissionSession {
         break;
       case 'cshld':
       case 'cshld2':
-      case 'cshld3':
-        this.userEffects.UE_Shield = Math.min(
-          virus.power * comboCount,
-          (this.userEffects.UE_Shield ?? 0) + virus.power * comboCount
-        );
+      case 'cshld3': {
+        const existing = this.userEffects.UE_Shield ?? 0;
+        const cap = virus.power * comboCount;
+        const gain = virus.power * comboCount;
+        this.userEffects.UE_Shield = Math.max(existing, Math.min(cap, existing + gain));
         this.emitSound({ kind: 'sfx', id: 'shield' });
         break;
+      }
       case 'cchrge':
         this.userEffects.UE_Charge = (this.userEffects.UE_Charge ?? 0) + comboCount;
         break;
@@ -1265,10 +1634,12 @@ export class MissionSession {
       this.onVirusExecuted(sys, virus);
     }
 
+    this.drainEndTurn();
+
     // Check OOM disconnect
     if (this.mana <= 0 && this.connectedNodeId !== null) {
       this.pushLog('danger', formatLang(ui, 'Log_OOM'));
-      this.disconnectFromSystem(true);
+      this.disconnectFromSystem(false);
       return;
     }
 
@@ -1279,22 +1650,98 @@ export class MissionSession {
     const mp = this.init.mission.type;
     const ui = this.bundle.uiStrings;
 
-    if (mp.kind === 'DeliverFile' || mp.kind === 'CompromiseMail' || mp.kind === 'Arrest' || mp.kind === 'CorruptDisplay') {
+    const getInheritedUploadEffects = (): FileNodeState['effects'] => {
+      let maskStacks = 0;
+      let curAnc: FileNodeState | undefined = this.currentFolder ?? undefined;
+      while (curAnc) {
+        maskStacks += curAnc.childrenIds.filter((cid) => {
+          const cf = sys.files[cid];
+          return cf && !cf.deleted && cf.avKey === 'mask';
+        }).length;
+        curAnc = curAnc.parentId !== null ? sys.files[curAnc.parentId] : undefined;
+      }
+      const effects: FileNodeState['effects'] = { E_CustomInfected: 1 };
+      if (this.systemHasAv(sys, 'paladin')) effects.E_Immune = 1;
+      if (maskStacks > 0) effects.E_Masked = maskStacks;
+      return effects;
+    };
+
+    const ensureUniqueUploadedName = (folder: FileNodeState, rawName: string): string => {
+      const seen = new Set(
+        folder.childrenIds
+          .map((cid) => sys.files[cid])
+          .filter((cf) => cf && !cf.deleted)
+          .map((cf) => cf.name.toLowerCase())
+      );
+      let candidate = rawName;
+      let attempt = 1;
+      while (seen.has(candidate.toLowerCase())) {
+        attempt++;
+        const dot = rawName.lastIndexOf('.');
+        candidate =
+          dot > 0
+            ? `${rawName.slice(0, dot)}_${attempt}${rawName.slice(dot)}`
+            : `${rawName}_${attempt}`;
+      }
+      return candidate;
+    };
+
+    if (mp.kind === 'CorruptDisplay') {
+      if (!this.currentFolder) return;
+      const rng = Rand.fromSeed(this.init.seed ^ 0xcd15);
+      const { fsNames } = this.bundle.createTextEngines(this.init.seed ^ 0xcd15, this.init.profile.adult);
+      const count = 5 + rng.random(7); // 5..11 subversive .data files
+      let nextId = Math.max(0, ...Object.keys(sys.files).map(Number)) + 1;
+      for (let i = 0; i < count; i++) {
+        const id = nextId++;
+        const rawSubName = fsNames.exists('playlist.subversive.data')
+          ? fsNames.get('playlist.subversive.data', rng)
+          : `subversive_${id}.data`;
+        const uploadedName = ensureUniqueUploadedName(this.currentFolder, rawSubName);
+        const uploaded: FileNodeState = {
+          id,
+          key: 'uploaded.mission',
+          name: uploadedName,
+          ext: 'data',
+          isFolder: false,
+          parentId: this.currentFolder.id,
+          childrenIds: [],
+          size: 1,
+          life: 1,
+          lifeTotal: 1,
+          deleted: false,
+          password: null,
+          avKey: null,
+          content: formatLang(ui, 'UploadedFile'),
+          embed: null,
+          cardData: null,
+          isMissionTarget: true,
+          infectedByVirus: 'cust',
+          effects: getInheritedUploadEffects(),
+        };
+        sys.files[id] = uploaded;
+        this.currentFolder.childrenIds.push(id);
+      }
+      this.pushLog('success', `${formatLang(ui, 'UploadedFile')} (${count})`);
+      this.emitSound({ kind: 'sfx', id: 'bonus_02' });
+      return;
+    }
+
+    if (mp.kind === 'DeliverFile' || mp.kind === 'CompromiseMail' || mp.kind === 'Arrest') {
       if (!this.currentFolder) return;
       const newId = Math.max(0, ...Object.keys(sys.files).map(Number)) + 1;
-      const uploadedName =
+      const rawUploadedName =
         mp.kind === 'DeliverFile'
           ? mp.file
           : mp.kind === 'CompromiseMail'
             ? 'compromise.mail'
-            : mp.kind === 'Arrest'
-              ? `${mp.name}.data`
-              : `subversive_${newId}.video`;
+            : `${mp.name}.data`;
+      const uploadedName = ensureUniqueUploadedName(this.currentFolder, rawUploadedName);
       const uploaded: FileNodeState = {
         id: newId,
         key: 'uploaded.mission',
         name: uploadedName,
-        ext: uploadedName.split('.').pop() ?? 'dat',
+        ext: uploadedName.split('.').pop()?.toLowerCase() ?? 'dat',
         isFolder: false,
         parentId: this.currentFolder.id,
         childrenIds: [],
@@ -1309,12 +1756,33 @@ export class MissionSession {
         cardData: null,
         isMissionTarget: true,
         infectedByVirus: 'cust',
-        effects: { E_CustomInfected: 1 },
+        effects: getInheritedUploadEffects(),
       };
       sys.files[newId] = uploaded;
       this.currentFolder.childrenIds.push(newId);
       this.pushLog('success', `${formatLang(ui, 'UploadedFile')}: ${uploadedName}`);
       this.emitSound({ kind: 'sfx', id: 'bonus_02' });
+      return;
+    }
+
+    if (mp.kind === 'FalsifyCam' || mp.kind === 'OverwriteFiles') {
+      if (!this.currentFolder) return;
+      const reqExt = mp.kind === 'FalsifyCam' ? 'video' : mp.ext;
+      for (const cid of this.currentFolder.childrenIds) {
+        const cf = sys.files[cid];
+        if (
+          cf &&
+          !cf.deleted &&
+          !cf.isFolder &&
+          cf.ext === reqExt &&
+          !(cf.effects.E_Encoded ?? 0) &&
+          !(cf.effects.E_Masked ?? 0)
+        ) {
+          cf.effects.E_CustomInfected = 1;
+          cf.infectedByVirus = 'cust';
+        }
+      }
+      this.emitSound({ kind: 'sfx', id: 'corrupt_01' });
       return;
     }
 
@@ -1324,6 +1792,8 @@ export class MissionSession {
       if (mp.kind === 'GetVirus' && (f.effects.E_Target ?? 0) > 0) {
         delete f.effects.E_Target;
         this.missionCpt++;
+        const pct = Math.min(100, Math.round((this.missionCpt / mp.n) * 100));
+        this.pushLog('info', formatLang(ui, 'ExtractedVirus', { pct, vname: mp.v }));
       }
       this.emitSound({ kind: 'sfx', id: 'corrupt_01' });
     }
@@ -1343,7 +1813,6 @@ export class MissionSession {
           const cnt = (bf.effects.E_Counter ?? 0) + 1;
           bf.effects.E_Counter = cnt;
           if (cnt > BOMB_LIMIT) {
-            bf.effects.E_Counter = 0;
             this.queueSingleAvAttack(sys, bf, 'bomb');
           } else if (cnt === BOMB_LIMIT) {
             this.pushLog('danger', formatLang(this.bundle.uiStrings, 'Log_BombLast'));
@@ -1353,8 +1822,9 @@ export class MissionSession {
         }
       }
     } else {
-      this.userEffects.UE_Furtivity!--;
-      if (this.userEffects.UE_Furtivity! <= 0) delete this.userEffects.UE_Furtivity;
+      this.endTurnQueue.push(() => {
+        this.pendingFurtivityConsume++;
+      });
       this.pushLog('info', formatLang(this.bundle.uiStrings, 'Log_Stealth'));
     }
   }
@@ -1389,9 +1859,14 @@ export class MissionSession {
           this.queueAvAttacks(sys, 'bigoxy', null);
           this.drainEndTurn();
         }
+        for (const f of Object.values(sys.files)) {
+          delete f.effects.E_Dot;
+          delete f.effects.E_DotLength;
+        }
       }
 
       // Clear per-connection effects
+      this.pendingFurtivityConsume = 0;
       delete this.userEffects.UE_Furtivity;
       delete this.userEffects.UE_MoveFurtivity;
       this.connectedNodeId = null;
@@ -1399,6 +1874,7 @@ export class MissionSession {
       this.selectedFileId = null;
       this.canSwitchDeckInFs = false;
       this.scannerState = null;
+      this.pendingPasswordFolderId = null;
 
       this.emitSound({ kind: 'loop_stop', id: 'drone_02' });
       this.emitSound({ kind: 'loop_stop', id: 'rythme_02' });
@@ -1419,24 +1895,26 @@ export class MissionSession {
     base: number,
     canBeBoosted: boolean,
     ignoreShield: boolean,
-    canSpread: boolean
+    canSpread: boolean,
+    applyBrute = true
   ): void {
-    if (f.deleted) return;
+    if (f.deleted || f.life <= 0) return;
     let dmg = base;
-    if (this.hasChipset('brute')) dmg = Math.round(1.5 * dmg);
-    if (this.hasChipset('scout') && (f.key === 'file.core' || f.key === 'file.guardian')) {
-      dmg = 0;
-    }
+    if (applyBrute && this.hasChipset('brute')) dmg = Math.round(1.5 * dmg);
 
     if (canBeBoosted) {
       if ((this.userEffects.UE_DamageBurst ?? 0) > 0) {
         dmg += 10;
-        this.endTurnQueue.push(() => {
-          if ((this.userEffects.UE_DamageBurst ?? 0) > 0) {
-            this.userEffects.UE_DamageBurst!--;
-            if (this.userEffects.UE_DamageBurst! <= 0) delete this.userEffects.UE_DamageBurst;
-          }
-        });
+        if (!this.burstConsumedThisTurn) {
+          this.burstConsumedThisTurn = true;
+          this.endTurnQueue.push(() => {
+            this.burstConsumedThisTurn = false;
+            if ((this.userEffects.UE_DamageBurst ?? 0) > 0) {
+              this.userEffects.UE_DamageBurst!--;
+              if (this.userEffects.UE_DamageBurst! <= 0) delete this.userEffects.UE_DamageBurst;
+            }
+          });
+        }
       }
       if ((this.userEffects.UE_Charge ?? 0) > 0) {
         dmg *= this.userEffects.UE_Charge!;
@@ -1459,6 +1937,10 @@ export class MissionSession {
       }
     }
 
+    if (this.hasChipset('scout') && (f.key === 'file.core' || f.key === 'file.guardian')) {
+      dmg = 0;
+    }
+
     if ((f.effects.E_Immune ?? 0) > 0) {
       dmg = 0;
     }
@@ -1467,22 +1949,57 @@ export class MissionSession {
     f.life = Math.max(0, f.life - finalDmg);
     this.emitSound({ kind: 'sfx', id: finalDmg > 0 ? 'hit_01' : 'shield' });
 
-    // E_Tag link spread
-    if (canSpread && finalDmg > 0 && (f.effects.E_Tag ?? 0) > 0) {
-      const sdamage = Math.floor((base * f.effects.E_Tag!) / 100);
-      if (sdamage > 0) {
-        for (const neig of Object.values(sys.files)) {
-          if (neig.id !== f.id && !neig.deleted && (neig.effects.E_Tag ?? 0) > 0) {
-            this.endTurnQueue.push(() => this.damageFile(sys, neig, sdamage, true, false, false));
+    if (finalDmg > 0) {
+      // E_Tag link spread (computed from finalDmg; does not re-apply brute or boosts)
+      if (canSpread && (f.effects.E_Tag ?? 0) > 0) {
+        const sdamage = Math.floor((finalDmg * f.effects.E_Tag!) / 100);
+        if (sdamage > 0) {
+          for (const neig of Object.values(sys.files)) {
+            if (neig.id !== f.id && !neig.deleted && (neig.effects.E_Tag ?? 0) > 0) {
+              this.endTurnQueue.push(() =>
+                this.damageFile(sys, neig, sdamage, false, false, false, false)
+              );
+            }
           }
         }
       }
+
+      // Eject in folder (respects E_SkipAction and UE_Furtivity; queued BEFORE deleteFile/crashSystem)
+      if (f.parentId !== null) {
+        const folder = sys.files[f.parentId];
+        if (folder) {
+          for (const cid of folder.childrenIds) {
+            const ej = sys.files[cid];
+            if (ej && !ej.deleted && ej.avKey === 'eject') {
+              this.endTurnQueue.push(() => {
+                if (ej.deleted || sys.crashed || this.connectedNodeId !== sys.nodeId) return;
+                const ui = this.bundle.uiStrings;
+                if ((ej.effects.E_SkipAction ?? 0) > 0) {
+                  ej.effects.E_SkipAction!--;
+                  if (ej.effects.E_SkipAction! <= 0) delete ej.effects.E_SkipAction;
+                  this.pushLog('info', formatLang(ui, 'AntivirusBlocked', { av: 'EJECT' }));
+                  return;
+                }
+                if ((this.userEffects.UE_Furtivity ?? 0) > 0) {
+                  this.pushLog('info', formatLang(ui, 'AntivirusDodged', { av: 'EJECT' }));
+                  return;
+                }
+                this.pushLog('danger', formatLang(ui, 'Ejected', { av: 'EJECT' }));
+                this.disconnectFromSystem(false);
+              });
+            }
+          }
+        }
+      }
+
+      // Tique system-wide (queued BEFORE deleteFile/crashSystem so core kills trigger tique)
+      this.queueAvAttacks(sys, 'tique', null);
     }
 
     if (f.life <= 0) {
-      // E_Splash on death
+      // E_Splash on death (does not re-apply brute or boosts)
       if ((f.effects.E_Splash ?? 0) > 0 && f.parentId !== null) {
-        const sdamage = Math.floor((dmg * f.effects.E_Splash!) / 100);
+        const sdamage = Math.floor((finalDmg * f.effects.E_Splash!) / 100);
         const parent = sys.files[f.parentId];
         if (parent && sdamage > 0) {
           for (const cid of parent.childrenIds) {
@@ -1493,38 +2010,14 @@ export class MissionSession {
               !sib.deleted &&
               (sib.key === 'file.core' || sib.key === 'file.guardian' || sib.avKey !== null)
             ) {
-              this.endTurnQueue.push(() => this.damageFile(sys, sib, sdamage, true, false, true));
+              this.endTurnQueue.push(() =>
+                this.damageFile(sys, sib, sdamage, false, false, true, false)
+              );
             }
           }
         }
       }
       this.deleteFile(sys, f, false);
-    }
-
-    if (finalDmg > 0) {
-      // Eject in folder (ignores furtivity, blocked by E_SkipAction)
-      if (f.parentId !== null) {
-        const folder = sys.files[f.parentId];
-        if (folder) {
-          for (const cid of folder.childrenIds) {
-            const ej = sys.files[cid];
-            if (ej && !ej.deleted && ej.avKey === 'eject') {
-              this.endTurnQueue.push(() => {
-                if (ej.deleted || this.connectedNodeId !== sys.nodeId) return;
-                if ((ej.effects.E_SkipAction ?? 0) > 0) {
-                  ej.effects.E_SkipAction!--;
-                  if (ej.effects.E_SkipAction! <= 0) delete ej.effects.E_SkipAction;
-                  return;
-                }
-                this.pushLog('danger', formatLang(this.bundle.uiStrings, 'Ejected', { av: 'EJECT' }));
-                this.disconnectFromSystem(false);
-              });
-            }
-          }
-        }
-      }
-      // Tique system-wide
-      this.queueAvAttacks(sys, 'tique', null);
     }
   }
 
@@ -1593,18 +2086,23 @@ export class MissionSession {
         }
       }
     } else if (oldAv === 'mask' && avFile.parentId !== null) {
-      const clearMaskRec = (folderId: number) => {
+      const decMaskRec = (folderId: number) => {
         const folder = sys.files[folderId];
         if (!folder) return;
-        if (this.folderHasAv(sys, folderId, 'mask')) return;
         for (const cid of folder.childrenIds) {
           const ch = sys.files[cid];
           if (!ch) continue;
-          delete ch.effects.E_Masked;
-          if (ch.isFolder) clearMaskRec(ch.id);
+          if ((ch.effects.E_Masked ?? 0) > 0) {
+            ch.effects.E_Masked!--;
+            if (ch.effects.E_Masked! <= 0) delete ch.effects.E_Masked;
+          }
+          if (ch.isFolder) decMaskRec(ch.id);
         }
       };
-      clearMaskRec(avFile.parentId);
+      decMaskRec(avFile.parentId);
+      if (this.selectedFileId !== null) {
+        this.tryCollectCard(sys.files[this.selectedFileId]);
+      }
     } else if (oldAv === 'paladin' && !this.systemHasAv(sys, 'paladin')) {
       for (const f of Object.values(sys.files)) {
         delete f.effects.E_Immune;
@@ -1614,12 +2112,15 @@ export class MissionSession {
 
   private crashSystem(sys: SystemState): void {
     if (sys.crashed) return;
+    const wasAlreadyCorrupted = sys.corrupted;
     sys.crashed = true;
-    if (!sys.corrupted) this.kills++;
+    if (!wasAlreadyCorrupted) this.kills++;
     this.incGoal('crash', 1);
     this.emitSound({ kind: 'sfx', id: 'explode_02' });
     this.pushLog('success', formatLang(this.bundle.uiStrings, 'Crashed'));
-    this.onNodeStatusChanged(sys.nodeId);
+    if (!wasAlreadyCorrupted) {
+      this.onNodeStatusChanged(sys.nodeId);
+    }
     this.disconnectFromSystem(true);
   }
 
@@ -1643,7 +2144,6 @@ export class MissionSession {
       this.alarmRemainingSec = null;
       this.alarmOriginNodeId = null;
       this.pushLog('success', formatLang(this.bundle.uiStrings, 'AlarmStop'));
-      return;
     }
 
     if (this.alarmRemainingSec === null) {
@@ -1674,6 +2174,9 @@ export class MissionSession {
   private queueSingleAvAttack(sys: SystemState, af: FileNodeState, avKey: string): void {
     this.endTurnQueue.push(() => {
       if (af.deleted) return;
+      if (avKey === 'bomb') {
+        delete af.effects.E_Counter;
+      }
       const ui = this.bundle.uiStrings;
 
       if ((af.effects.E_SkipAction ?? 0) > 0) {
@@ -1723,12 +2226,16 @@ export class MissionSession {
           'warn',
           `[${avKey.toUpperCase()}] ${formatLang(ui, `AV_${avKey}`)} : ${formatLang(ui, 'AntivirusDamage', { n: dmg })}`
         );
-        const dealt = this.damagePlayer(dmg, true);
-        if (dealt > 0 && (af.effects.E_Revenge ?? 0) > 0) {
+        this.damagePlayer(dmg, true);
+        if (
+          this.life > 0 &&
+          (this.connectedNodeId === sys.nodeId || this.isDisconnecting) &&
+          (af.effects.E_Revenge ?? 0) > 0
+        ) {
           const rev = af.effects.E_Revenge!;
           delete af.effects.E_Revenge;
-          this.damageFile(sys, af, rev, false, false, true);
           this.pushLog('success', formatLang(ui, 'RevengeEffect', { av: avKey.toUpperCase(), v: 'REVENG', p: rev }));
+          this.damageFile(sys, af, rev, false, false, true, false);
         }
       }
     });
@@ -1749,9 +2256,11 @@ export class MissionSession {
     if (dmg > 0) {
       this.life = Math.max(0, this.life - dmg);
       this.emitSound({ kind: 'sfx', id: 'hit_03' });
-      if (this.life <= 0 && this.connectedNodeId !== null) {
+      if (this.life <= 0) {
         this.cancelCast();
-        this.disconnectFromSystem(true);
+        if (this.connectedNodeId !== null) {
+          this.disconnectFromSystem(true);
+        }
         this.lastPopup = {
           title: 'TERMINAL OFFLINE',
           message: formatLang(this.bundle.uiStrings, 'YouAreDead'),
@@ -1768,7 +2277,17 @@ export class MissionSession {
       const fn = this.endTurnQueue.shift()!;
       fn();
     }
+    this.burstConsumedThisTurn = false;
     delete this.userEffects.UE_SilentDeath;
+    if (this.pendingFurtivityConsume > 0) {
+      const next = (this.userEffects.UE_Furtivity ?? 0) - this.pendingFurtivityConsume;
+      this.pendingFurtivityConsume = 0;
+      if (next > 0) {
+        this.userEffects.UE_Furtivity = next;
+      } else {
+        delete this.userEffects.UE_Furtivity;
+      }
+    }
   }
 
   // --- CLI Execution & Autocomplete ---
@@ -1779,16 +2298,28 @@ export class MissionSession {
     this.cmdHistory.unshift(trimmed);
     if (this.cmdHistory.length > 20) this.cmdHistory.length = 20;
 
-    // Expand word-level aliases from .hackrc
-    const expandedWords = trimmed
-      .split(/\s+/)
-      .flatMap((w) => {
-        const rep = this.aliases.get(w.toLowerCase());
-        return rep ? rep.split(/\s+/) : [w];
-      });
+    // Expand .hackrc aliases ONLY on the first token
+    const firstSpaceIdx = trimmed.search(/\s/);
+    const rawFirst = firstSpaceIdx === -1 ? trimmed : trimmed.slice(0, firstSpaceIdx);
+    const rawRest = firstSpaceIdx === -1 ? '' : trimmed.slice(firstSpaceIdx).trim();
 
-    const cmd = expandedWords[0]?.toLowerCase() ?? '';
-    const arg = expandedWords.slice(1).join(' ').trim();
+    const aliasExpansion = this.aliases.get(rawFirst.toLowerCase());
+    let cmd: string;
+    let arg: string;
+    if (aliasExpansion !== undefined) {
+      const expSpaceIdx = aliasExpansion.search(/\s/);
+      if (expSpaceIdx === -1) {
+        cmd = aliasExpansion.toLowerCase();
+        arg = rawRest;
+      } else {
+        cmd = aliasExpansion.slice(0, expSpaceIdx).toLowerCase();
+        const expArg = aliasExpansion.slice(expSpaceIdx).trim();
+        arg = rawRest ? `${expArg} ${rawRest}` : expArg;
+      }
+    } else {
+      cmd = rawFirst.toLowerCase();
+      arg = rawRest;
+    }
 
     if (cmd === 'cd' && arg === '..') {
       return this.goParentOrDisconnect();
@@ -1860,7 +2391,7 @@ export class MissionSession {
 
   // --- Objective Check ---
   public evaluateMissionObjective(): boolean {
-    if (this.hasChipset('scout')) return false;
+    if (this.busted || this.hasChipset('scout')) return false;
 
     const targetNodes = Object.values(this.nodes).filter((n) => n.isMissionTarget && n.system !== null);
     if (targetNodes.length === 0) return false;
@@ -1888,7 +2419,9 @@ export class MissionSession {
       case 'CleanTerminal':
         done =
           !fn.crashed &&
-          Object.values(fn.files).every((f) => f.deleted || f.avKey === null);
+          Object.values(fn.files).every(
+            (f) => f.deleted || (f.avKey === null && !(f.effects.E_Disabled ?? 0) && f.key !== 'file.antivir')
+          );
         break;
       case 'TutorialDelete': {
         const deletedCount = targetNodes.reduce(
@@ -1926,33 +2459,35 @@ export class MissionSession {
           .filter((f) => !f.isFolder && f.ext === mp.ext)
           .every((f) => f.deleted);
         break;
-      case 'Moderate':
-        done =
-          !fn.crashed &&
-          Object.values(fn.files)
-            .filter((f) => !f.isFolder && (f.ext === 'mp3' || f.ext === 'video'))
-            .every((f) => f.deleted);
+      case 'Moderate': {
+        const mediaFiles = Object.values(fn.files).filter(
+          (f) => !f.isFolder && (f.ext === 'mp3' || f.ext === 'video')
+        );
+        done = !fn.crashed && mediaFiles.length > 0 && mediaFiles.every((f) => f.deleted);
         break;
+      }
       case 'CleanCriminal':
         done =
           !fn.crashed &&
           Object.values(fn.files).some((f) => f.isMissionTarget && f.deleted);
         break;
-      case 'Spy':
+      case 'Spy': {
+        const cores = Object.values(fn.files).filter((f) => f.key === 'file.core');
         done =
           !fn.crashed &&
-          Object.values(fn.files)
-            .filter((f) => f.key === 'file.core')
-            .every((f) => (f.effects.E_CustomInfected ?? 0) > 0);
+          cores.length > 0 &&
+          cores.every((f) => !f.deleted && (f.effects.E_CustomInfected ?? 0) > 0);
         break;
+      }
       case 'SpyCam':
-        done = targetNodes.every(
-          (n) =>
+        done = targetNodes.every((n) => {
+          const cores = Object.values(n.system!.files).filter((f) => f.key === 'file.core');
+          return (
             !n.system!.crashed &&
-            Object.values(n.system!.files)
-              .filter((f) => f.key === 'file.core')
-              .every((f) => (f.effects.E_CustomInfected ?? 0) > 0)
-        );
+            cores.length > 0 &&
+            cores.every((f) => !f.deleted && (f.effects.E_CustomInfected ?? 0) > 0)
+          );
+        });
         break;
       case 'DeliverFile':
       case 'CompromiseMail':
@@ -1960,11 +2495,21 @@ export class MissionSession {
           !fn.crashed &&
           Object.values(fn.files).some((f) => f.key === 'uploaded.mission' && !f.deleted);
         break;
-      case 'CorruptDisplay':
+      case 'CorruptDisplay': {
+        const playlistDir = Object.values(fn.files).find(
+          (f) => f.isFolder && f.key.toLowerCase() === '/playlist'
+        );
+        const activePlaylistFiles = playlistDir
+          ? playlistDir.childrenIds
+              .map((cid) => fn.files[cid])
+              .filter((cf) => cf && !cf.deleted && !cf.isFolder)
+          : [];
         done =
           !fn.crashed &&
-          Object.values(fn.files).filter((f) => f.key === 'uploaded.mission' && !f.deleted).length >= 5;
+          activePlaylistFiles.length > 0 &&
+          activePlaylistFiles.every((cf) => (cf.effects.E_CustomInfected ?? 0) > 0);
         break;
+      }
       case 'Arrest':
         done =
           !fn.crashed &&
@@ -1974,37 +2519,45 @@ export class MissionSession {
             .every((f) => f.deleted);
         break;
       case 'FalsifyCam':
-      case 'GameHack':
+      case 'GameHack': {
+        const targets = Object.values(fn.files).filter((f) => f.isMissionTarget);
         done =
           !fn.crashed &&
-          Object.values(fn.files)
-            .filter((f) => f.isMissionTarget)
-            .every((f) => (f.effects.E_CustomInfected ?? 0) > 0);
+          targets.length > 0 &&
+          targets.every((f) => !f.deleted && (f.effects.E_CustomInfected ?? 0) > 0);
         break;
+      }
       case 'OverwriteFiles':
-      case 'InfectNet':
-        done = targetNodes.every((n) =>
-          Object.values(n.system!.files)
-            .filter((f) => f.isMissionTarget)
-            .every((f) => (f.effects.E_CustomInfected ?? 0) > 0)
+      case 'InfectNet': {
+        const allTargets = targetNodes.flatMap((n) =>
+          Object.values(n.system!.files).filter((f) => f.isMissionTarget)
         );
+        done =
+          targetNodes.every((n) => !n.system!.crashed) &&
+          allTargets.length > 0 &&
+          allTargets.every((f) => !f.deleted && (f.effects.E_CustomInfected ?? 0) > 0);
         break;
+      }
       case 'GetVirus':
         done = this.missionCpt >= mp.n;
         break;
-      case 'TV':
+      case 'TV': {
+        const progs = Object.values(fn.files).filter((f) => f.key === 'tvprog.data');
         done =
+          !fn.crashed &&
           this.tvCopiedProgram &&
-          Object.values(fn.files)
-            .filter((f) => f.key === 'tvprog.data')
-            .every((f) => (f.effects.E_CustomInfected ?? 0) > 0);
+          progs.length > 0 &&
+          progs.every((f) => !f.deleted && (f.effects.E_CustomInfected ?? 0) > 0);
         break;
+      }
     }
 
     if (done && !this.missionObjectiveCompleted) {
       this.missionObjectiveCompleted = true;
       this.pushLog('success', formatLang(this.bundle.uiStrings, 'Log_MissionComplete'));
       this.emitSound({ kind: 'sfx', id: 'bonus_02' });
+    } else if (!done) {
+      this.missionObjectiveCompleted = false;
     }
     return done;
   }
@@ -2017,7 +2570,7 @@ export class MissionSession {
     }
     const scoutRun = this.hasChipset('scout');
     const success = !aborted && !this.busted && !scoutRun && this.evaluateMissionObjective();
-    const remainingSec = Math.floor(this.remainingTimeMs / 1000);
+    const remainingSec = this.hasTimer ? Math.floor(this.remainingTimeMs / 1000) : 0;
 
     const score = success
       ? 1000 * this.init.mission.gl +

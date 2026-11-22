@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { CreditCard, FileText, Package, Trash2, TrendingUp } from 'lucide-react';
 import type { PlayerDto, SimpleFile } from '@intrusion/shared';
 import { api, type CatalogResponse, type StorageResponse } from '../api/client';
-import { SafeHtml } from '../components/SafeHtml';
+import { parseCineEmbed, SafeHtml } from '../components/SafeHtml';
 
 interface HardDriveAppProps {
   player: PlayerDto;
@@ -15,12 +15,20 @@ export function HardDriveApp({ player, catalog, onPlayerUpdate }: HardDriveAppPr
   const [tab, setTab] = useState<'packs' | 'files' | 'cards'>('packs');
   const [selectedFile, setSelectedFile] = useState<Required<SimpleFile> | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    const res = await api.storage();
-    setData(res);
-    if (res.files.length > 0 && !selectedFile) {
-      setSelectedFile(res.files[0]);
+    try {
+      const res = await api.storage();
+      setData(res);
+      setSelectedFile((prev) => {
+        if (prev) {
+          return res.files.find((f) => f.id === prev.id) ?? res.files[0] ?? null;
+        }
+        return res.files[0] ?? null;
+      });
+    } catch (err: any) {
+      setError(err.message || 'Erreur lors de la lecture du disque dur.');
     }
   }
 
@@ -30,24 +38,39 @@ export function HardDriveApp({ player, catalog, onPlayerUpdate }: HardDriveAppPr
 
   async function handleSellPack(valId: string, qty: number) {
     setMessage(null);
-    const res = await api.sellPack(valId, qty);
-    onPlayerUpdate(res.player);
-    setMessage(`Vendu ${res.soldQty} pack(s) pour +${res.totalEarned} CR.`);
-    await refresh();
+    setError(null);
+    try {
+      const res = await api.sellPack(valId, qty);
+      onPlayerUpdate(res.player);
+      setMessage(`Vendu ${res.soldQty} pack(s) pour +${res.totalEarned} CR.`);
+      await refresh();
+    } catch (err: any) {
+      setError(err.message || 'Erreur lors de la vente des packs.');
+    }
   }
 
   async function handleRedeemCard(cardId: string) {
     setMessage(null);
-    const res = await api.redeemCard(cardId);
-    onPlayerUpdate(res.player);
-    setMessage(`Transfert offshore effectué : +${res.earned} CR.`);
-    await refresh();
+    setError(null);
+    try {
+      const res = await api.redeemCard(cardId);
+      onPlayerUpdate(res.player);
+      setMessage(`Transfert offshore effectué : +${res.earned} CR.`);
+      await refresh();
+    } catch (err: any) {
+      setError(err.message || 'Erreur lors de l’encaissement de la carte.');
+    }
   }
 
   async function handleDeleteFile(fileId: string) {
-    await api.deleteFile(fileId);
-    if (selectedFile?.id === fileId) setSelectedFile(null);
-    await refresh();
+    setError(null);
+    try {
+      await api.deleteFile(fileId);
+      if (selectedFile?.id === fileId) setSelectedFile(null);
+      await refresh();
+    } catch (err: any) {
+      setError(err.message || 'Erreur lors de la suppression du fichier.');
+    }
   }
 
   const ownedPackEntries = Object.entries(player.valuables)
@@ -113,6 +136,12 @@ export function HardDriveApp({ player, catalog, onPlayerUpdate }: HardDriveAppPr
           </div>
         )}
       </div>
+
+      {error && (
+        <div className="mx-4 mt-3 rounded border border-rose-500/40 bg-rose-950/50 px-3 py-2 font-mono text-xs text-rose-200">
+          {error}
+        </div>
+      )}
 
       {message && (
         <div className="mx-4 mt-3 rounded border border-emerald-500/40 bg-emerald-950/40 px-3 py-2 font-mono text-xs text-emerald-200">
@@ -215,14 +244,39 @@ export function HardDriveApp({ player, catalog, onPlayerUpdate }: HardDriveAppPr
             </div>
 
             <div className="rounded border border-[#343f24] bg-[#0e130b] p-4 lg:col-span-7">
-              {selectedFile ? (
-                <div>
-                  <div className="mb-3 border-b border-[#2b351e] pb-2 font-mono text-sm font-bold text-[#fed82a]">
-                    {selectedFile.name}
+              {selectedFile ? (() => {
+                const cine = parseCineEmbed(selectedFile.embed);
+                return (
+                  <div>
+                    <div className="mb-3 border-b border-[#2b351e] pb-2 font-mono text-sm font-bold text-[#fed82a]">
+                      {selectedFile.name}
+                    </div>
+                    {cine && (
+                      <div className="mb-3 rounded border border-[#3d4b2a] bg-[#12180e] p-3 text-center font-mono">
+                        {cine.kind === 'image' && cine.href ? (
+                          <a href={cine.href} target="_blank" rel="noreferrer" className="inline-block">
+                            <img
+                              src={cine.src}
+                              alt={selectedFile.name}
+                              className="mx-auto max-h-48 rounded border border-[#495933] object-contain"
+                            />
+                          </a>
+                        ) : (
+                          <img
+                            src={cine.src}
+                            alt={selectedFile.name}
+                            className="mx-auto max-h-48 rounded border border-[#495933] object-contain"
+                          />
+                        )}
+                        <div className="mt-1.5 text-[10px] text-[#7be082]">
+                          {cine.kind === 'video' ? 'FLUX VIDÉO' : 'CAPTURE IMAGE'} // {selectedFile.name}
+                        </div>
+                      </div>
+                    )}
+                    <SafeHtml html={selectedFile.content} className="text-sm leading-relaxed" />
                   </div>
-                  <SafeHtml html={selectedFile.content} className="text-sm leading-relaxed" />
-                </div>
-              ) : (
+                );
+              })() : (
                 <div className="flex h-full items-center justify-center font-mono text-xs text-[#7f8c5e]">
                   Sélectionnez un fichier pour lire son contenu.
                 </div>

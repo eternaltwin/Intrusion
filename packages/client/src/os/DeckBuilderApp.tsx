@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Cpu, Plus, RotateCcw, Star, Trash2 } from 'lucide-react';
 import { formatVirusDesc, type PlayerDto, type VirusDef } from '@intrusion/shared';
 import { api, type CatalogResponse } from '../api/client';
@@ -16,11 +16,14 @@ export function DeckBuilderApp({ player, catalog, onPlayerUpdate }: DeckBuilderA
   );
   const [hoveredVirus, setHoveredVirus] = useState<VirusDef | null>(null);
   const [catFilter, setCatFilter] = useState<string>('all');
-  const [editingName, setEditingName] = useState<string>('');
-  const [error, setError] = useState<string | null>(null);
-
   const activeDeck =
     player.decks.find((d) => d.id === selectedDeckId) ?? player.decks[0];
+  const [editingName, setEditingName] = useState<string>(activeDeck?.name ?? '');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setEditingName(activeDeck?.name ?? '');
+  }, [activeDeck?.id, activeDeck?.name]);
 
   const usedAcrossAllDecks = new Map<string, number>();
   for (const d of player.decks) {
@@ -31,11 +34,11 @@ export function DeckBuilderApp({ player, catalog, onPlayerUpdate }: DeckBuilderA
   const seenOwned = new Map<string, number>();
   const poolViruses: Array<{ def: VirusDef; copyKey: string }> = [];
   for (const id of player.viruses) {
+    const def = catalog.viruses.find((v) => v.id === id);
+    if (!def || def.cat === 'hidden' || def.cat === 'specials') continue;
     const seen = (seenOwned.get(id) ?? 0) + 1;
     seenOwned.set(id, seen);
     if (seen <= (usedAcrossAllDecks.get(id) ?? 0)) continue;
-    const def = catalog.viruses.find((v) => v.id === id);
-    if (!def) continue;
     if (catFilter !== 'all' && def.cat !== catFilter) continue;
     poolViruses.push({ def, copyKey: `${id}_${seen}` });
   }
@@ -127,7 +130,7 @@ export function DeckBuilderApp({ player, catalog, onPlayerUpdate }: DeckBuilderA
                   type="button"
                   onClick={() => {
                     setSelectedDeckId(d.id);
-                    setEditingName('');
+                    setEditingName(d.name);
                   }}
                   className={`flex items-center gap-1.5 rounded border px-3 py-1.5 font-mono text-xs transition cursor-pointer ${
                     d.id === activeDeck?.id
@@ -165,11 +168,15 @@ export function DeckBuilderApp({ player, catalog, onPlayerUpdate }: DeckBuilderA
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
-                    value={editingName || activeDeck.name}
+                    maxLength={32}
+                    value={editingName}
                     onChange={(e) => setEditingName(e.target.value)}
                     onBlur={() => {
-                      if (editingName.trim() && editingName !== activeDeck.name) {
-                        void updateDeckContent(activeDeck.content, { name: editingName.trim() });
+                      const trimmed = editingName.trim();
+                      if (!trimmed) {
+                        setEditingName(activeDeck.name);
+                      } else if (trimmed !== activeDeck.name) {
+                        void updateDeckContent(activeDeck.content, { name: trimmed });
                       }
                     }}
                     className="rounded border border-[#3e4b2b] bg-[#0e130b] px-2.5 py-1 font-mono text-sm font-bold text-[#fed82a] focus:border-[#fed82a] focus:outline-none"
