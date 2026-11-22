@@ -3,6 +3,9 @@ import type { ChipsetDef, PlayerDto } from '@intrusion/shared';
 import { api, type MissionOfferDto, type MissionsListResponse } from '../api/client';
 import { useVirusTooltip } from './TooltipContext';
 import { SafeHtml } from '../components/SafeHtml';
+import { ModalDialog } from '../components/ModalDialog';
+
+const MISSION_REFRESH_COST = 2000;
 
 type MissionTab = 'ongoing' | 'available' | 'tutorial' | 'completed';
 
@@ -27,6 +30,8 @@ export function MissionsView({
   const [data, setData] = useState<MissionsListResponse | null>(null);
   const [selectedOffer, setSelectedOffer] = useState<MissionOfferDto | null>(null);
   const [loading, setLoading] = useState(true);
+  const [confirmRefreshOpen, setConfirmRefreshOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const { showVirus, hideVirus } = useVirusTooltip();
 
   const loadMissions = async () => {
@@ -53,12 +58,19 @@ export function MissionsView({
   }, [initialTab]);
 
   const handleRefreshOffers = async () => {
+    setRefreshing(true);
     try {
       const res = await api.refreshMissions();
-      setData((prev) => (prev ? { ...prev, available: res.available } : prev));
+      setData((prev) =>
+        prev ? { ...prev, available: res.available, active: [], completed: [] } : prev
+      );
+      if (res.player) onPlayerUpdate(res.player);
+      setConfirmRefreshOpen(false);
       onNotify('Nouvelles offres de contrats récupérées sur le réseau.');
     } catch (err: any) {
       onNotify(err.message || 'Erreur lors du renouvellement.', true);
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -255,8 +267,14 @@ export function MissionsView({
               {data.available.map((m) => renderCard(m, 'details'))}
               <div className="clear" />
               <div style={{ marginTop: 10 }}>
-                <a className="optionLink" onClick={handleRefreshOffers}>
-                  [Renouveler les offres disponibles]
+                <a className="optionLink" onClick={() => setConfirmRefreshOpen(true)}>
+                  [Renouveler les offres disponibles ({MISSION_REFRESH_COST}{' '}
+                  <img
+                    src="/img/icons/money.png"
+                    alt=""
+                    style={{ display: 'inline', height: '14px', width: '14px', verticalAlign: 'text-bottom' }}
+                  />
+                  )]
                 </a>
               </div>
             </div>
@@ -281,6 +299,75 @@ export function MissionsView({
           </>
         )}
       </div>
+
+      <ModalDialog
+        open={confirmRefreshOpen}
+        variant="classic"
+        maxWidthClass="max-w-md"
+        title="Renouvellement des offres"
+        onClose={() => {
+          if (!refreshing) setConfirmRefreshOpen(false);
+        }}
+      >
+        <div>
+          <p className="classicPopupLead">
+            Renouveler les offres disponibles coûte{' '}
+            <strong>
+              {MISSION_REFRESH_COST}{' '}
+              <img
+                src="/img/icons/money.png"
+                alt=""
+                style={{ display: 'inline', height: '14px', width: '14px', verticalAlign: '-2px' }}
+              />
+            </strong>
+            .
+          </p>
+          <div className="classicPopupWarn">
+            Attention : vos missions en cours et terminées seront également réinitialisées.
+          </div>
+          {player.money < MISSION_REFRESH_COST && (
+            <div className="classicPopupError">
+              Crédits insuffisants ({player.money} / {MISSION_REFRESH_COST}{' '}
+              <img
+                src="/img/icons/money.png"
+                alt=""
+                style={{ display: 'inline', height: '13px', width: '13px', verticalAlign: '-2px' }}
+              />
+              ).
+            </div>
+          )}
+          <div className="classicPopupActions">
+            <button
+              type="button"
+              disabled={refreshing}
+              onClick={() => setConfirmRefreshOpen(false)}
+              className="classicPopupBtn secondary"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              disabled={refreshing || player.money < MISSION_REFRESH_COST}
+              onClick={handleRefreshOffers}
+              className="classicPopupBtn"
+            >
+              {refreshing ? (
+                'Renouvellement...'
+              ) : (
+                <>
+                  Confirmer ({MISSION_REFRESH_COST}{' '}
+                  <img
+                    src="/img/icons/money.png"
+                    alt=""
+                    style={{ display: 'inline', height: '13px', width: '13px', verticalAlign: '-2px' }}
+                  />
+                  )
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </ModalDialog>
     </div>
   );
 }

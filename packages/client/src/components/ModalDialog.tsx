@@ -7,6 +7,7 @@ interface ModalDialogProps {
   onClose: () => void;
   children: ReactNode;
   maxWidthClass?: string;
+  variant?: 'cyber' | 'classic';
 }
 
 export function ModalDialog({
@@ -15,6 +16,7 @@ export function ModalDialog({
   onClose,
   children,
   maxWidthClass = 'max-w-lg',
+  variant = 'cyber',
 }: ModalDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -39,6 +41,30 @@ export function ModalDialog({
     dialog.addEventListener('close', handleClose);
     return () => dialog.removeEventListener('close', handleClose);
   }, [onClose]);
+
+  if (variant === 'classic') {
+    return (
+      <dialog
+        ref={dialogRef}
+        aria-labelledby={titleId}
+        {...({ closedby: 'any' } as any)}
+        className={`classicPopupDialog m-auto w-[92vw] ${maxWidthClass}`}
+      >
+        <div className="window classicPopupWindow">
+          <div className="wtitle">
+            <img
+              className="wbutton"
+              src="/img/design/pixel.gif"
+              alt="Fermer"
+              onClick={() => dialogRef.current?.close()}
+            />
+            <span id={titleId}>{title}</span>
+          </div>
+          <div className="container">{children}</div>
+        </div>
+      </dialog>
+    );
+  }
 
   return (
     <dialog

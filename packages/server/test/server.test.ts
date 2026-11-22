@@ -160,5 +160,38 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(chalBoard.hasPlayedRanked).toBe(true);
     expect(chalBoard.leaderboard.length).toBe(1);
     expect(chalBoard.leaderboard[0].bestScore).toBe(8450);
+
+    // 7. Refreshing missions flushes active missions and sets midnight expiry
+    const beforeRefresh = await (await app.request('/api/missions', { headers: { Cookie: cookie } })).json();
+    expect(beforeRefresh.available.length).toBeGreaterThan(0);
+    const missionToStart = beforeRefresh.available[0];
+    const startActiveRes = await app.request(`/api/missions/${missionToStart.missionKey}/start`, {
+      method: 'POST',
+      headers: { Cookie: cookie },
+    });
+    expect(startActiveRes.status).toBe(200);
+
+    const midCheck = await (await app.request('/api/missions', { headers: { Cookie: cookie } })).json();
+    expect(midCheck.active.length).toBe(1);
+
+    const meBeforeRefresh = await (await app.request('/api/auth/me', { headers: { Cookie: cookie } })).json();
+    const moneyBeforeRefresh = meBeforeRefresh.player.money;
+
+    const refreshRes = await app.request('/api/missions/refresh', {
+      method: 'POST',
+      headers: { Cookie: cookie },
+    });
+    expect(refreshRes.status).toBe(200);
+    const refreshJson = await refreshRes.json();
+    expect(refreshJson.available.length).toBeGreaterThan(0);
+    expect(refreshJson.player.money).toBe(moneyBeforeRefresh - 2000);
+
+    const nextMidnight = new Date();
+    nextMidnight.setHours(24, 0, 0, 0);
+    expect(refreshJson.available[0].expiresAt).toBe(nextMidnight.getTime());
+
+    const afterRefresh = await (await app.request('/api/missions', { headers: { Cookie: cookie } })).json();
+    expect(afterRefresh.active.length).toBe(0);
+    expect(afterRefresh.completed.length).toBe(0);
   });
 });

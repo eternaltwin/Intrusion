@@ -196,13 +196,26 @@ export function createApp(opts: CreateAppOptions) {
     return next();
   });
 
+  function getStartOfTodayMs(nowMs = Date.now()): number {
+    const d = new Date(nowMs);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+
+  function getNextMidnightMs(nowMs = Date.now()): number {
+    const d = new Date(nowMs);
+    d.setHours(24, 0, 0, 0);
+    return d.getTime();
+  }
+
   // --- Helper: Ensure available missions exist & aren't expired ---
   function ensureAvailableMissions(userId: number, player: PlayerDto, lang: LangCode) {
     const now = Date.now();
-    // Clean expired available missions
+    const startOfTodayMs = getStartOfTodayMs(now);
+    // Clean expired daily missions (available, active, completed created before today's midnight)
     db.prepare(
-      "DELETE FROM missions WHERE user_id = ? AND status = 'available' AND (? - created_at) > ?"
-    ).run(userId, now, MISSION_EXPIRY_MS);
+      "DELETE FROM missions WHERE user_id = ? AND status IN ('available', 'active', 'completed') AND created_at < ?"
+    ).run(userId, startOfTodayMs);
 
     let rows = db
       .prepare("SELECT * FROM missions WHERE user_id = ? AND status = 'available' ORDER BY created_at ASC")
@@ -264,7 +277,7 @@ export function createApp(opts: CreateAppOptions) {
       bonus: mdata.bonus,
       tries: row.tries,
       difficulty: getMissionDifficultyLabel(mdata.gl, player.level),
-      expiresAt: row.created_at + MISSION_EXPIRY_MS,
+      expiresAt: getNextMidnightMs(row.created_at),
       status: row.status ?? 'available',
     };
   }
@@ -314,7 +327,7 @@ export function createApp(opts: CreateAppOptions) {
         bonus: 0,
         tries: 0,
         difficulty: 'easy' as const,
-        expiresAt: Date.now() + MISSION_EXPIRY_MS,
+        expiresAt: getNextMidnightMs(Date.now()),
         status: 'tutorial' as const,
       };
     });
@@ -327,14 +340,22 @@ export function createApp(opts: CreateAppOptions) {
     });
   });
 
+  const MISSION_REFRESH_COST = 2000;
+
   app.post('/api/missions/refresh', (c) => {
     const userId = c.get('userId');
     const player = c.get('player');
-    db.prepare("DELETE FROM missions WHERE user_id = ? AND status = 'available'").run(userId);
-    const availableRows = ensureAvailableMissions(userId, player, player.settings.lang);
-    const bundle = getCatalog(opts.assetsDir, player.settings.lang);
+    if (player.money < MISSION_REFRESH_COST) {
+      return c.json({ error: 'Crédits insuffisants.' }, 400);
+    }
+    db.prepare('UPDATE users SET money = money - ? WHERE id = ?').run(MISSION_REFRESH_COST, userId);
+    db.prepare("DELETE FROM missions WHERE user_id = ? AND status IN ('available', 'active', 'completed')").run(userId);
+    const updatedPlayer = buildPlayerDto(db, userId) ?? { ...player, money: player.money - MISSION_REFRESH_COST };
+    const availableRows = ensureAvailableMissions(userId, updatedPlayer, updatedPlayer.settings.lang);
+    const bundle = getCatalog(opts.assetsDir, updatedPlayer.settings.lang);
     return c.json({
-      available: availableRows.map((r) => formatMissionRow(bundle, player, r)),
+      available: availableRows.map((r) => formatMissionRow(bundle, updatedPlayer, r)),
+      player: updatedPlayer,
     });
   });
 

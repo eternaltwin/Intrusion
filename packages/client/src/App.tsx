@@ -69,6 +69,7 @@ export function App() {
 
   const handlePlayerUpdate = useCallback(
     async (next: PlayerDto) => {
+      if (!next) return;
       setPlayer(next);
       if (catalog && next.settings.lang !== catalog.lang) {
         try {

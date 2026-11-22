@@ -207,3 +207,106 @@ ul.tabs li a,
   padding: 3px 4px;
   margin-bottom: 6px;
 }
+
+/* Classic site-matched popup dialog (.window / .sitePopup aesthetic) */
+dialog.classicPopupDialog {
+  border: none;
+  background: transparent;
+  padding: 0;
+  overflow: visible;
+  color: #e9eec6;
+  font-family: Trebuchet MS, Arial, Verdana, sans-serif;
+  font-size: 9.5pt;
+}
+
+dialog.classicPopupDialog::backdrop {
+  background: rgba(16, 18, 10, 0.72);
+}
+
+.classicPopupWindow {
+  margin-bottom: 0;
+  border: 1px solid #d0d194;
+  outline: 2px solid #000;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75);
+}
+
+.classicPopupWindow .container {
+  color: #e9eec6;
+  line-height: 1.45;
+}
+
+.classicPopupWindow .classicPopupLead {
+  margin-bottom: 10px;
+  font-size: 10pt;
+  color: #e9eec6;
+}
+
+.classicPopupWindow .classicPopupLead strong {
+  color: #fed82a;
+}
+
+.classicPopupWindow .classicPopupWarn {
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  background-color: #3b3d28;
+  border: 1px solid #71754c;
+  outline: 1px solid #292b1c;
+  color: #d0d194;
+  font-size: 8.5pt;
+}
+
+.classicPopupWindow .classicPopupError {
+  margin-bottom: 10px;
+  padding: 5px 8px;
+  background-color: #3b241c;
+  border: 1px solid #ff693e;
+  outline: 1px solid #000;
+  color: #ff9c7d;
+  font-size: 8.5pt;
+  font-weight: bold;
+}
+
+.classicPopupWindow .classicPopupActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.classicPopupWindow button.classicPopupBtn {
+  min-width: 110px;
+  padding: 4px 12px;
+  text-align: center;
+  line-height: 13pt;
+  font-family: Trebuchet MS, Arial, Verdana, sans-serif;
+  font-size: 8.5pt;
+  font-weight: bold;
+  color: #e59f07;
+  background-color: #3b3d28;
+  border: 1px solid #e59f07;
+  outline: 1px solid #000;
+  cursor: pointer;
+}
+
+.classicPopupWindow button.classicPopupBtn:hover:not(:disabled) {
+  background-color: #e59f07;
+  color: #3b3d28;
+}
+
+.classicPopupWindow button.classicPopupBtn.secondary {
+  color: #d0d194;
+  border-color: #9ba06b;
+}
+
+.classicPopupWindow button.classicPopupBtn.secondary:hover:not(:disabled) {
+  background-color: #d0d194;
+  color: #292b1c;
+}
+
+.classicPopupWindow button.classicPopupBtn:disabled {
+  color: #8c8f64;
+  border-color: #71754c;
+  background-color: #454730;
+  cursor: not-allowed;
+  opacity: 0.75;
+}

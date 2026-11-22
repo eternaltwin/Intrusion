@@ -110,7 +110,9 @@ export const api = {
 
   missions: () => requestJson<MissionsListResponse>('/api/missions'),
   refreshMissions: () =>
-    requestJson<{ available: MissionOfferDto[] }>('/api/missions/refresh', { method: 'POST' }),
+    requestJson<{ available: MissionOfferDto[]; player: PlayerDto }>('/api/missions/refresh', {
+      method: 'POST',
+    }),
   startMission: (missionKey: string) =>
     requestJson<{ init: MissionInitParams }>(`/api/missions/${encodeURIComponent(missionKey)}/start`, {
       method: 'POST',
