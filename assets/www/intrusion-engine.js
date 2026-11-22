@@ -1376,16 +1376,17 @@ Dock.prototype = {
 				emc.gotoAndStop(1);
 				var ef = MCField.get_field(emc);
 				if(ef != null) {
-					ef.style.fill = "#ffffff";
-					ef.style.stroke = "#000000";
-					ef.style.strokeThickness = 3;
-					ef.style.lineJoin = "round";
-					ef.style.padding = 3;
-					ef.style.lineHeight = ef.style.fontSize + 2;
+					ef.style.fontFamily = "Arial, sans-serif";
+					ef.style.fontSize = 10;
+					ef.style.fontWeight = "bold";
+					ef.style.fill = "#111111";
+					ef.style.strokeThickness = 0;
+					ef.style.padding = 1;
+					ef.style.lineHeight = 11;
 					ef.text = e.cpt == null ? "" : "" + e.cpt;
 					ef.anchor.set(0.5,0.5);
-					ef.x = 0.01;
-					ef.y = 0.5;
+					ef.x = 0;
+					ef.y = 0;
 				}
 				this.emcList.add(emc);
 			}

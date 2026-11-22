@@ -483,16 +483,17 @@ class Dock {
 				emc._y = Math.round(targetSlot.mc._height*0.8);
 				emc.gotoAndStop(1);
 				if ( emc.field != null ) {
-					untyped emc.field.style.fill = "#ffffff";
-					untyped emc.field.style.stroke = "#000000";
-					untyped emc.field.style.strokeThickness = 3;
-					untyped emc.field.style.lineJoin = "round";
-					untyped emc.field.style.padding = 3;
-					untyped emc.field.style.lineHeight = emc.field.style.fontSize + 2;
+					untyped emc.field.style.fontFamily = "Arial, sans-serif";
+					untyped emc.field.style.fontSize = 10;
+					untyped emc.field.style.fontWeight = "bold";
+					untyped emc.field.style.fill = "#111111";
+					untyped emc.field.style.strokeThickness = 0;
+					untyped emc.field.style.padding = 1;
+					untyped emc.field.style.lineHeight = 11;
 					emc.field.text = Std.string(e.cpt);
 					untyped emc.field.anchor.set(0.5, 0.5);
-					emc.field.x = 0.01;
-					emc.field.y = 0.5;
+					emc.field.x = 0;
+					emc.field.y = 0;
 				}
 				emcList.add(emc);
 			}
