@@ -34,6 +34,8 @@ enum NodeType {
 
 typedef NetNode = {
 	mc			: MCNode,
+	arrowMc		: MovieClip,
+	checkMc		: MovieClip,
 	id			: Int,
 	ip			: String,
 	type		: NodeType,
@@ -444,6 +446,8 @@ class GNetwork {
 	function generateNode(x:Int,y:Int,remain:Int, ?dist=0) : Int {
 		var node : NetNode = {
 			mc			: null,
+			arrowMc		: null,
+			checkMc		: null,
 			id			: uniq,
 			ip			: baseIp+uniq,
 			x			: x,
@@ -1378,6 +1382,39 @@ class GNetwork {
 		for(gs in gspamList)
 			gs.mc._visible = fl;
 		groundField._visible = fl;
+		updateTargetIndicators();
+	}
+
+	function createCheckIndicator(x:Float, y:Float) : MovieClip {
+		var cmc = sdm.empty(Data.DP_ITEM);
+		cmc._x = x;
+		cmc._y = y;
+		var gfx : Dynamic = untyped __js__("new PIXI.Graphics()");
+		gfx.lineStyle(2.2, 0x0a2900, 0.95);
+		gfx.beginFill(Data.GREEN, 1.0);
+		gfx.drawPolygon([-9.2, -9.7, -6.4, -12.5, -2.5, -8.7, 6.3, -17.5, 9.2, -14.7, -2.5, -3.0]);
+		gfx.endFill();
+		gfx.lineStyle(1.0, 0xeaff99, 0.75);
+		gfx.moveTo(-8.1, -9.7);
+		gfx.lineTo(-6.4, -11.4);
+		gfx.lineTo(-2.5, -7.5);
+		gfx.lineTo(6.3, -16.3);
+		cmc.addChild(gfx);
+		if ( !term.fl_lowq )
+			cmc.filters = GlowFilter.create(Data.GREEN, 0.55, 4, 4, 1.4);
+		return cmc;
+	}
+
+	public function updateTargetIndicators() {
+		if ( nodes==null )
+			return;
+		var done = term.isObjectiveCompleted();
+		for (node in nodes) {
+			if ( node.arrowMc!=null )
+				node.arrowMc._visible = !fl_lock && !done;
+			if ( node.checkMc!=null )
+				node.checkMc._visible = !fl_lock && done;
+		}
 	}
 
 	function isUp(node:NetNode) {
@@ -1586,6 +1623,9 @@ class GNetwork {
 					var amc = sdm.attach("arrow",Data.DP_ITEM);
 					amc._x = node.mc._x;
 					amc._y = node.mc._y-45;
+					node.arrowMc = amc;
+					node.checkMc = createCheckIndicator(node.mc._x, node.mc._y-45);
+					node.checkMc._visible = false;
 				}
 				if ( node!=null && node.type!=Empty )
 					if ( node.type==Entrance ) {
@@ -1738,6 +1778,7 @@ class GNetwork {
 				node.mc.sicon._visible = false;
 			}
 		}
+		updateTargetIndicators();
 		detachPath();
 		if ( curNode!=null )
 			drawPath(curNode);

@@ -175,18 +175,18 @@ class Dock {
 
 	public function loadIcons() {
 		urlList = new List();
-		var me = this;
-		for (deck in decks)
-			for(ds in deck.content) {
-				if ( ds.virus==null )
-					continue;
+		for(ds in getCurrentDeck()) {
+			if ( ds.virus==null || ds.mc==null )
+				continue;
 
-				var url = Manager.PARAMS._iconsUrl+ds.virus.id+".png?v="+Manager.PARAMS._iconsVer;
-				var promise = ((untyped Texture).fromURL(url))
-					.then((texture) -> {
-						ds.mc.smc.attachBitmap(texture, 1);
-					});
-			}
+			var targetMc = ds.mc;
+			var url = Manager.PARAMS._iconsUrl+ds.virus.id+".png?v="+Manager.PARAMS._iconsVer;
+			var promise = ((untyped Texture).fromURL(url))
+				.then((texture) -> {
+					if ( targetMc != null && targetMc._name != null && targetMc.smc != null )
+						targetMc.smc.attachBitmap(texture, 1);
+				});
+		}
 	}
 
 	function onLoadComplete(ds:DockSlot) {

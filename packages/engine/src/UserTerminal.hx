@@ -1060,7 +1060,13 @@ class UserTerminal {
 			}
 
 		}
+		if ( net!=null && fs==null )
+			net.updateTargetIndicators();
 		return fl_success;
+	}
+
+	public function isObjectiveCompleted() {
+		return !fl_busted && checkMissionStatus();
 	}
 
 	function checkMissionStatus() {
@@ -1359,7 +1365,7 @@ class UserTerminal {
 	public function logout(?fl_abandon=false) {
 		Manager.loading(Lang.get.LP_Logout);
 		stopAllSounds(false);
-		Tutorial.print();
+		Tutorial.end();
 		dock.hide();
 		#if debug
 			if ( Manager.STANDALONE ) {
@@ -2835,6 +2841,7 @@ class UserTerminal {
 
 	public function dispose() {
 		fl_end = true;
+		Tutorial.end();
 		js.Browser.window.removeEventListener("keydown", onKey);
 		js.Browser.window.removeEventListener("paste", onPaste);
 		if (Manager.app != null && Manager.app.view != null) {

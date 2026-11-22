@@ -61,6 +61,7 @@ class Tutorial {
 
 
 	public static function init(ut:UserTerminal) {
+		end();
 		term = ut;
 		indicators = new List();
 	}
@@ -115,13 +116,17 @@ class Tutorial {
 
 	public static function end() {
 		cmc?.removeMovieClip();
+		cmc = null;
 		current = null;
 		currentStep = null;
 //		nextCB = null;
-		for (mc in indicators)
-			mc?.removeMovieClip();
+		if ( indicators!=null ) {
+			for (mc in indicators)
+				mc?.removeMovieClip();
+		}
 		indicators = new List();
 		print();
+		pop = null;
 	}
 
 	public static function play(t:Tut, s:String) {

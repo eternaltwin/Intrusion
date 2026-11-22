@@ -30,6 +30,7 @@ export function DecksView({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragSource, setDragSource] = useState<'deck' | 'pool' | null>(null);
   const [dragTargetZone, setDragTargetZone] = useState<'deck' | 'pool' | null>(null);
+  const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
 
   useEffect(() => {
     if (!activeDeck) return;
@@ -94,10 +95,12 @@ export function DecksView({
 
   const reorderInDeck = (vid: string, targetIndex: number) => {
     const curIdx = deckViruses.indexOf(vid);
-    if (curIdx === -1 || curIdx === targetIndex) return;
+    if (curIdx === -1) return;
+    const clampedIdx = Math.min(targetIndex, Math.max(0, deckViruses.length - 1));
+    if (curIdx === clampedIdx) return;
     const next = [...deckViruses];
     next.splice(curIdx, 1);
-    next.splice(targetIndex, 0, vid);
+    next.splice(clampedIdx, 0, vid);
     setDeckViruses(next);
     persistDeck(next);
   };
@@ -114,12 +117,14 @@ export function DecksView({
     setDraggingId(null);
     setDragSource(null);
     setDragTargetZone(null);
+    setDragOverSlot(null);
   };
 
   const onDropDeckZone = (e: DragEvent, targetIndex?: number) => {
     e.preventDefault();
     e.stopPropagation();
     setDragTargetZone(null);
+    setDragOverSlot(null);
     const raw = e.dataTransfer.getData('text/plain');
     const [src, vid] = raw.includes(':') ? raw.split(':') : [dragSource, draggingId];
     if (!vid) return;
@@ -184,7 +189,7 @@ export function DecksView({
           <ul>
             <li className={`chipset${!player.activeChipset ? ' active' : ''}`}>
               <a onClick={() => handleSelectChipset(null)}>
-                <img src="/img/icons/none.png" alt="" /> Aucun
+                <img src="/img/icons/delete.png" alt="" /> Aucun
               </a>
             </li>
             {ownedChipsets.map((c) => (
@@ -242,14 +247,6 @@ export function DecksView({
             vers un emplacement de votre deck. Les changements sont automatiquement sauvegardés.
           </div>
 
-          <div className="slots">
-            {Array.from({ length: activeDeck.capacity }, (_, i) => (
-              <div key={i + 1} className="slot">
-                {i + 1}
-              </div>
-            ))}
-          </div>
-
           <ul
             id="deckContainer"
             className={`bg${dragTargetZone === 'deck' ? ' dragOver' : ''}`}
@@ -257,28 +254,55 @@ export function DecksView({
               e.preventDefault();
               setDragTargetZone('deck');
             }}
-            onDragLeave={() => setDragTargetZone(null)}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                setDragTargetZone(null);
+                setDragOverSlot(null);
+              }
+            }}
             onDrop={(e) => onDropDeckZone(e)}
           >
-            {deckViruses.map((vid, idx) => (
-              <li
-                key={vid}
-                draggable
-                className={draggingId === vid ? 'dragging' : ''}
-                onDragStart={(e) => onDragStartItem(e, vid, 'deck')}
-                onDragEnd={onDragEndItem}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => onDropDeckZone(e, idx)}
-                onClick={() => {
-                  hideVirus(vid);
-                  removeFromDeck(vid);
-                }}
-                onMouseEnter={() => showVirus(vid)}
-                onMouseLeave={() => hideVirus(vid)}
-              >
-                <img src={`/img/dockicons/${vid}.png`} alt={vid} />
-              </li>
-            ))}
+            {Array.from({ length: activeDeck.capacity }, (_, idx) => {
+              const vid = deckViruses[idx];
+              const isOver = dragOverSlot === idx;
+              return vid ? (
+                <li
+                  key={`slot_${idx}_${vid}`}
+                  draggable
+                  className={`filledSlot${draggingId === vid ? ' dragging' : ''}${isOver ? ' slotDragOver' : ''}`}
+                  onDragStart={(e) => onDragStartItem(e, vid, 'deck')}
+                  onDragEnd={onDragEndItem}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragTargetZone('deck');
+                    setDragOverSlot(idx);
+                  }}
+                  onDrop={(e) => onDropDeckZone(e, idx)}
+                  onClick={() => {
+                    hideVirus(vid);
+                    removeFromDeck(vid);
+                  }}
+                  onMouseEnter={() => showVirus(vid)}
+                  onMouseLeave={() => hideVirus(vid)}
+                >
+                  <img src={`/img/dockicons/${vid}.png`} alt={vid} />
+                  <div className="id">{idx + 1}</div>
+                </li>
+              ) : (
+                <li
+                  key={`slot_${idx}_empty`}
+                  className={`emptySlot${isOver ? ' slotDragOver' : ''}`}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragTargetZone('deck');
+                    setDragOverSlot(idx);
+                  }}
+                  onDrop={(e) => onDropDeckZone(e, idx)}
+                >
+                  <div className="id">{idx + 1}</div>
+                </li>
+              );
+            })}
           </ul>
 
           <div className="infos">

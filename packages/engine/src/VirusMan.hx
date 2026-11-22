@@ -257,14 +257,19 @@ class VirusMan {
 
 	public function onTick(t) {
 		if (term.fs == null) return;
-		if ( t%5==0 )
+		if ( t%5==0 ) {
+			var hit = false;
 			for (f in term.fs.rawTree)
 				if ( f.hasEffect(E_Dot) ) {
+					hit = true;
 					f.damage( f.countEffect(E_Dot) );
 					f.removeEffect(E_DotLength);
 					if ( !f.hasEffect(E_DotLength) )
 						f.clearEffect(E_Dot);
 				}
+			if ( hit )
+				term.checkMission();
+		}
 	}
 
 

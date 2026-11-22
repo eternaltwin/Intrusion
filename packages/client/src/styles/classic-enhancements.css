@@ -64,10 +64,67 @@ ul.tabs li a,
   color: #ff693e;
 }
 
-/* Drag-and-drop subtle visual cue in Decks */
-#deckContainer li,
-#poolContainer li {
+/* Deck slots layout, dashed slot placeholders & aligned slot numbers */
+.decks #deckContainer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  height: auto;
+  min-height: 41px;
+  padding: 8px 8px 22px 8px;
+}
+
+.decks #poolContainer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  height: auto;
+  min-height: 41px;
+  padding: 8px;
+}
+
+.decks #deckContainer li,
+.decks #poolContainer li {
+  float: none;
+  margin: 0;
   user-select: none;
+}
+
+.decks #deckContainer li.filledSlot {
+  border: 1px dashed #a8ab76;
+}
+
+.decks #deckContainer li.emptySlot {
+  background-image: none;
+  background-color: rgba(41, 43, 28, 0.42);
+  border: 1px dashed #d0d194;
+  cursor: default;
+}
+
+.decks #deckContainer li.slotDragOver {
+  border: 1px dashed #fed82a;
+  background-color: rgba(229, 159, 7, 0.22);
+}
+
+.decks #deckContainer li .id {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 41px;
+  width: 100%;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  text-align: center;
+  font-size: 7.5pt;
+  font-weight: bold;
+  line-height: 10pt;
+  color: #fed82a;
+  pointer-events: none;
+}
+
+.decks #deckContainer li.emptySlot .id {
+  color: #d0d194;
 }
 
 #deckContainer li.dragging,

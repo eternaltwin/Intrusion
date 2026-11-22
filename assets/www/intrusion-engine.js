@@ -1013,29 +1013,25 @@ Dock.prototype = {
 	}
 	,loadIcons: function() {
 		this.urlList = new haxe_ds_List();
-		var me = this;
 		var _g = 0;
-		var _g1 = this.decks;
+		var _g1 = this.getCurrentDeck();
 		while(_g < _g1.length) {
-			var deck = _g1[_g];
+			var ds = _g1[_g];
 			++_g;
-			var _g2 = 0;
-			var _g3 = deck.content;
-			while(_g2 < _g3.length) {
-				var ds = [_g3[_g2]];
-				++_g2;
-				if(ds[0].virus == null) {
-					continue;
-				}
-				var url = Manager.PARAMS._iconsUrl + ds[0].virus.id + ".png?v=" + Manager.PARAMS._iconsVer;
-				var promise = PIXI.Texture.fromURL(url);
-				var promise1 = (function(ds) {
-					return function(texture) {
-						return ds[0].mc.get_smc().attachBitmap(texture,1);
-					};
-				})(ds);
-				var promise2 = promise.then(promise1);
+			if(ds.virus == null || ds.mc == null) {
+				continue;
 			}
+			var targetMc = [ds.mc];
+			var url = Manager.PARAMS._iconsUrl + ds.virus.id + ".png?v=" + Manager.PARAMS._iconsVer;
+			var promise = PIXI.Texture.fromURL(url);
+			var promise1 = (function(targetMc) {
+				return function(texture) {
+					if(targetMc[0] != null && targetMc[0]._name != null && targetMc[0].get_smc() != null) {
+						return targetMc[0].get_smc().attachBitmap(texture,1);
+					}
+				};
+			})(targetMc);
+			var promise2 = promise.then(promise1);
 		}
 	}
 	,onLoadComplete: function(ds) {
@@ -4820,7 +4816,7 @@ GNetwork.prototype = {
 		if(dist == null) {
 			dist = 0;
 		}
-		var node = { mc : null, id : this.uniq, ip : this.baseIp + this.uniq, x : x, y : y, type : this.uniq == 0 ? NodeType.Entrance : NodeType.Terminal, links : new haxe_ds_List(), users : [], dist : -1, path : null, system : null, sibling : null, fl_target : false, fl_visible : false, fl_generated : false};
+		var node = { mc : null, arrowMc : null, checkMc : null, id : this.uniq, ip : this.baseIp + this.uniq, x : x, y : y, type : this.uniq == 0 ? NodeType.Entrance : NodeType.Terminal, links : new haxe_ds_List(), users : [], dist : -1, path : null, system : null, sibling : null, fl_target : false, fl_visible : false, fl_generated : false};
 		this.uniq++;
 		if(node.type == NodeType.Terminal) {
 			var tmp;
@@ -6234,6 +6230,44 @@ GNetwork.prototype = {
 		}
 		var _this = this.groundField;
 		_this.visible = fl;
+		this.updateTargetIndicators();
+	}
+	,createCheckIndicator: function(x,y) {
+		var cmc = this.sdm.empty(Data.DP_ITEM);
+		cmc.x = x;
+		cmc.y = y;
+		var gfx = new PIXI.Graphics();
+		gfx.lineStyle(2.2,665856,0.95);
+		gfx.beginFill(10875441,1.0);
+		gfx.drawPolygon([-9.2,-9.7,-6.4,-12.5,-2.5,-8.7,6.3,-17.5,9.2,-14.7,-2.5,-3.0]);
+		gfx.endFill();
+		gfx.lineStyle(1.0,15400857,0.75);
+		gfx.moveTo(-8.1,-9.7);
+		gfx.lineTo(-6.4,-11.4);
+		gfx.lineTo(-2.5,-7.5);
+		gfx.lineTo(6.3,-16.3);
+		cmc.addChild(gfx);
+		if(!this.term.fl_lowq) {
+			cmc.filters = common_GlowFilter.create(10875441,0.55,4,4,1.4);
+		}
+		return cmc;
+	}
+	,updateTargetIndicators: function() {
+		if(this.nodes == null) {
+			return;
+		}
+		var done = this.term.isObjectiveCompleted();
+		var _g_head = this.nodes.h;
+		while(_g_head != null) {
+			var node = _g_head.item;
+			_g_head = _g_head.next;
+			if(node.arrowMc != null) {
+				node.arrowMc.visible = !this.fl_lock && !done;
+			}
+			if(node.checkMc != null) {
+				node.checkMc.visible = !this.fl_lock && done;
+			}
+		}
 	}
 	,isUp: function(node) {
 		var s = node.system;
@@ -6484,6 +6518,9 @@ GNetwork.prototype = {
 					_this18.x = node.mc.x;
 					var _this19 = amc;
 					_this19.y = node.mc.y - 45;
+					node.arrowMc = amc;
+					node.checkMc = this.createCheckIndicator(node.mc.x,node.mc.y - 45);
+					node.checkMc.visible = false;
 				}
 				if(node != null && node.type != NodeType.Empty) {
 					if(node.type == NodeType.Entrance) {
@@ -6623,6 +6660,7 @@ GNetwork.prototype = {
 				_this2.visible = false;
 			}
 		}
+		this.updateTargetIndicators();
 		this.detachPath();
 		if(this.curNode != null) {
 			this.drawPath(this.curNode);
@@ -9795,6 +9833,7 @@ var Tutorial = function() { };
 $hxClasses["Tutorial"] = Tutorial;
 Tutorial.__name__ = "Tutorial";
 Tutorial.init = function(ut) {
+	Tutorial.end();
 	Tutorial.term = ut;
 	Tutorial.indicators = new haxe_ds_List();
 };
@@ -9855,19 +9894,23 @@ Tutorial.end = function() {
 	if(tmp != null) {
 		tmp.removeMovieClip();
 	}
+	Tutorial.cmc = null;
 	Tutorial.current = null;
 	Tutorial.currentStep = null;
-	var _g_head = Tutorial.indicators.h;
-	while(_g_head != null) {
-		var val = _g_head.item;
-		_g_head = _g_head.next;
-		var mc = val;
-		if(mc != null) {
-			mc.removeMovieClip();
+	if(Tutorial.indicators != null) {
+		var _g_head = Tutorial.indicators.h;
+		while(_g_head != null) {
+			var val = _g_head.item;
+			_g_head = _g_head.next;
+			var mc = val;
+			if(mc != null) {
+				mc.removeMovieClip();
+			}
 		}
 	}
 	Tutorial.indicators = new haxe_ds_List();
 	Tutorial.print();
+	Tutorial.pop = null;
 };
 Tutorial.play = function(t,s) {
 	if(s == null) {
@@ -11196,7 +11239,13 @@ UserTerminal.prototype = {
 				this.log(_$Lang_AllTexts.getText(Lang.get,"Log_MissionComplete"),7584759);
 			}
 		}
+		if(this.net != null && this.fs == null) {
+			this.net.updateTargetIndicators();
+		}
 		return this.fl_success;
+	}
+	,isObjectiveCompleted: function() {
+		return !this.fl_busted && this.checkMissionStatus();
 	}
 	,checkMissionStatus: function() {
 		if(this.fl_busted) {
@@ -11683,7 +11732,7 @@ UserTerminal.prototype = {
 		}
 		Manager.loading(_$Lang_AllTexts.getText(Lang.get,"LP_Logout"));
 		this.stopAllSounds(false);
-		Tutorial.print();
+		Tutorial.end();
 		this.dock.hide();
 		this.endGame(fl_abandon);
 	}
@@ -13336,6 +13385,7 @@ UserTerminal.prototype = {
 	}
 	,dispose: function() {
 		this.fl_end = true;
+		Tutorial.end();
 		window.removeEventListener("keydown",$bind(this,this.onKey));
 		window.removeEventListener("paste",$bind(this,this.onPaste));
 		if(Manager.app != null && Manager.app.view != null) {
@@ -14318,18 +14368,23 @@ VirusMan.prototype = {
 			return;
 		}
 		if(t % 5 == 0) {
+			var hit = false;
 			var _g = 0;
 			var _g1 = this.term.fs.rawTree;
 			while(_g < _g1.length) {
 				var f = _g1[_g];
 				++_g;
 				if(f.hasEffect(EffectType.E_Dot)) {
+					hit = true;
 					f.damage(f.countEffect(EffectType.E_Dot));
 					f.removeEffect(EffectType.E_DotLength);
 					if(!f.hasEffect(EffectType.E_DotLength)) {
 						f.clearEffect(EffectType.E_Dot);
 					}
 				}
+			}
+			if(hit) {
+				this.term.checkMission();
 			}
 		}
 	}
