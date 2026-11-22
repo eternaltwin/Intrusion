@@ -1643,11 +1643,8 @@ class GFileSystem {
 		bg.gotoAndStop(f);
 		wallL?.smc.gotoAndStop(f);
 		wallR?.smc.gotoAndStop(f);
-		if ( fl_auth ) {
-			Col.setPercentColor(wallL, 0, 0);
-			Col.setPercentColor(wallR, 45, 0x0);
+		if ( fl_auth )
 			setWallpaper("sicon","corrupt");
-		}
 	}
 
 	function detachFolder() {

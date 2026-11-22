@@ -1024,6 +1024,11 @@ class FSNode {
 			emc.gotoAndStop(frame);
 			emc._x = 18*emcList.length;
 			emc._y = 50;
+			untyped emc.field.style.fill = "#ffffff";
+			untyped emc.field.style.stroke = "#000000";
+			untyped emc.field.style.strokeThickness = 3;
+			untyped emc.field.style.lineJoin = "round";
+			untyped emc.field.style.padding = 2;
 			emc.field.text = ""+e.cpt;
 			emc.field._visible = (e.cpt>1);
 //			emc.field._width = emc.field._width+5;

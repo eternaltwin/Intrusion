@@ -1027,6 +1027,9 @@ Dock.prototype = {
 				ds.mc.get_smc().set__alpha(0);
 			}
 		}
+		if(!this.fl_lock) {
+			this.displayEffects();
+		}
 	}
 	,loadIcons: function() {
 		this.urlList = new haxe_ds_List();
@@ -1327,27 +1330,64 @@ Dock.prototype = {
 	}
 	,displayEffects: function() {
 		this.detachEffects();
+		var deckSlots = this.getCurrentDeck();
 		var _g_head = this.term.ueffects.h;
 		while(_g_head != null) {
 			var val = _g_head.item;
 			_g_head = _g_head.next;
 			var e = val;
+			if(e.source == null || e.type == UserEffectType.UE_SwitchDeck) {
+				continue;
+			}
+			var targetSlot = null;
 			var _g = 0;
-			var _g1 = this.getCurrentDeck();
-			while(_g < _g1.length) {
-				var ds = _g1[_g];
-				++_g;
-				if(e.source != null && ds.virus == e.source) {
-					var emc = ds.mc.attachMovie("userEffect","effect_" + Data.UNIQ,Data.UNIQ++);
-					var _this = emc;
-					_this.x = Math.round(ds.mc.width * 0.4);
-					var _this1 = emc;
-					_this1.y = Math.round(ds.mc.height * 0.8);
-					emc.gotoAndStop(1);
-					var tmp = e.cpt == null ? "null" : "" + e.cpt;
-					MCField.get_field(emc).text = tmp;
-					this.emcList.add(emc);
+			while(_g < deckSlots.length) {
+				var ds = deckSlots[_g++];
+				if(ds.mc != null && ds.virus == e.source) {
+					targetSlot = ds;
+					break;
 				}
+			}
+			if(targetSlot == null) {
+				var _g2 = 0;
+				while(_g2 < deckSlots.length) {
+					var ds2 = deckSlots[_g2++];
+					if(ds2.mc != null && ds2.virus.id == e.source.id) {
+						targetSlot = ds2;
+						break;
+					}
+				}
+			}
+			if(targetSlot == null && e.type == UserEffectType.UE_Shield) {
+				var _g3 = 0;
+				while(_g3 < deckSlots.length) {
+					var ds3 = deckSlots[_g3++];
+					var vid = ds3.virus != null ? ds3.virus.id : "";
+					if(ds3.mc != null && (vid == "shld1" || vid == "shld2" || vid == "cshld" || vid == "cshld2" || vid == "cshld3")) {
+						targetSlot = ds3;
+						break;
+					}
+				}
+			}
+			if(targetSlot != null && targetSlot.mc != null) {
+				var emc = targetSlot.mc.attachMovie("userEffect","effect_" + Data.UNIQ,Data.UNIQ++);
+				emc.x = Math.round(targetSlot.mc.width * 0.4);
+				emc.y = Math.round(targetSlot.mc.height * 0.8);
+				emc.gotoAndStop(1);
+				var ef = MCField.get_field(emc);
+				if(ef != null) {
+					ef.style.fill = "#ffffff";
+					ef.style.stroke = "#000000";
+					ef.style.strokeThickness = 3;
+					ef.style.lineJoin = "round";
+					ef.style.padding = 3;
+					ef.style.lineHeight = ef.style.fontSize + 2;
+					ef.text = e.cpt == null ? "" : "" + e.cpt;
+					ef.anchor.set(0.5,0.5);
+					ef.x = 0.01;
+					ef.y = 0.5;
+				}
+				this.emcList.add(emc);
 			}
 		}
 	}
@@ -2366,9 +2406,14 @@ FSNode.prototype = {
 			_this.x = 18 * this.emcList.length;
 			var _this1 = emc[0];
 			_this1.y = 50;
-			MCField.get_field(emc[0]).text = "" + e.cpt;
-			var _this2 = MCField.get_field(emc[0]);
-			_this2.visible = e.cpt > 1;
+			var ef2 = MCField.get_field(emc[0]);
+			ef2.style.fill = "#ffffff";
+			ef2.style.stroke = "#000000";
+			ef2.style.strokeThickness = 3;
+			ef2.style.lineJoin = "round";
+			ef2.style.padding = 2;
+			ef2.text = "" + e.cpt;
+			ef2.visible = e.cpt > 1;
 			var over = (function(emc) {
 				return function() {
 					emc[0].filters = common_GlowFilter.create(16777215,1,3,3,600);
@@ -4248,8 +4293,6 @@ GFileSystem.prototype = {
 			tmp.get_smc().gotoAndStop(f);
 		}
 		if(this.fl_auth) {
-			mt_bumdum_Col.setPercentColor(this.wallL,0,0);
-			mt_bumdum_Col.setPercentColor(this.wallR,45,0);
 			this.setWallpaper("sicon","corrupt");
 		}
 	}
@@ -16941,8 +16984,16 @@ $hxClasses["common.ColorMatrixFilter"] = common_ColorMatrixFilter;
 common_ColorMatrixFilter.__name__ = "common.ColorMatrixFilter";
 common_ColorMatrixFilter.create = function(matrix) {
 	var filter = new PIXI.filters.ColorMatrixFilter();
-	if(matrix != null) {
-		filter.matrix = matrix;
+	if(Manager.app != null && Manager.app.renderer != null) {
+		filter.resolution = Manager.app.renderer.resolution;
+	}
+	if(matrix != null && matrix.length == 20) {
+		var norm = matrix.slice(0);
+		norm[4] /= 255.0;
+		norm[9] /= 255.0;
+		norm[14] /= 255.0;
+		norm[19] /= 255.0;
+		filter.matrix = norm;
 	}
 	return filter;
 };
@@ -21445,34 +21496,61 @@ mt_bumdum_Col.colToObj32 = function(col) {
 mt_bumdum_Col.objToCol32 = function(o) {
 	return o.a << 24 | o.r << 16 | o.g << 8 | o.b;
 };
-mt_bumdum_Col.setPercentColor = function(mc,prc,col,inc,alpha) {
-	if(alpha == null) {
-		alpha = 100;
+mt_bumdum_Col.applyColorTransform = function(mc,mulR,mulG,mulB,mulA,offR,offG,offB,offA) {
+	if(mc == null) {
+		return;
 	}
-	if(prc <= 0) {
-		mc.set_tint(16777215);
+	mc.set_tint(16777215);
+	var isIdentity = mulR == 1.0 && mulG == 1.0 && mulB == 1.0 && mulA == 1.0 && offR == 0.0 && offG == 0.0 && offB == 0.0 && offA == 0.0;
+	if(isIdentity) {
+		if(mc._colFilter != null) {
+			if(mc.filters != null) {
+				var next = mc.filters.filter(function(f) {
+					return f != mc._colFilter;
+				});
+				mc.filters = next.length > 0 ? next : null;
+			}
+			mc._colFilter = null;
+		}
+		return;
+	}
+	var filter = mc._colFilter;
+	if(filter == null) {
+		filter = new PIXI.filters.ColorMatrixFilter();
+		mc._colFilter = filter;
+	}
+	if(Manager.app != null && Manager.app.renderer != null) {
+		filter.resolution = Manager.app.renderer.resolution;
+	}
+	filter.matrix = [mulR,0.0,0.0,0.0,offR,0.0,mulG,0.0,0.0,offG,0.0,0.0,mulB,0.0,offB,0.0,0.0,0.0,mulA,offA];
+	if(mc.filters == null) {
+		mc.filters = [filter];
+	} else if(mc.filters.indexOf(filter) < 0) {
+		var copy = mc.filters.slice(0);
+		copy.push(filter);
+		mc.filters = copy;
+	}
+};
+mt_bumdum_Col.setPercentColor = function(mc,prc,col,inc,alpha) {
+	var incVal = inc != null ? inc : 0.0;
+	var alphaVal = alpha != null ? alpha : 100.0;
+	if(prc <= 0 && incVal == 0.0 && alphaVal == 100.0) {
+		mt_bumdum_Col.applyColorTransform(mc,1.0,1.0,1.0,1.0,0.0,0.0,0.0,0.0);
 		return;
 	}
 	var c = Math.min(1.0,Math.max(0.0,prc / 100.0));
-	var blended = mt_bumdum_Col.mergeCol(col,16777215,c);
-	if(inc != null && inc != 0) {
-		var o = mt_bumdum_Col.colToObj(blended);
-		o.r = mt_bumdum_Num.mm(0,o.r + inc,255) | 0;
-		o.g = mt_bumdum_Num.mm(0,o.g + inc,255) | 0;
-		o.b = mt_bumdum_Num.mm(0,o.b + inc,255) | 0;
-		blended = mt_bumdum_Col.objToCol(o);
-	}
-	mt_bumdum_Col.setColor(mc,blended);
+	var mul = 1.0 - c;
+	var aMul = alphaVal / 100.0;
+	var o = mt_bumdum_Col.colToObj(col != null ? col : 0);
+	mt_bumdum_Col.applyColorTransform(mc,mul,mul,mul,aMul,(c * o.r + incVal) / 255.0,(c * o.g + incVal) / 255.0,(c * o.b + incVal) / 255.0,0.0);
 };
 mt_bumdum_Col.setColor = function(mc,col,dec) {
-	if(dec != null && dec != 0) {
-		var o = mt_bumdum_Col.colToObj(col);
-		o.r = mt_bumdum_Num.mm(0,o.r + dec,255) | 0;
-		o.g = mt_bumdum_Num.mm(0,o.g + dec,255) | 0;
-		o.b = mt_bumdum_Num.mm(0,o.b + dec,255) | 0;
-		col = mt_bumdum_Col.objToCol(o);
+	var o = mt_bumdum_Col.colToObj(col != null ? col : 0);
+	if(dec == null) {
+		mt_bumdum_Col.applyColorTransform(mc,0.0,0.0,0.0,1.0,o.r / 255.0,o.g / 255.0,o.b / 255.0,0.0);
+	} else {
+		mt_bumdum_Col.applyColorTransform(mc,1.0,1.0,1.0,1.0,(o.r + dec) / 255.0,(o.g + dec) / 255.0,(o.b + dec) / 255.0,0.0);
 	}
-	mc.set_tint(col);
 };
 mt_bumdum_Col.mergeCol = function(col,col2,c) {
 	if(c == null) {

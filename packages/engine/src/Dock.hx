@@ -175,6 +175,8 @@ class Dock {
 		for (ds in list)
 			if ( ds.virus.uses==0 )
 				ds.mc.smc._alpha = 0;
+		if ( !fl_lock )
+			displayEffects();
 	}
 
 
@@ -453,17 +455,48 @@ class Dock {
 
 	public function displayEffects() {
 		detachEffects();
-		for (e in term.ueffects)
-			for (ds in getCurrentDeck())
-				if ( e.source!=null && ds.virus==e.source ) {
-					var emc : MCField = cast ds.mc.attachMovie("userEffect", "effect_"+Data.UNIQ, Data.UNIQ++);
-					emc._x = Math.round(ds.mc._width*0.4);
-					emc._y = Math.round(ds.mc._height*0.8);
-					emc.gotoAndStop(1);
-					emc.field.text = Std.string(e.cpt);
-//					emc.field._visible = (e.cpt>1);
-					emcList.add(emc);
+		var deckSlots = getCurrentDeck();
+		for (e in term.ueffects) {
+			if ( e.source==null || e.type==UE_SwitchDeck )
+				continue;
+			var targetSlot : DockSlot = null;
+			for (ds in deckSlots)
+				if ( ds.mc!=null && ds.virus==e.source ) {
+					targetSlot = ds;
+					break;
 				}
+			if ( targetSlot==null )
+				for (ds in deckSlots)
+					if ( ds.mc!=null && ds.virus.id==e.source.id ) {
+						targetSlot = ds;
+						break;
+					}
+			if ( targetSlot==null && e.type==UE_Shield )
+				for (ds in deckSlots)
+					if ( ds.mc!=null && (ds.virus.id=="shld1" || ds.virus.id=="shld2" || ds.virus.id=="cshld" || ds.virus.id=="cshld2" || ds.virus.id=="cshld3") ) {
+						targetSlot = ds;
+						break;
+					}
+			if ( targetSlot!=null && targetSlot.mc!=null ) {
+				var emc : MCField = cast targetSlot.mc.attachMovie("userEffect", "effect_"+Data.UNIQ, Data.UNIQ++);
+				emc._x = Math.round(targetSlot.mc._width*0.4);
+				emc._y = Math.round(targetSlot.mc._height*0.8);
+				emc.gotoAndStop(1);
+				if ( emc.field != null ) {
+					untyped emc.field.style.fill = "#ffffff";
+					untyped emc.field.style.stroke = "#000000";
+					untyped emc.field.style.strokeThickness = 3;
+					untyped emc.field.style.lineJoin = "round";
+					untyped emc.field.style.padding = 3;
+					untyped emc.field.style.lineHeight = emc.field.style.fontSize + 2;
+					emc.field.text = Std.string(e.cpt);
+					untyped emc.field.anchor.set(0.5, 0.5);
+					emc.field.x = 0.01;
+					emc.field.y = 0.5;
+				}
+				emcList.add(emc);
+			}
+		}
 	}
 
 	public function onStorageChange() {

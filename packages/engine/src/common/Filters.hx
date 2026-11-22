@@ -59,7 +59,17 @@ class BlurFilter  {
 class ColorMatrixFilter  {
     static public function create(matrix: Array<Float>): PixiColorMatrixFilter {
         var filter = new PixiColorMatrixFilter();
-        if (matrix != null) filter.matrix = matrix;
+        if (Manager.app != null && Manager.app.renderer != null) {
+            (untyped filter).resolution = Manager.app.renderer.resolution;
+        }
+        if (matrix != null && matrix.length == 20) {
+            var norm = matrix.slice(0);
+            norm[4] /= 255.0;
+            norm[9] /= 255.0;
+            norm[14] /= 255.0;
+            norm[19] /= 255.0;
+            filter.matrix = norm;
+        }
         return filter;
     }
 }
