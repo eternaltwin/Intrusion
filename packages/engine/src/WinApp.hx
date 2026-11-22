@@ -66,6 +66,7 @@ class WinApp {
 	}
 
 	public function start() {
+		term.detachBubble();
 		term.playSound("bleep_07");
 		bg = Manager.DM.attach("mask", Data.DP_APP);
 		bg._alpha = 70;
@@ -105,9 +106,17 @@ class WinApp {
 		scrollDown.onRollOut = onOut.bind(scrollDown);
 
 		scroller = dm.empty(Data.DP_ITEM);
-		scroller.fieldWrite("mask", cast win.resolve("mask"));
-		scroller._x = win.resolve("mask")._x;
-		scroller._y = win.resolve("mask")._y;
+		var winMask = win.resolve("mask");
+		untyped winMask.renderable = false;
+		winMask.alpha = 0;
+		var maskGfx: Dynamic = js.Syntax.code("new PIXI.Graphics()");
+		maskGfx.beginFill(0xffffff);
+		maskGfx.drawRect(winMask._x, winMask._y, wid, hei);
+		maskGfx.endFill();
+		untyped win.addChild(maskGfx);
+		untyped scroller.mask = maskGfx;
+		scroller._x = winMask._x;
+		scroller._y = winMask._y;
 		sdm = new mt.DepthManager( scroller );
 
 		term.registerApp(this);
@@ -156,7 +165,6 @@ class WinApp {
 			fdm = dm;
 		var mc : MCField = cast fdm.attach("logLine",Data.DP_TOP);
 		mc.field.text = s;
-		mc.field._width = mc.field.width + 10;
 		mc._x = x;
 		mc._y = y;
 		if ( fl_anim )
@@ -172,9 +180,13 @@ class WinApp {
 		mc._x = x;
 		mc._y = y;
 		mc.field.text = label;
-		mc.field._width = mc.field.width + 10;
 		if ( fl_resize )
-			mc.smc._width = mc.field.width+10;
+			mc.smc._width = Math.max(22, Math.ceil(mc.field.width) + 14);
+		else if ( mc.field.width + 10 > mc.smc._width )
+			mc.smc._width = Math.ceil(mc.field.width) + 12;
+		mc.field.anchor.set(0.5, 0.5);
+		mc.field._x = mc.smc._x + Math.round(mc.smc._width * 0.5);
+		mc.field._y = mc.smc._y + Math.round(mc.smc._height * 0.5);
 		var me = this;
 		mc.onRelease = function() {
 			me.term.playSound("single_01");

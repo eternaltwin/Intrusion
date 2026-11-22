@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { ChipsetDef, PlayerDto } from '@intrusion/shared';
+import { getMissionRefreshCost, type ChipsetDef, type PlayerDto } from '@intrusion/shared';
 import { api, type MissionOfferDto, type MissionsListResponse } from '../api/client';
 import { useVirusTooltip } from './TooltipContext';
 import { SafeHtml } from '../components/SafeHtml';
 import { ModalDialog } from '../components/ModalDialog';
-
-const MISSION_REFRESH_COST = 2000;
 
 type MissionTab = 'ongoing' | 'available' | 'tutorial' | 'completed';
 
@@ -33,6 +31,7 @@ export function MissionsView({
   const [confirmRefreshOpen, setConfirmRefreshOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const { showVirus, hideVirus } = useVirusTooltip();
+  const refreshCost = getMissionRefreshCost(player.level);
 
   const loadMissions = async () => {
     setLoading(true);
@@ -268,7 +267,7 @@ export function MissionsView({
               <div className="clear" />
               <div style={{ marginTop: 10 }}>
                 <a className="optionLink" onClick={() => setConfirmRefreshOpen(true)}>
-                  [Renouveler les offres disponibles ({MISSION_REFRESH_COST}{' '}
+                  [Renouveler les offres disponibles ({refreshCost}{' '}
                   <img
                     src="/img/icons/money.png"
                     alt=""
@@ -313,7 +312,7 @@ export function MissionsView({
           <p className="classicPopupLead">
             Renouveler les offres disponibles coûte{' '}
             <strong>
-              {MISSION_REFRESH_COST}{' '}
+              {refreshCost}{' '}
               <img
                 src="/img/icons/money.png"
                 alt=""
@@ -325,9 +324,9 @@ export function MissionsView({
           <div className="classicPopupWarn">
             Attention : vos missions en cours et terminées seront également réinitialisées.
           </div>
-          {player.money < MISSION_REFRESH_COST && (
+          {player.money < refreshCost && (
             <div className="classicPopupError">
-              Crédits insuffisants ({player.money} / {MISSION_REFRESH_COST}{' '}
+              Crédits insuffisants ({player.money} / {refreshCost}{' '}
               <img
                 src="/img/icons/money.png"
                 alt=""
@@ -347,7 +346,7 @@ export function MissionsView({
             </button>
             <button
               type="button"
-              disabled={refreshing || player.money < MISSION_REFRESH_COST}
+              disabled={refreshing || player.money < refreshCost}
               onClick={handleRefreshOffers}
               className="classicPopupBtn"
             >
@@ -355,7 +354,7 @@ export function MissionsView({
                 'Renouvellement...'
               ) : (
                 <>
-                  Confirmer ({MISSION_REFRESH_COST}{' '}
+                  Confirmer ({refreshCost}{' '}
                   <img
                     src="/img/icons/money.png"
                     alt=""

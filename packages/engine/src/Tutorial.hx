@@ -279,8 +279,7 @@ class Tutorial {
 			pop._y = y;
 			pop.title.text = Lang.get.TutorialTitle;
 			pop.field.text = str;
-			pop.field._height = pop.field.height+10;
-			pop.bg._height = Math.max( 81, pop.field._y + pop.field.height + 10 );
+			pop.bg._height = Math.max( 81, pop.field._y + pop.field.textHeight + 12 );
 			if ( fl_blockClick )
 				pop.bg.onRelease = function() {};
 			term.startAnim(A_FadeIn, pop).spd*=2;

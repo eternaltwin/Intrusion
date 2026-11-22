@@ -1885,13 +1885,11 @@ class GNetwork {
 					str = TD.texts.get("corpoSpam");
 				} while(str.length>70);
 				mc.field.text = str;
-				mc.field._width = mc.field.textWidth+5;
 				mc.field.filters = GlowFilter.create(0xffffff,0.7, 10,10, 1);
 				if ( fl_spamDir )
 					mc.field._y = mc.field._height-45;
 				var mcc: MCFieldShadow = cast mc;
 				mcc.shadow.text = mc.field.text;
-				mcc.shadow._width = mcc.shadow.textWidth+5;
 				mcc.shadow._y = mc.field._y+22;
 				mcc.shadow.alpha = 0.4;
 				var delta = Std.random(30)+10;

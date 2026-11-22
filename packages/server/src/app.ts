@@ -12,6 +12,7 @@ import {
   generateMission,
   getAdjustedPrime,
   getMissionDifficultyLabel,
+  getMissionRefreshCost,
   MissionEndPayloadSchema,
   Rand,
   RedeemCardByNumberSchema,
@@ -213,9 +214,17 @@ export function createApp(opts: CreateAppOptions) {
     const now = Date.now();
     const startOfTodayMs = getStartOfTodayMs(now);
     // Clean expired daily missions (available, active, completed created before today's midnight)
-    db.prepare(
-      "DELETE FROM missions WHERE user_id = ? AND status IN ('available', 'active', 'completed') AND created_at < ?"
-    ).run(userId, startOfTodayMs);
+    db.prepare('DELETE FROM missions WHERE user_id = ? AND created_at < ?').run(
+      userId,
+      startOfTodayMs
+    );
+
+    // Purge any stale rows from an older batch if a newer batch exists (e.g. after level-up or partial refresh)
+    if (player.level >= 4) {
+      db.prepare(
+        'DELETE FROM missions WHERE user_id = ? AND created_at < (SELECT MAX(created_at) FROM missions WHERE user_id = ?)'
+      ).run(userId, userId);
+    }
 
     let rows = db
       .prepare("SELECT * FROM missions WHERE user_id = ? AND status = 'available' ORDER BY created_at ASC")
@@ -228,9 +237,20 @@ export function createApp(opts: CreateAppOptions) {
       created_at: number;
     }>;
 
-    if (rows.length === 0) {
+    const totalBatchRow = db
+      .prepare('SELECT COUNT(*) as cnt FROM missions WHERE user_id = ?')
+      .get(userId) as { cnt: number };
+
+    const batchSize = player.level < 4 ? 1 : 9;
+    const shouldGenerate =
+      rows.length === 0 && (player.level < 4 || totalBatchRow.cnt < batchSize);
+
+    if (shouldGenerate) {
+      if (player.level >= 4) {
+        db.prepare('DELETE FROM missions WHERE user_id = ?').run(userId);
+      }
       const bundle = getCatalog(opts.assetsDir, lang);
-      const count = player.level < 4 ? 1 : 9;
+      const count = batchSize;
       const insertStmt = db.prepare(
         "INSERT INTO missions (mission_key, user_id, seed, level, prime, status, tries, created_at) VALUES (?, ?, ?, ?, ?, 'available', 0, ?)"
       );
@@ -340,17 +360,16 @@ export function createApp(opts: CreateAppOptions) {
     });
   });
 
-  const MISSION_REFRESH_COST = 2000;
-
   app.post('/api/missions/refresh', (c) => {
     const userId = c.get('userId');
     const player = c.get('player');
-    if (player.money < MISSION_REFRESH_COST) {
+    const refreshCost = getMissionRefreshCost(player.level);
+    if (player.money < refreshCost) {
       return c.json({ error: 'Crédits insuffisants.' }, 400);
     }
-    db.prepare('UPDATE users SET money = money - ? WHERE id = ?').run(MISSION_REFRESH_COST, userId);
-    db.prepare("DELETE FROM missions WHERE user_id = ? AND status IN ('available', 'active', 'completed')").run(userId);
-    const updatedPlayer = buildPlayerDto(db, userId) ?? { ...player, money: player.money - MISSION_REFRESH_COST };
+    db.prepare('UPDATE users SET money = money - ? WHERE id = ?').run(refreshCost, userId);
+    db.prepare('DELETE FROM missions WHERE user_id = ?').run(userId);
+    const updatedPlayer = buildPlayerDto(db, userId) ?? { ...player, money: player.money - refreshCost };
     const availableRows = ensureAvailableMissions(userId, updatedPlayer, updatedPlayer.settings.lang);
     const bundle = getCatalog(opts.assetsDir, updatedPlayer.settings.lang);
     return c.json({

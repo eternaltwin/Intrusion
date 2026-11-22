@@ -29,11 +29,11 @@ class WinAppOptions extends WinApp {
 		addButton(sdm, 70,30, ">", sensitivy.bind(1));
 
 		// raccourcis
-		capField = addField(sdm, 10,200, Lang.get.OptCapture, false );
-		capField.field.multiline = true;
+		capField = addField(sdm, 10,210, "", false );
+		capField.field.anchor.set(0, 0);
 		capField.field.wordWrap = true;
-		capField.field._width = wid-20;
-		capField.field._height = 70;
+		capField.field.style.wordWrapWidth = wid-20;
+		capField.field.text = Lang.get.OptCapture;
 
 		addField(sdm, 10,70, Lang.get.OptShortcuts);
 		var i = 0;
@@ -42,7 +42,8 @@ class WinAppOptions extends WinApp {
 		for (s in ls.shortcuts) {
 			addField(sdm, 30+x*75,90+y*55, "Virus "+(i+1), false);
 			var mc = addButton(sdm, 30 + x*75, 110+y*55, "NUMPAD 5", onShortcut.bind(i) );
-			mc.smc._width = mc.field._width+5;
+			mc.smc._width = 64;
+			mc.field._x = mc.smc._x + 32;
 			shortcutButtons.push(mc);
 			x++;
 			if ( x>=5 ) {

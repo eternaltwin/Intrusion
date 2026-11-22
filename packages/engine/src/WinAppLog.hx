@@ -58,10 +58,12 @@ class WinAppLog extends WinApp {
 		var y = 0;
 		for (l in history) {
 			var mc : MCField = cast sdm.attach("logLine",Data.DP_TOP);
+			mc.field.wordWrap = true;
+			mc.field.style.wordWrapWidth = Math.max(120, wid - 115);
 			mc.field.text = l.str;
 			mc.field.textColor = l.col;
 			mc.field._y = y;
-			y += Math.round(mc.field.textHeight);
+			y += Math.round(mc.field.textHeight) + 2;
 		}
 
 	}

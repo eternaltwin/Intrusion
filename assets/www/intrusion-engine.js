@@ -548,6 +548,12 @@ Boot.mountEngine = function(viewElem) {
 		dpr = window.devicePixelRatio;
 	}
 	if (window.PIXI && PIXI.settings) { PIXI.settings.ROUND_PIXELS = true; }
+	if (window.PIXI && PIXI.TextMetrics) {
+		PIXI.TextMetrics.HEIGHT_MULTIPLIER = 4.5;
+		PIXI.TextMetrics.BASELINE_MULTIPLIER = 3.0;
+		PIXI.TextMetrics.METRICS_STRING = "|ÉÈÀÂÊÎÔÛÇMÉqgyp";
+		PIXI.TextMetrics._fonts = {};
+	}
 	var view = viewElem != null ? viewElem : window.document.getElementById("main");
 	Manager.app = new PIXI.Application({ width : 600, height : 400, view : view, resolution : dpr, autoDensity : true, antialias : true});
 	globalThis.__PIXI_APP__ = Manager.app;
@@ -6738,8 +6744,6 @@ GNetwork.prototype = {
 				var str = "";
 				do str = TD.texts.get("corpoSpam"); while(str.length > 70);
 				MCField.get_field(mc).text = str;
-				var _this = MCField.get_field(mc);
-				_this.width = MCField.get_field(mc).width + 5;
 				MCField.get_field(mc).filters = common_GlowFilter.create(16777215,0.7,10,10,1);
 				if(this.fl_spamDir) {
 					var _this = MCField.get_field(mc);
@@ -6747,8 +6751,6 @@ GNetwork.prototype = {
 				}
 				var mcc = mc;
 				MCFieldShadow.get_shadow(mcc).text = MCField.get_field(mc).text;
-				var _this = MCFieldShadow.get_shadow(mcc);
-				_this.width = MCFieldShadow.get_shadow(mcc).width + 5;
 				var _this = MCFieldShadow.get_shadow(mcc);
 				_this.y = MCField.get_field(mc).y + 22;
 				MCFieldShadow.get_shadow(mcc).alpha = 0.4;
@@ -10091,10 +10093,8 @@ Tutorial.print = function(str,y,fl_blockClick) {
 		_this.y = y;
 		T_$TutoPop.get_title(Tutorial.pop).text = _$Lang_AllTexts.getText(Lang.get,"TutorialTitle");
 		T_$TutoPop.get_field(Tutorial.pop).text = str;
-		var _this = T_$TutoPop.get_field(Tutorial.pop);
-		_this.height = T_$TutoPop.get_field(Tutorial.pop).height + 10;
 		var _this = T_$TutoPop.get_bg(Tutorial.pop);
-		_this.height = Math.max(81,T_$TutoPop.get_field(Tutorial.pop).y + T_$TutoPop.get_field(Tutorial.pop).height + 10);
+		_this.height = Math.max(81,T_$TutoPop.get_field(Tutorial.pop).y + T_$TutoPop.get_field(Tutorial.pop).get_textHeight() + 12);
 		if(fl_blockClick) {
 			T_$TutoPop.get_bg(Tutorial.pop).set_onRelease(function() {
 			});
@@ -10687,6 +10687,7 @@ UserTerminal.prototype = {
 			_this.y = -11;
 			this.moreLog = Manager.DM.attach("more",Data.DP_TOP);
 			this.moreLog.stop();
+			this.moreLog.hitArea = new PIXI.Rectangle(0, 0, 18, 18);
 			var _this = this.moreLog;
 			_this.x = 1;
 			var _this = this.moreLog;
@@ -12386,22 +12387,27 @@ UserTerminal.prototype = {
 			});
 		}
 		this.popMC = Manager.DM.attach("pop",Data.DP_TOP);
-		var padX = 10;
+		var padX = 12;
 		var padY = 8;
-		MCField.get_field(this.popMC).set__x(padX);
-		MCField.get_field(this.popMC).set__y(padY);
-		MCField.get_field(this.popMC).text = str + "_";
-		var cursorW = MCField.get_field(this.popMC).get_textWidth();
-		var cursorH = MCField.get_field(this.popMC).get_textHeight();
-		MCField.get_field(this.popMC).text = str;
+		var popField = MCField.get_field(this.popMC);
+		popField.style.align = "center";
+		popField.anchor.set(0, 0);
+		popField.text = str + "_";
+		var cursorW = popField.get_textWidth();
+		var cursorH = popField.get_textHeight();
+		popField.text = str;
+		var boxW = Math.ceil(Math.max(popField.get_textWidth(),cursorW)) + padX * 2;
+		var boxH = Math.ceil(Math.max(popField.get_textHeight(),cursorH)) + padY * 2;
 		var _this = MCSprite.get_bg(this.popMC);
-		_this.width = Math.ceil(Math.max(MCField.get_field(this.popMC).get_textWidth(),cursorW)) + padX * 2;
+		_this.width = boxW;
 		var _this = MCSprite.get_bg(this.popMC);
-		_this.height = Math.ceil(Math.max(MCField.get_field(this.popMC).get_textHeight(),cursorH)) + padY * 2;
+		_this.height = boxH;
+		popField.set__x(Math.round((boxW - Math.max(popField.get_textWidth(), cursorW)) * 0.5));
+		popField.set__y(Math.round((boxH - Math.max(popField.get_textHeight(), cursorH)) * 0.5));
 		var _this = this.popMC;
-		_this.x = Math.round(300. - MCSprite.get_bg(this.popMC).width * 0.5);
+		_this.x = Math.round(300. - boxW * 0.5);
 		var _this = this.popMC;
-		_this.y = Math.round(200. - MCSprite.get_bg(this.popMC).height * 0.5);
+		_this.y = Math.round(200. - boxH * 0.5);
 		if(this.fl_generated) {
 			this.startAnim(AnimType.A_Text,this.popMC,str);
 		}
@@ -12452,9 +12458,12 @@ UserTerminal.prototype = {
 			return;
 		}
 		this.detachBubble();
+		this.bubbleOwner = mc;
 		this.bmc = Manager.DM.attach("bubble",Data.DP_TOP);
 		this.bmc.interactive = false;
 		this.bmc.interactiveChildren = false;
+		BubbleMC.get_title(this.bmc).anchor.set(0, 0);
+		BubbleMC.get_field(this.bmc).anchor.set(0, 0);
 		if(title != null) {
 			BubbleMC.get_title(this.bmc).text = title;
 		} else {
@@ -12464,34 +12473,37 @@ UserTerminal.prototype = {
 		var maxWid = Math.max(BubbleMC.get_field(this.bmc).width,BubbleMC.get_title(this.bmc).width);
 		var totHei = BubbleMC.get_field(this.bmc).get_textHeight() + BubbleMC.get_title(this.bmc).get_textHeight();
 		var _this = BubbleMC.get_title(this.bmc);
+		_this.x = 5;
 		_this.y = -Math.round(totHei * 0.5);
 		var _this = BubbleMC.get_field(this.bmc);
+		_this.x = 5;
 		_this.y = BubbleMC.get_title(this.bmc).y + BubbleMC.get_title(this.bmc).get_textHeight();
-		BubbleMC.get_bg(this.bmc).on("complete",function() {
-			BubbleMC.get_bg(_gthis.bmc).width = 10 + maxWid;
-			var tmp = 10 + BubbleMC.get_field(_gthis.bmc).height;
-			BubbleMC.get_bg(_gthis.bmc).height = tmp + BubbleMC.get_title(_gthis.bmc).height;
+		var resizeBubbleBg = function() {
+			if (_gthis.bmc == null) return;
+			BubbleMC.get_bg(_gthis.bmc).width = 12 + maxWid;
+			var tmp = 10 + BubbleMC.get_field(_gthis.bmc).get_textHeight();
+			BubbleMC.get_bg(_gthis.bmc).height = tmp + BubbleMC.get_title(_gthis.bmc).get_textHeight();
 			BubbleMC.get_l(_gthis.bmc).height = BubbleMC.get_bg(_gthis.bmc).height + 6;
 			BubbleMC.get_r(_gthis.bmc).height = BubbleMC.get_l(_gthis.bmc).height;
 			var _this = BubbleMC.get_r(_gthis.bmc);
 			_this.x = BubbleMC.get_bg(_gthis.bmc).width + 5;
-		});
-		var _this = BubbleMC.get_field(this.bmc);
-		_this.width = BubbleMC.get_field(this.bmc).width + 5;
-		var _this = BubbleMC.get_field(this.bmc);
-		_this.height = BubbleMC.get_field(this.bmc).get_textHeight() + 5;
-		var _this = BubbleMC.get_title(this.bmc);
-		_this.width = BubbleMC.get_title(this.bmc).width + 5;
-		var _this = BubbleMC.get_title(this.bmc);
-		_this.height = BubbleMC.get_title(this.bmc).get_textHeight() + 5;
+		};
+		resizeBubbleBg();
+		BubbleMC.get_bg(this.bmc).on("complete", resizeBubbleBg);
 		this.updateBubble();
 		if(!this.fl_lowq) {
 			this.startAnim(AnimType.A_BubbleIn,this.bmc,null,d);
 		}
 	}
 	,detachBubble: function() {
+		this.bubbleOwner = null;
 		if(this.bmc == null) {
 			return;
+		}
+		for (var _ai = 0; _ai < this.animList.length; _ai++) {
+			if (this.animList[_ai].mc == this.bmc && this.animList[_ai].type == AnimType.A_BubbleIn) {
+				this.animList[_ai].kill = true;
+			}
 		}
 		if(this.bmc.visible) {
 			if(this.fl_lowq) {
@@ -12938,9 +12950,17 @@ UserTerminal.prototype = {
 			++_g1;
 			var mmc = this.cmenu.attachMovie("menuButton","menu_" + Data.UNIQ,Data.UNIQ++);
 			var mc = mmc;
+			var smc = mc.get_smc();
+			var btnField = MCField.get_field(mc);
+			btnField.text = b.label;
+			if (btnField.width + 12 > smc.width) {
+				smc.width = Math.ceil(btnField.width) + 12;
+			}
+			btnField.anchor.set(0.5, 0.5);
+			btnField.x = smc.x + Math.round(smc.width * 0.5);
+			btnField.y = smc.y + Math.round(smc.height * 0.5);
 			var _this = mc;
-			_this.y = i * (mc.get_smc().height + 2);
-			MCField.get_field(mc).text = b.label;
+			_this.y = i * (smc.height + 2);
 			this.initStandardButton(mc,b.cb);
 			this.startAnim(AnimType.A_MenuIn,mc,null,-i * 0.2).spd *= 2;
 			++i;
@@ -13025,6 +13045,7 @@ UserTerminal.prototype = {
 		this.updateLog();
 	}
 	,hideLog: function() {
+		this.detachBubble();
 		var _g_head = this.logLines.h;
 		while(_g_head != null) {
 			var val = _g_head.item;
@@ -13033,8 +13054,10 @@ UserTerminal.prototype = {
 			var _this = l.mc;
 			_this.visible = false;
 		}
-		var _this = this.moreLog;
-		_this.visible = false;
+		if (this.moreLog != null) {
+			this.moreLog.gotoAndStop(1);
+			this.moreLog.visible = false;
+		}
 	}
 	,showLog: function() {
 		var _g_head = this.logLines.h;
@@ -13052,6 +13075,7 @@ UserTerminal.prototype = {
 		if(this.fl_end) {
 			return;
 		}
+		this.detachBubble();
 		var app = new WinAppLog(this);
 		app.start();
 		app.showLog(this.logHistory);
@@ -13892,6 +13916,10 @@ UserTerminal.prototype = {
 		}
 	}
 	,updateBubble: function() {
+		if (this.bubbleOwner != null && (!this.bubbleOwner.visible || this.bubbleOwner.parent == null || (this.apps != null && this.apps.length > 0))) {
+			this.detachBubble();
+			return;
+		}
 		var xoff = 5;
 		var yoff = -10;
 		var xm = Manager.ROOT.get__xmouse();
@@ -15675,6 +15703,7 @@ WinApp.prototype = {
 		}
 	}
 	,start: function() {
+		this.term.detachBubble();
 		this.term.playSound("bleep_07");
 		this.bg = Manager.DM.attach("mask",Data.DP_APP);
 		this.bg.set__alpha(70);
@@ -15746,11 +15775,19 @@ WinApp.prototype = {
 		};
 		this.scrollDown.set_onRollOut(tmp);
 		this.scroller = this.dm.empty(Data.DP_ITEM);
-		common_MovieClip.fieldWrite(this.scroller,"mask",common_MovieClip.resolve(this.win,"mask"));
+		var winMask = common_MovieClip.resolve(this.win,"mask");
+		winMask.renderable = false;
+		winMask.alpha = 0;
+		var maskGfx = new PIXI.Graphics();
+		maskGfx.beginFill(0xffffff);
+		maskGfx.drawRect(winMask.x, winMask.y, this.wid, this.hei);
+		maskGfx.endFill();
+		this.win.addChild(maskGfx);
+		this.scroller.mask = maskGfx;
 		var _this = this.scroller;
-		_this.x = common_MovieClip.resolve(this.win,"mask").x;
+		_this.x = winMask.x;
 		var _this = this.scroller;
-		_this.y = common_MovieClip.resolve(this.win,"mask").y;
+		_this.y = winMask.y;
 		this.sdm = new mt_DepthManager(this.scroller);
 		this.term.registerApp(this);
 		if(this.term.fs != null) {
@@ -15799,8 +15836,6 @@ WinApp.prototype = {
 		}
 		var mc = fdm.attach("logLine",Data.DP_TOP);
 		MCField.get_field(mc).text = s;
-		var _this = MCField.get_field(mc);
-		_this.width = MCField.get_field(mc).width + 10;
 		var _this = mc;
 		_this.x = x;
 		var _this = mc;
@@ -15822,13 +15857,17 @@ WinApp.prototype = {
 		_this.x = x;
 		var _this = mc;
 		_this.y = y;
-		MCField.get_field(mc).text = label;
-		var _this = MCField.get_field(mc);
-		_this.width = MCField.get_field(mc).width + 10;
+		var smc = mc.get_smc();
+		var btnField = MCField.get_field(mc);
+		btnField.text = label;
 		if(fl_resize) {
-			var _this = mc.get_smc();
-			_this.width = MCField.get_field(mc).width + 10;
+			smc.width = Math.max(22, Math.ceil(btnField.width) + 14);
+		} else if(btnField.width + 10 > smc.width) {
+			smc.width = Math.ceil(btnField.width) + 12;
 		}
+		btnField.anchor.set(0.5, 0.5);
+		btnField.x = smc.x + Math.round(smc.width * 0.5);
+		btnField.y = smc.y + Math.round(smc.height * 0.5);
 		var me = this;
 		mc.set_onRelease(function() {
 			me.term.playSound("single_01");
@@ -15901,6 +15940,7 @@ WinApp.prototype = {
 		_this.y = Math.round(this.scroller.y);
 	}
 	,onClose: function() {
+		this.term.detachBubble();
 		this.term.playSound("bleep_07");
 		this.stop();
 	}
@@ -15973,11 +16013,14 @@ WinAppLog.prototype = $extend(WinApp.prototype,{
 			_g_head = _g_head.next;
 			var l = val;
 			var mc = this.sdm.attach("logLine",Data.DP_TOP);
-			MCField.get_field(mc).text = l.str;
-			MCField.get_field(mc).set_textColor(l.col);
-			var _this = MCField.get_field(mc);
-			_this.y = y;
-			y += Math.round(MCField.get_field(mc).get_textHeight());
+			var logField = MCField.get_field(mc);
+			logField.anchor.set(0, 0);
+			logField.set_wordWrap(true);
+			logField.style.wordWrapWidth = Math.max(120, this.wid - 115);
+			logField.text = l.str;
+			logField.set_textColor(l.col);
+			logField.y = y;
+			y += Math.round(logField.get_textHeight()) + 2;
 		}
 	}
 	,update: function() {
@@ -16295,13 +16338,12 @@ WinAppOptions.prototype = $extend(WinApp.prototype,{
 			_g1.sensitivy(delta1);
 		};
 		this.addButton(this.sdm,70,30,">",tmp);
-		this.capField = this.addField(this.sdm,10,200,_$Lang_AllTexts.getText(Lang.get,"OptCapture"),false);
-		MCField.get_field(this.capField).set_multiline(true);
-		MCField.get_field(this.capField).set_wordWrap(true);
-		var _this = MCField.get_field(this.capField);
-		_this.width = this.wid - 20;
-		var _this = MCField.get_field(this.capField);
-		_this.height = 70;
+		this.capField = this.addField(this.sdm,10,210,"",false);
+		var capText = MCField.get_field(this.capField);
+		capText.anchor.set(0, 0);
+		capText.set_wordWrap(true);
+		capText.style.wordWrapWidth = this.wid - 20;
+		capText.text = _$Lang_AllTexts.getText(Lang.get,"OptCapture");
 		this.addField(this.sdm,10,70,_$Lang_AllTexts.getText(Lang.get,"OptShortcuts"));
 		var i = 0;
 		var x = 0;
@@ -16317,8 +16359,9 @@ WinAppOptions.prototype = $extend(WinApp.prototype,{
 					_g[0].onShortcut(i[0]);
 				};
 			})([this],[i]));
-			var _this = mc.get_smc();
-			_this.width = MCField.get_field(mc).width + 5;
+			var _smc = mc.get_smc();
+			_smc.width = 64;
+			MCField.get_field(mc).x = _smc.x + 32;
 			this.shortcutButtons.push(mc);
 			++x;
 			if(x >= 5) {
@@ -17532,7 +17575,8 @@ common_MovieClipBuilder.prototype = {
 		case "DefineEditTextTag":case "DefineTextTag":
 			var bounds = this.getBounds(haxe_xml__$Access_AttribAccess.resolve(t,"type") == "DefineEditTextTag" ? haxe_xml__$Access_NodeAccess.resolve(t,"bounds") : haxe_xml__$Access_NodeAccess.resolve(t,"textBounds"));
 			var text = this.buildTextField(t,bounds.width,bounds.height);
-			transform = { x : transform.x + bounds.x, y : transform.y + bounds.y, scaleX : transform.scaleX, scaleY : transform.scaleY, rotation : transform.rotation, skewX : transform.skewX, skewY : transform.skewY, pivotX : 0.0, pivotY : 0.0};
+			var posY = text.anchor.y == 0.5 ? transform.y + bounds.y + bounds.height * 0.5 : transform.y + bounds.y;
+			transform = { x : transform.x + bounds.x + text.anchor.x * bounds.width, y : posY, scaleX : transform.scaleX, scaleY : transform.scaleY, rotation : transform.rotation, skewX : transform.skewX, skewY : transform.skewY, pivotX : 0.0, pivotY : 0.0};
 			sprite = text;
 			break;
 		default:
@@ -17639,7 +17683,7 @@ common_MovieClipBuilder.prototype = {
 		var colorTag = haxe_xml__$Access_NodeAccess.resolve(record,"textColor");
 		style.fontFamily = "" + haxe_xml__$Access_AttribAccess.resolve(record,"fontId");
 		style.fontSize = Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(record,"textHeight")) / 20;
-		style.lineHeight = style.fontSize;
+		style.padding = 3;
 		style.fill = this.getColor(colorTag);
 		textField.style = style;
 		return textField;
@@ -17648,20 +17692,25 @@ common_MovieClipBuilder.prototype = {
 		var initialText = haxe_xml__$Access_HasAttribAccess.resolve(textTag,"initialText") ? haxe_xml__$Access_AttribAccess.resolve(textTag,"initialText") : "";
 		var regex_r = new RegExp("\\\\r","g".split("u").join(""));
 		initialText = initialText.replace(regex_r,"\r");
-		if(haxe_xml__$Access_HasAttribAccess.resolve(textTag,"useOutlines") && haxe_xml__$Access_AttribAccess.resolve(textTag,"useOutlines") == "true") {
+		if(haxe_xml__$Access_HasAttribAccess.resolve(textTag,"useOutlines") && haxe_xml__$Access_AttribAccess.resolve(textTag,"useOutlines") == "true" && haxe_xml__$Access_AttribAccess.resolve(textTag,"multiline") == "true") {
 			initialText += "\n";
 		}
 		var alignments = ["left","right","center","justify"];
-		var textField = new common_Text(width,height,initialText,alignments[Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(textTag,"align"))]);
+		var align = alignments[Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(textTag,"align"))];
+		var textField = new common_Text(width,height,initialText,align);
 		var style = new PIXI.TextStyle();
 		style.fontFamily = "" + haxe_xml__$Access_AttribAccess.resolve(textTag,"fontId");
 		style.fontSize = Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(textTag,"fontHeight")) / 20;
-		style.lineHeight = style.fontSize;
 		style.leading = Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(textTag,"leading")) / 20;
 		style.fill = this.getColor(haxe_xml__$Access_NodeAccess.resolve(textTag,"textColor"));
+		style.padding = 3;
+		style.align = align;
 		style.wordWrap = haxe_xml__$Access_AttribAccess.resolve(textTag,"wordWrap") == "true";
 		style.wordWrapWidth = width;
 		textField.style = style;
+		var anchorY = haxe_xml__$Access_AttribAccess.resolve(textTag,"multiline") != "true" ? 0.5 : 0.0;
+		var anchorX = align == "center" ? 0.5 : (align == "right" ? 1.0 : 0.0);
+		textField.anchor.set(anchorX, anchorY);
 		return textField;
 	}
 	,getSpriteTag: function(id) {

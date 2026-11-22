@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Cpu, Play, RefreshCw, ShieldAlert, Sparkles } from 'lucide-react';
-import type { MissionInitParams, PlayerDto } from '@intrusion/shared';
+import { getMissionRefreshCost, type MissionInitParams, type PlayerDto } from '@intrusion/shared';
 import { api, type CatalogResponse, type MissionOfferDto, type MissionsListResponse } from '../api/client';
 import { SafeHtml } from '../components/SafeHtml';
 import { ModalDialog } from '../components/ModalDialog';
-
-const MISSION_REFRESH_COST = 2000;
 
 interface ContractsAppProps {
   player: PlayerDto;
@@ -25,6 +23,7 @@ export function ContractsApp({
   const [selected, setSelected] = useState<MissionOfferDto | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirmRefreshOpen, setConfirmRefreshOpen] = useState(false);
+  const refreshCost = getMissionRefreshCost(player.level);
 
   async function load() {
     setLoading(true);
@@ -151,11 +150,11 @@ export function ContractsApp({
               type="button"
               onClick={() => setConfirmRefreshOpen(true)}
               disabled={loading}
-              title={`Scanner de nouveaux contrats sur le réseau (${MISSION_REFRESH_COST})`}
+              title={`Scanner de nouveaux contrats sur le réseau (${refreshCost})`}
               className="cyber-btn flex items-center gap-1.5 rounded px-2.5 py-1 font-mono text-xs cursor-pointer"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-              Nouveaux Contrats ({MISSION_REFRESH_COST}{' '}
+              Nouveaux Contrats ({refreshCost}{' '}
               <img src="/img/icons/money.png" alt="" className="inline h-3.5 w-3.5" />)
             </button>
           )}
@@ -356,7 +355,7 @@ export function ContractsApp({
           <p>
             Renouveler les offres disponibles coûte{' '}
             <strong className="text-[#fed82a]">
-              {MISSION_REFRESH_COST}{' '}
+              {refreshCost}{' '}
               <img src="/img/icons/money.png" alt="" className="inline h-3.5 w-3.5 align-text-bottom" />
             </strong>
             .
@@ -364,9 +363,9 @@ export function ContractsApp({
           <p className="text-xs text-[#9aa678]">
             Attention : vos missions en cours et terminées seront également réinitialisées.
           </p>
-          {player.money < MISSION_REFRESH_COST && (
+          {player.money < refreshCost && (
             <p className="text-xs font-semibold text-rose-400">
-              Crédits insuffisants ({player.money} / {MISSION_REFRESH_COST}{' '}
+              Crédits insuffisants ({player.money} / {refreshCost}{' '}
               <img src="/img/icons/money.png" alt="" className="inline h-3.5 w-3.5 align-text-bottom" />).
             </p>
           )}
@@ -381,7 +380,7 @@ export function ContractsApp({
             </button>
             <button
               type="button"
-              disabled={loading || player.money < MISSION_REFRESH_COST}
+              disabled={loading || player.money < refreshCost}
               onClick={handleRefresh}
               className="rounded border border-[#fed82a]/60 bg-[#3a4923] px-3 py-1.5 font-mono text-xs font-bold text-[#fed82a] hover:bg-[#4b5f2d] disabled:opacity-50 cursor-pointer"
             >
@@ -389,7 +388,7 @@ export function ContractsApp({
                 'Renouvellement...'
               ) : (
                 <>
-                  Confirmer ({MISSION_REFRESH_COST}{' '}
+                  Confirmer ({refreshCost}{' '}
                   <img src="/img/icons/money.png" alt="" className="inline h-3.5 w-3.5 align-text-bottom" />)
                 </>
               )}

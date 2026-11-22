@@ -21,6 +21,10 @@ export const CORP_COLORS = [
 export const ADD_DECK_COST = [0, 2500, 4500, 9500] as const;
 export const ADD_SLOT_COST = [0, 0, 0, 2500, 4500, 8000, 14000, 24500, 75000] as const;
 
+export function getMissionRefreshCost(level: number): number {
+  return level <= 4 ? 2000 : 2000 + (level - 4) * 250;
+}
+
 export function getGameLevel(xp: number): number {
   let gl = 0;
   for (const lxp of XP_LEVELS) {

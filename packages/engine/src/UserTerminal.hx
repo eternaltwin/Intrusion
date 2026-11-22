@@ -1960,18 +1960,22 @@ class UserTerminal {
 			} );
 		}
 		popMC = cast Manager.DM.attach("pop", Data.DP_TOP);
-		var padX = 10;
+		var padX = 12;
 		var padY = 8;
-		popMC.field._x = padX;
-		popMC.field._y = padY;
+		popMC.field.style.align = "center";
+		popMC.field.anchor.set(0, 0);
 		popMC.field.text = str + "_";
 		var cursorW = popMC.field.textWidth;
 		var cursorH = popMC.field.textHeight;
 		popMC.field.text = str;
-		popMC.bg._width = Math.ceil(Math.max(popMC.field.textWidth, cursorW)) + padX * 2;
-		popMC.bg._height = Math.ceil(Math.max(popMC.field.textHeight, cursorH)) + padY * 2;
-		popMC._x = Math.round(Data.WID*0.5 - popMC.bg._width*0.5);
-		popMC._y = Math.round(Data.HEI*0.5 - popMC.bg._height*0.5);
+		var boxW = Math.ceil(Math.max(popMC.field.textWidth, cursorW)) + padX * 2;
+		var boxH = Math.ceil(Math.max(popMC.field.textHeight, cursorH)) + padY * 2;
+		popMC.bg._width = boxW;
+		popMC.bg._height = boxH;
+		popMC.field._x = Math.round((boxW - Math.max(popMC.field.textWidth, cursorW)) * 0.5);
+		popMC.field._y = Math.round((boxH - Math.max(popMC.field.textHeight, cursorH)) * 0.5);
+		popMC._x = Math.round(Data.WID*0.5 - boxW*0.5);
+		popMC._y = Math.round(Data.HEI*0.5 - boxH*0.5);
 		if ( fl_generated )
 			startAnim( A_Text, popMC, str );
 //		startAnim( A_BubbleIn, popMC ).spd*=0.8;
@@ -2069,6 +2073,10 @@ class UserTerminal {
 
 	public function detachBubble() {
 		if ( bmc==null ) return;
+		for (a in animList) {
+			if (a.mc == bmc && a.type == A_BubbleIn)
+				a.kill = true;
+		}
 		if ( bmc._visible )
 			if ( fl_lowq )
 				bmc.removeMovieClip();
@@ -2449,8 +2457,13 @@ class UserTerminal {
 		for (b in blist) {
 			var mmc = cmenu.attachMovie("menuButton","menu_"+Data.UNIQ, Data.UNIQ++);
 			var mc : MCField = cast mmc;
-			mc._y = i*(mc.smc._height+2);
 			mc.field.text = b.label;
+			if (mc.field.width + 12 > mc.smc._width)
+				mc.smc._width = Math.ceil(mc.field.width) + 12;
+			mc.field.anchor.set(0.5, 0.5);
+			mc.field._x = mc.smc._x + Math.round(mc.smc._width * 0.5);
+			mc.field._y = mc.smc._y + Math.round(mc.smc._height * 0.5);
+			mc._y = i*(mc.smc._height+2);
 			initStandardButton(mc, b.cb);
 			startAnim(A_MenuIn, mc, -i*0.2).spd*=2;
 			i++;
@@ -2525,9 +2538,13 @@ class UserTerminal {
 	}
 
 	public function hideLog() {
+		detachBubble();
 		for (l in logLines)
 			l.mc._visible = false;
-		moreLog._visible = false;
+		if ( moreLog!=null ) {
+			moreLog.gotoAndStop(1);
+			moreLog._visible = false;
+		}
 	}
 
 	public function showLog() {
@@ -2539,6 +2556,7 @@ class UserTerminal {
 	function showLogHistory() {
 		if (fl_end)
 			return;
+		detachBubble();
 		var app = new WinAppLog(this);
 		app.start();
 		app.showLog( logHistory );

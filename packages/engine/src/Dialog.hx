@@ -131,9 +131,9 @@ class Dialog {
 		mc._y = 80 + rmcList.length*40;
 		mc.onRelease = cb;
 		term.startAnim(A_Text, mc, "> "+label,-1);
+		mc.field.anchor.set(0, 0);
 		mc.field.wordWrap = true;
-		mc.field._height = 50;
-		mc.field._width = 500;
+		mc.field.style.wordWrapWidth = 500;
 		rmcList.add(mc);
 	}
 
