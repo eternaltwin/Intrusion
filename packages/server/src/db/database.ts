@@ -104,6 +104,7 @@ export function openDatabase(dbPath: string): DatabaseSync {
     CREATE TABLE IF NOT EXISTS challenge_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       challenge_date TEXT NOT NULL,
+      challenge_level INTEGER NOT NULL DEFAULT 7,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       username TEXT NOT NULL,
       score INTEGER NOT NULL,
@@ -119,6 +120,12 @@ export function openDatabase(dbPath: string): DatabaseSync {
   const userItemsCols = db.prepare("PRAGMA table_info('user_items')").all() as Array<{ name: string }>;
   if (!userItemsCols.some((c) => c.name === 'quantity')) {
     db.exec('ALTER TABLE user_items ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1;');
+  }
+
+  // Safe schema migration: add challenge_level column to challenge_runs if missing on existing DBs
+  const challengeCols = db.prepare("PRAGMA table_info('challenge_runs')").all() as Array<{ name: string }>;
+  if (!challengeCols.some((c) => c.name === 'challenge_level')) {
+    db.exec('ALTER TABLE challenge_runs ADD COLUMN challenge_level INTEGER NOT NULL DEFAULT 7;');
   }
 
   // Ensure existing decks do not exceed owned virus quantities across a user's decks

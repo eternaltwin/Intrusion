@@ -82,11 +82,27 @@ export function MissionsView({
     }
   };
 
+  const handleDeckSelect = async (deckId: string) => {
+    const target = player.decks.find((d) => d.id === deckId);
+    if (!target || target.isFavorite) return;
+    try {
+      const res = await api.saveDeck(target.id, {
+        name: target.name,
+        content: target.content,
+        isFavorite: true,
+      });
+      onPlayerUpdate(res.player);
+    } catch (err: any) {
+      onNotify(err.message, true);
+    }
+  };
+
   if (selectedOffer) {
     const ownedChipsets = chipsets.filter((c) => player.chipsets.includes(c.id));
     const activeChipDef = chipsets.find((c) => c.id === player.activeChipset);
     const primaryDeck =
-      player.decks.find((d) => d.isFavorite) ?? player.decks[0] ?? { name: 'Deck', content: [] };
+      player.decks.find((d) => d.isFavorite) ??
+      player.decks[0] ?? { id: '', name: 'Deck', content: [] };
 
     return (
       <div className="missionDetails">
@@ -151,12 +167,37 @@ export function MissionsView({
             </div>
 
             <div className="container">
+              {player.decks.length > 1 && (
+                <div className="deckSelectRow">
+                  <span>
+                    <img src="/img/icons/deck.png" alt="" /> Deck principal :{' '}
+                    <strong>{primaryDeck.name}</strong>
+                  </span>
+                  <form onSubmit={(e) => e.preventDefault()}>
+                    <label htmlFor="mission_deck">Choisir :</label>
+                    <select
+                      id="mission_deck"
+                      value={primaryDeck.id}
+                      onChange={(e) => handleDeckSelect(e.target.value)}
+                    >
+                      {player.decks.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name}
+                        </option>
+                      ))}
+                    </select>
+                  </form>
+                </div>
+              )}
+
               <div className="chipset">
-                <img src="/img/icons/chip.png" alt="" /> Chipset{' '}
-                <strong>{activeChipDef ? activeChipDef.name : 'Aucun'}</strong>
+                <span>
+                  <img src="/img/icons/chip.png" alt="" /> Chipset{' '}
+                  <strong>{activeChipDef ? activeChipDef.name : 'Aucun'}</strong>
+                </span>
                 {ownedChipsets.length > 0 && (
                   <form onSubmit={(e) => e.preventDefault()}>
-                    <label htmlFor="chipset">Choisir : </label>
+                    <label htmlFor="chipset">Choisir :</label>
                     <select
                       id="chipset"
                       name="chipset"

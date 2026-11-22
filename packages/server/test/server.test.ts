@@ -185,9 +185,26 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(chalEndJson.score).toBe(1635);
 
     const chalBoard = await (await app.request('/api/challenges/today', { headers: { Cookie: cookie } })).json();
+    expect(chalBoard.challenges.length).toBe(3);
+    expect(chalBoard.challenges.map((c: any) => c.level)).toEqual([5, 7, 9]);
+    expect(chalBoard.challenges.map((c: any) => c.difficulty)).toEqual(['easy', 'medium', 'hard']);
     expect(chalBoard.hasPlayedRanked).toBe(true);
     expect(chalBoard.leaderboard.length).toBe(1);
     expect(chalBoard.leaderboard[0].bestScore).toBe(1635);
+    // Tier 5 and Tier 9 ranked attempts are still untouched and independent from Tier 7
+    expect(chalBoard.challenges[0].hasPlayedRanked).toBe(false);
+    expect(chalBoard.challenges[1].hasPlayedRanked).toBe(true);
+    expect(chalBoard.challenges[2].hasPlayedRanked).toBe(false);
+
+    const chalStart9 = await app.request('/api/challenges/today/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ level: 9 }),
+    });
+    expect(chalStart9.status).toBe(200);
+    const chalStart9Json = await chalStart9.json();
+    expect(chalStart9Json.init.gl).toBe(9);
+    expect(chalStart9Json.init.decks.length).toBe(1);
 
     // 7. Refreshing missions flushes active missions and sets midnight expiry
     const beforeRefresh = await (await app.request('/api/missions', { headers: { Cookie: cookie } })).json();

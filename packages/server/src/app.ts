@@ -732,57 +732,104 @@ export function createApp(opts: CreateAppOptions) {
     });
   });
 
-  // --- Daily Challenge Routes ---
+  // --- Daily Challenge Routes (3 levels: 5 Easy, 7 Medium, 9 Hard — no access restriction) ---
+  const CHALLENGE_TIERS = [
+    { level: 5, difficulty: 'easy' as const, rewardMoney: 1000, rewardXp: 1 },
+    { level: 7, difficulty: 'medium' as const, rewardMoney: 1500, rewardXp: 2 },
+    { level: 9, difficulty: 'hard' as const, rewardMoney: 2500, rewardXp: 3 },
+  ] as const;
+
+  function challengeSeedForTier(dateStr: string, level: number): number {
+    const base = dailySeedFromDate(dateStr);
+    if (level === 5) return ((base ^ 0x13579bdf) & 0x3fffffff) || 555555;
+    if (level === 9) return ((base ^ 0x2468ace1) & 0x3fffffff) || 999999;
+    return base;
+  }
+
   app.get('/api/challenges/today', (c) => {
     const userId = c.get('userId');
     const player = c.get('player');
     const dateStr = todayDateStr();
-    const seed = dailySeedFromDate(dateStr);
-    const gl = 7;
     const bundle = getCatalog(opts.assetsDir, player.settings.lang);
-    const mdata = generateMission(bundle, gl, seed, true);
 
-    const leaderboard = db
-      .prepare(
-        `SELECT username, MAX(score) as bestScore, remaining_sec as remainingSec, kills, created_at as createdAt
-         FROM challenge_runs
-         WHERE challenge_date = ? AND is_ranked = 1 AND success = 1
-         GROUP BY user_id
-         ORDER BY bestScore DESC, remainingSec DESC
-         LIMIT 25`
-      )
-      .all(dateStr);
+    const leaderboardStmt = db.prepare(
+      `SELECT username, MAX(score) as bestScore, remaining_sec as remainingSec, kills, created_at as createdAt
+       FROM challenge_runs
+       WHERE challenge_date = ? AND challenge_level = ? AND is_ranked = 1 AND success = 1
+       GROUP BY user_id
+       ORDER BY bestScore DESC, remainingSec DESC
+       LIMIT 25`
+    );
+    const rankedRunStmt = db.prepare(
+      'SELECT * FROM challenge_runs WHERE challenge_date = ? AND challenge_level = ? AND user_id = ? AND is_ranked = 1 LIMIT 1'
+    );
 
-    const playerRankedRun = db
-      .prepare(
-        'SELECT * FROM challenge_runs WHERE challenge_date = ? AND user_id = ? AND is_ranked = 1 LIMIT 1'
-      )
-      .get(dateStr, userId);
+    const challenges = CHALLENGE_TIERS.map((tier) => {
+      const seed = challengeSeedForTier(dateStr, tier.level);
+      const mdata = generateMission(bundle, tier.level, seed, true);
+      const leaderboard = leaderboardStmt.all(dateStr, tier.level);
+      const playerRankedRun = rankedRunStmt.get(dateStr, tier.level, userId);
+      return {
+        level: tier.level,
+        difficulty: tier.difficulty,
+        rewardMoney: tier.rewardMoney,
+        rewardXp: tier.rewardXp,
+        seed,
+        corp: mdata.corp,
+        colorHex: mdata.colorHex,
+        short: mdata.short,
+        details: mdata.details,
+        hasPlayedRanked: Boolean(playerRankedRun),
+        playerRankedRun: playerRankedRun ?? null,
+        leaderboard,
+      };
+    });
+
+    const defaultTier = challenges.find((ch) => ch.level === 7) ?? challenges[0];
 
     return c.json({
       date: dateStr,
-      seed,
-      level: gl,
-      corp: mdata.corp,
-      colorHex: mdata.colorHex,
-      short: mdata.short,
-      details: mdata.details,
-      hasPlayedRanked: Boolean(playerRankedRun),
-      playerRankedRun: playerRankedRun ?? null,
-      leaderboard,
+      challenges,
+      // Backward-compatible top-level summary (Level 7 Medium)
+      seed: defaultTier.seed,
+      level: defaultTier.level,
+      corp: defaultTier.corp,
+      colorHex: defaultTier.colorHex,
+      short: defaultTier.short,
+      details: defaultTier.details,
+      hasPlayedRanked: defaultTier.hasPlayedRanked,
+      playerRankedRun: defaultTier.playerRankedRun,
+      leaderboard: defaultTier.leaderboard,
     });
   });
 
-  app.post('/api/challenges/today/start', (c) => {
+  app.post('/api/challenges/today/start', async (c) => {
     const player = c.get('player');
     const dateStr = todayDateStr();
-    const seed = dailySeedFromDate(dateStr);
-    const gl = 7;
+
+    let requestedLevel = 7;
+    const queryLvl = c.req.query('level');
+    if (queryLvl !== undefined) {
+      requestedLevel = Number(queryLvl);
+    } else {
+      const body = await c.req.json().catch(() => null);
+      if (body && typeof body.level === 'number') {
+        requestedLevel = body.level;
+      }
+    }
+
+    const tier = CHALLENGE_TIERS.find((t) => t.level === requestedLevel);
+    if (!tier) {
+      return c.json({ error: 'Niveau de challenge invalide (5, 7 ou 9 attendu).' }, 400);
+    }
+
+    const gl = tier.level;
+    const seed = challengeSeedForTier(dateStr, gl);
     const bundle = getCatalog(opts.assetsDir, player.settings.lang);
     const mdata = generateMission(bundle, gl, seed, true);
 
     const init: MissionInitParams = {
-      missionKey: `challenge_${dateStr}`,
+      missionKey: `challenge_${dateStr}_${gl}`,
       seed,
       gl,
       mission: mdata,
@@ -813,10 +860,18 @@ export function createApp(opts: CreateAppOptions) {
     const dateStr = todayDateStr();
     const end = c.req.valid('json');
 
+    const keyMatch = /^challenge_\d{4}-\d{2}-\d{2}_(5|7|9)$/.exec(end.missionKey);
+    const parsedKeyLvl = keyMatch ? Number(keyMatch[1]) : null;
+    const tier =
+      CHALLENGE_TIERS.find((t) => t.level === (parsedKeyLvl ?? end.gl)) ??
+      CHALLENGE_TIERS.find((t) => t.level === 7)!;
+
     if (end.scoutRun && player.activeChipset === 'scout') {
       return c.json({
         isRanked: false,
+        level: tier.level,
         rewardMoney: 0,
+        rewardXp: 0,
         score: 0,
         scoutRun: true,
         player: buildPlayerDto(db, userId),
@@ -832,19 +887,23 @@ export function createApp(opts: CreateAppOptions) {
 
     let isRanked = 0;
     let rewardMoney = 0;
+    let rewardXp = 0;
 
     db.exec('BEGIN IMMEDIATE');
     try {
       const alreadyRanked = db
-        .prepare('SELECT id FROM challenge_runs WHERE challenge_date = ? AND user_id = ? AND is_ranked = 1')
-        .get(dateStr, userId);
+        .prepare(
+          'SELECT id FROM challenge_runs WHERE challenge_date = ? AND challenge_level = ? AND user_id = ? AND is_ranked = 1'
+        )
+        .get(dateStr, tier.level, userId);
 
       isRanked = alreadyRanked ? 0 : 1;
       db.prepare(
-        `INSERT INTO challenge_runs (challenge_date, user_id, username, score, success, remaining_sec, kills, is_ranked)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO challenge_runs (challenge_date, challenge_level, user_id, username, score, success, remaining_sec, kills, is_ranked)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         dateStr,
+        tier.level,
         userId,
         player.username,
         computedScore,
@@ -855,9 +914,11 @@ export function createApp(opts: CreateAppOptions) {
       );
 
       if (isRanked === 1 && end.success) {
-        rewardMoney = 1500;
-        db.prepare('UPDATE users SET money = money + ?, xp = xp + 2 WHERE id = ?').run(
+        rewardMoney = tier.rewardMoney;
+        rewardXp = tier.rewardXp;
+        db.prepare('UPDATE users SET money = money + ?, xp = xp + ? WHERE id = ?').run(
           rewardMoney,
+          rewardXp,
           userId
         );
       }
@@ -873,7 +934,9 @@ export function createApp(opts: CreateAppOptions) {
 
     return c.json({
       isRanked: isRanked === 1,
+      level: tier.level,
       rewardMoney,
+      rewardXp,
       score: computedScore,
       scoutRun: false,
       player: buildPlayerDto(db, userId),

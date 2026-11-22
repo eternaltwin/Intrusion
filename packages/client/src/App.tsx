@@ -168,10 +168,10 @@ export function App() {
     }
   };
 
-  const handleStartChallenge = async () => {
+  const handleStartChallenge = async (level: number = 7) => {
     try {
       setNotice(null);
-      const res = await api.startChallenge();
+      const res = await api.startChallenge(level);
       missionEndingRef.current = false;
       setDebrief(null);
       setActiveMission(res.init);
@@ -195,7 +195,7 @@ export function App() {
         setDebrief({
           summary: { ...summary, score: res.score ?? summary.score },
           earnedMoney: res.rewardMoney,
-          earnedXp: res.isRanked && summary.success ? 2 : 0,
+          earnedXp: res.rewardXp ?? (res.isRanked && summary.success ? 2 : 0),
           scoutRun: res.scoutRun ?? summary.scoutRun,
           previousLevel: prevLevel,
           newLevel: res.player.level,
@@ -268,7 +268,7 @@ export function App() {
             valuablesCatalog={catalog.valuables}
             virusesCatalog={catalog.viruses}
             onRetry={() => {
-              if (debrief.summary.isChallenge) handleStartChallenge();
+              if (debrief.summary.isChallenge) handleStartChallenge(debrief.summary.gl);
               else handleStartMission(debrief.summary.missionKey);
             }}
             onOpenDecks={() => navigate('decks')}
@@ -294,7 +294,14 @@ export function App() {
             onNotify={notify}
           />
         ) : route === 'challenge' ? (
-          <ChallengeView onStartChallenge={handleStartChallenge} onNotify={notify} />
+          <ChallengeView
+            player={player}
+            chipsets={catalog.chipsets}
+            onPlayerUpdate={handlePlayerUpdate}
+            onOpenDecks={() => navigate('decks')}
+            onStartChallenge={handleStartChallenge}
+            onNotify={notify}
+          />
         ) : route === 'decks' ? (
           <DecksView
             player={player}

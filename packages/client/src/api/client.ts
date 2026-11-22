@@ -58,8 +58,37 @@ export interface StorageResponse {
   cards: Array<StolenCard & { redeemed: number; capturedAt: string }>;
 }
 
+export interface ChallengeLeaderboardEntry {
+  username: string;
+  bestScore: number;
+  remainingSec: number;
+  kills: number;
+  createdAt: string;
+}
+
+export interface ChallengeTierDto {
+  level: 5 | 7 | 9;
+  difficulty: 'easy' | 'medium' | 'hard';
+  rewardMoney: number;
+  rewardXp: number;
+  seed: number;
+  corp: string;
+  colorHex: string;
+  short: string;
+  details: string;
+  hasPlayedRanked: boolean;
+  playerRankedRun: {
+    score: number;
+    success: number;
+    remaining_sec: number;
+    kills: number;
+  } | null;
+  leaderboard: ChallengeLeaderboardEntry[];
+}
+
 export interface ChallengeTodayResponse {
   date: string;
+  challenges: ChallengeTierDto[];
   seed: number;
   level: number;
   corp: string;
@@ -68,13 +97,7 @@ export interface ChallengeTodayResponse {
   details: string;
   hasPlayedRanked: boolean;
   playerRankedRun: any;
-  leaderboard: Array<{
-    username: string;
-    bestScore: number;
-    remainingSec: number;
-    kills: number;
-    createdAt: string;
-  }>;
+  leaderboard: ChallengeLeaderboardEntry[];
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -127,10 +150,21 @@ export const api = {
     ),
 
   challengeToday: () => requestJson<ChallengeTodayResponse>('/api/challenges/today'),
-  startChallenge: () =>
-    requestJson<{ init: MissionInitParams }>('/api/challenges/today/start', { method: 'POST' }),
+  startChallenge: (level: number = 7) =>
+    requestJson<{ init: MissionInitParams }>('/api/challenges/today/start', {
+      method: 'POST',
+      body: JSON.stringify({ level }),
+    }),
   endChallenge: (summary: MissionEndSummary) =>
-    requestJson<{ isRanked: boolean; rewardMoney: number; score: number; scoutRun?: boolean; player: PlayerDto }>(
+    requestJson<{
+      isRanked: boolean;
+      level?: number;
+      rewardMoney: number;
+      rewardXp?: number;
+      score: number;
+      scoutRun?: boolean;
+      player: PlayerDto;
+    }>(
       '/api/challenges/today/end',
       {
         method: 'POST',

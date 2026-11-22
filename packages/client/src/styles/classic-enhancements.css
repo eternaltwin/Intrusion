@@ -310,3 +310,65 @@ dialog.classicPopupDialog::backdrop {
   cursor: not-allowed;
   opacity: 0.75;
 }
+
+/* 3-tier Challenge floppy row (.challenge .mlist) & 3 side-by-side rankings */
+.challenge .mlist {
+  background-color: #3b3d28;
+  border: 1px solid #71754c;
+}
+
+.challenge .mlist .file:nth-of-type(3) {
+  margin-right: 0;
+}
+
+.challenge .mlist .file:hover .label strong {
+  color: #292b1c;
+}
+
+/* Fix .missionDetails deck & chipset combobox overlap / 12px hit-box from legacy style.css */
+.missionDetails .deckSelectRow,
+.missionDetails .chipset {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  margin-bottom: 8px;
+  border-bottom: 1px dashed #71754c;
+}
+
+.missionDetails .deckSelectRow img,
+.missionDetails .chipset img {
+  vertical-align: -25%;
+}
+
+.missionDetails .deckSelectRow form,
+.missionDetails .chipset form {
+  position: relative;
+  z-index: 5;
+  margin: 0;
+  width: auto;
+  height: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.missionDetails .deckSelectRow form label,
+.missionDetails .chipset form label {
+  font-size: 8pt;
+  font-weight: bold;
+  color: #fed82a;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.missionDetails .deckSelectRow form select,
+.missionDetails .chipset form select {
+  width: 155px;
+  height: 22px;
+  padding: 1px 4px;
+  font-size: 8.5pt;
+  letter-spacing: 0.4pt;
+  cursor: pointer;
+}
