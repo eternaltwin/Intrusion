@@ -171,6 +171,13 @@ ul.tabs li a,
   border: 1px dotted #d0d194;
 }
 
+.userInfos table.stats img.statIcon {
+  width: 16px;
+  height: 16px;
+  vertical-align: -3px;
+  margin-right: 8px;
+}
+
 /* Auth / Register classic form alignment */
 .authSplit {
   min-height: 360px;

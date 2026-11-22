@@ -1,16 +1,16 @@
 import type { ChipsetDef, PlayerDto } from '@intrusion/shared';
 import { useVirusTooltip } from './TooltipContext';
 
-const STAT_ROWS: Array<{ keys: string[]; label: string }> = [
-  { keys: ['missions_fulfilled', 'success'], label: 'Missions remplies' },
-  { keys: ['firsttry'], label: 'Missions sans échec' },
-  { keys: ['av'], label: "Suppression d'antivirus" },
-  { keys: ['crash'], label: 'Systèmes détruits' },
-  { keys: ['corrup'], label: 'Systèmes corrompus' },
-  { keys: ['log'], label: 'Traces effacées' },
-  { keys: ['passwd'], label: 'Mots de passe crackés' },
-  { keys: ['eextra'], label: 'Extraction de ressources' },
-  { keys: ['mextra'], label: 'Extraction de fichiers de valeur' },
+const STAT_ROWS: Array<{ keys: string[]; label: string; icon: string }> = [
+  { keys: ['missions_fulfilled', 'success'], label: 'Missions remplies', icon: 'disk' },
+  { keys: ['firsttry'], label: 'Missions sans échec', icon: 'lead1' },
+  { keys: ['av'], label: "Suppression d'antivirus", icon: 'av' },
+  { keys: ['crash'], label: 'Systèmes détruits', icon: 'screen' },
+  { keys: ['corrup'], label: 'Systèmes corrompus', icon: 'admin' },
+  { keys: ['log'], label: 'Traces effacées', icon: 'delete' },
+  { keys: ['passwd'], label: 'Mots de passe crackés', icon: 'id' },
+  { keys: ['eextra'], label: 'Extraction de ressources', icon: 'mana' },
+  { keys: ['mextra'], label: 'Extraction de fichiers de valeur', icon: 'pack' },
 ];
 
 export function ProfileView({
@@ -100,7 +100,14 @@ export function ProfileView({
                   const total = row.keys.reduce((acc, k) => acc + (player.goals[k] ?? 0), 0);
                   return (
                     <tr key={row.label}>
-                      <td>{row.label}</td>
+                      <td>
+                        <img
+                          className="statIcon"
+                          src={`/img/icons/${row.icon}.png`}
+                          alt=""
+                        />
+                        {row.label}
+                      </td>
                       <td className="value">
                         <strong>{total}</strong>
                       </td>
