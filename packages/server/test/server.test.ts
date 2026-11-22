@@ -137,6 +137,8 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
       body: JSON.stringify({ cardId: cardToRedeemById.id }),
     });
     expect(redeemRes.status).toBe(200);
+    const redeemJson = await redeemRes.json();
+    expect(redeemJson.player.goals.cards_redeemed).toBe(1);
 
     const redeemByNumberRes = await app.request('/api/storage/redeem-card-number', {
       method: 'POST',
@@ -144,6 +146,11 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
       body: JSON.stringify({ number: startJson.init.cards[0] }),
     });
     expect(redeemByNumberRes.status).toBe(200);
+    const redeemByNumberJson = await redeemByNumberRes.json();
+    expect(redeemByNumberJson.player.goals.cards_redeemed).toBe(2);
+
+    const cbIconRes = await app.request('/img/icons/cb.png');
+    expect(cbIconRes.status).toBe(200);
 
     const cssRes = await app.request('/style.css');
     expect(cssRes.status).toBe(200);

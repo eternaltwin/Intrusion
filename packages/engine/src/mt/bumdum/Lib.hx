@@ -122,22 +122,24 @@ class Col {
 		return (o.a << 24) | (o.r << 16) | (o.g << 8) | o.b;
 	}
 
-	static function applyColorTransform(mc:MovieClip, mulR:Float, mulG:Float, mulB:Float, mulA:Float, offR:Float, offG:Float, offB:Float, offA:Float) {
+	static function clearColorFilter(mc:MovieClip) {
+		if (mc == null)
+			return;
+		var dyn:Dynamic = mc;
+		if (dyn._colFilter != null) {
+			if (mc.filters != null) {
+				var next = mc.filters.filter(function(f) return f != dyn._colFilter);
+				mc.filters = next.length > 0 ? next : null;
+			}
+			dyn._colFilter = null;
+		}
+	}
+
+	static function setAdditiveColorOffset(mc:MovieClip, offR:Float, offG:Float, offB:Float) {
 		if (mc == null)
 			return;
 		mc.tint = 0xFFFFFF;
 		var dyn:Dynamic = mc;
-		var isIdentity = mulR == 1.0 && mulG == 1.0 && mulB == 1.0 && mulA == 1.0 && offR == 0.0 && offG == 0.0 && offB == 0.0 && offA == 0.0;
-		if (isIdentity) {
-			if (dyn._colFilter != null) {
-				if (mc.filters != null) {
-					var next = mc.filters.filter(function(f) return f != dyn._colFilter);
-					mc.filters = next.length > 0 ? next : null;
-				}
-				dyn._colFilter = null;
-			}
-			return;
-		}
 		var filter:ColorMatrixFilter = dyn._colFilter;
 		if (filter == null) {
 			filter = new ColorMatrixFilter();
@@ -147,10 +149,10 @@ class Col {
 			(untyped filter).resolution = Manager.app.renderer.resolution;
 		}
 		filter.matrix = [
-			mulR, 0.0, 0.0, 0.0, offR,
-			0.0, mulG, 0.0, 0.0, offG,
-			0.0, 0.0, mulB, 0.0, offB,
-			0.0, 0.0, 0.0, mulA, offA
+			1.0, 0.0, 0.0, 0.0, offR,
+			0.0, 1.0, 0.0, 0.0, offG,
+			0.0, 0.0, 1.0, 0.0, offB,
+			0.0, 0.0, 0.0, 1.0, 0.0
 		];
 		if (mc.filters == null) {
 			mc.filters = [filter];
@@ -162,38 +164,38 @@ class Col {
 	}
 
 	static public function setPercentColor(mc:MovieClip, prc:Float, col, ?inc:Float, ?alpha = 100) {
-		var incVal:Float = inc != null ? inc : 0.0;
-		var alphaVal:Float = alpha != null ? alpha : 100.0;
-		if (prc <= 0 && incVal == 0.0 && alphaVal == 100.0) {
-			applyColorTransform(mc, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0);
+		if (mc == null)
+			return;
+		clearColorFilter(mc);
+		if (prc <= 0) {
+			mc.tint = 0xFFFFFF;
 			return;
 		}
 		var c = Math.min(1.0, Math.max(0.0, prc / 100.0));
-		var mul = 1.0 - c;
-		var aMul = alphaVal / 100.0;
-		var o = colToObj(col != null ? col : 0);
-		applyColorTransform(
-			mc,
-			mul, mul, mul, aMul,
-			(c * o.r + incVal) / 255.0,
-			(c * o.g + incVal) / 255.0,
-			(c * o.b + incVal) / 255.0,
-			0.0
-		);
+		var blended = mergeCol(col, 0xFFFFFF, c);
+		if (inc != null && inc != 0) {
+			var o = colToObj(blended);
+			o.r = Std.int(Num.mm(0, o.r + inc, 255));
+			o.g = Std.int(Num.mm(0, o.g + inc, 255));
+			o.b = Std.int(Num.mm(0, o.b + inc, 255));
+			blended = objToCol(o);
+		}
+		mc.tint = blended;
 	}
 
 	static public function setColor(mc:MovieClip, col, ?dec:Float) {
-		var o = colToObj(col != null ? col : 0);
+		if (mc == null)
+			return;
 		if (dec == null) {
-			applyColorTransform(mc, 0.0, 0.0, 0.0, 1.0, o.r / 255.0, o.g / 255.0, o.b / 255.0, 0.0);
+			clearColorFilter(mc);
+			mc.tint = col;
 		} else {
-			applyColorTransform(
+			var o = colToObj(col != null ? col : 0);
+			setAdditiveColorOffset(
 				mc,
-				1.0, 1.0, 1.0, 1.0,
 				(o.r + dec) / 255.0,
 				(o.g + dec) / 255.0,
-				(o.b + dec) / 255.0,
-				0.0
+				(o.b + dec) / 255.0
 			);
 		}
 	}

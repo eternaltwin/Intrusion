@@ -21496,24 +21496,25 @@ mt_bumdum_Col.colToObj32 = function(col) {
 mt_bumdum_Col.objToCol32 = function(o) {
 	return o.a << 24 | o.r << 16 | o.g << 8 | o.b;
 };
-mt_bumdum_Col.applyColorTransform = function(mc,mulR,mulG,mulB,mulA,offR,offG,offB,offA) {
+mt_bumdum_Col.clearColorFilter = function(mc) {
+	if(mc == null) {
+		return;
+	}
+	if(mc._colFilter != null) {
+		if(mc.filters != null) {
+			var next = mc.filters.filter(function(f) {
+				return f != mc._colFilter;
+			});
+			mc.filters = next.length > 0 ? next : null;
+		}
+		mc._colFilter = null;
+	}
+};
+mt_bumdum_Col.setAdditiveColorOffset = function(mc,offR,offG,offB) {
 	if(mc == null) {
 		return;
 	}
 	mc.set_tint(16777215);
-	var isIdentity = mulR == 1.0 && mulG == 1.0 && mulB == 1.0 && mulA == 1.0 && offR == 0.0 && offG == 0.0 && offB == 0.0 && offA == 0.0;
-	if(isIdentity) {
-		if(mc._colFilter != null) {
-			if(mc.filters != null) {
-				var next = mc.filters.filter(function(f) {
-					return f != mc._colFilter;
-				});
-				mc.filters = next.length > 0 ? next : null;
-			}
-			mc._colFilter = null;
-		}
-		return;
-	}
 	var filter = mc._colFilter;
 	if(filter == null) {
 		filter = new PIXI.filters.ColorMatrixFilter();
@@ -21522,7 +21523,7 @@ mt_bumdum_Col.applyColorTransform = function(mc,mulR,mulG,mulB,mulA,offR,offG,of
 	if(Manager.app != null && Manager.app.renderer != null) {
 		filter.resolution = Manager.app.renderer.resolution;
 	}
-	filter.matrix = [mulR,0.0,0.0,0.0,offR,0.0,mulG,0.0,0.0,offG,0.0,0.0,mulB,0.0,offB,0.0,0.0,0.0,mulA,offA];
+	filter.matrix = [1.0,0.0,0.0,0.0,offR,0.0,1.0,0.0,0.0,offG,0.0,0.0,1.0,0.0,offB,0.0,0.0,0.0,1.0,0.0];
 	if(mc.filters == null) {
 		mc.filters = [filter];
 	} else if(mc.filters.indexOf(filter) < 0) {
@@ -21532,24 +21533,35 @@ mt_bumdum_Col.applyColorTransform = function(mc,mulR,mulG,mulB,mulA,offR,offG,of
 	}
 };
 mt_bumdum_Col.setPercentColor = function(mc,prc,col,inc,alpha) {
-	var incVal = inc != null ? inc : 0.0;
-	var alphaVal = alpha != null ? alpha : 100.0;
-	if(prc <= 0 && incVal == 0.0 && alphaVal == 100.0) {
-		mt_bumdum_Col.applyColorTransform(mc,1.0,1.0,1.0,1.0,0.0,0.0,0.0,0.0);
+	if(mc == null) {
+		return;
+	}
+	mt_bumdum_Col.clearColorFilter(mc);
+	if(prc <= 0) {
+		mc.set_tint(16777215);
 		return;
 	}
 	var c = Math.min(1.0,Math.max(0.0,prc / 100.0));
-	var mul = 1.0 - c;
-	var aMul = alphaVal / 100.0;
-	var o = mt_bumdum_Col.colToObj(col != null ? col : 0);
-	mt_bumdum_Col.applyColorTransform(mc,mul,mul,mul,aMul,(c * o.r + incVal) / 255.0,(c * o.g + incVal) / 255.0,(c * o.b + incVal) / 255.0,0.0);
+	var blended = mt_bumdum_Col.mergeCol(col,16777215,c);
+	if(inc != null && inc != 0) {
+		var o = mt_bumdum_Col.colToObj(blended);
+		o.r = mt_bumdum_Num.mm(0,o.r + inc,255) | 0;
+		o.g = mt_bumdum_Num.mm(0,o.g + inc,255) | 0;
+		o.b = mt_bumdum_Num.mm(0,o.b + inc,255) | 0;
+		blended = mt_bumdum_Col.objToCol(o);
+	}
+	mc.set_tint(blended);
 };
 mt_bumdum_Col.setColor = function(mc,col,dec) {
-	var o = mt_bumdum_Col.colToObj(col != null ? col : 0);
+	if(mc == null) {
+		return;
+	}
 	if(dec == null) {
-		mt_bumdum_Col.applyColorTransform(mc,0.0,0.0,0.0,1.0,o.r / 255.0,o.g / 255.0,o.b / 255.0,0.0);
+		mt_bumdum_Col.clearColorFilter(mc);
+		mc.set_tint(col);
 	} else {
-		mt_bumdum_Col.applyColorTransform(mc,1.0,1.0,1.0,1.0,(o.r + dec) / 255.0,(o.g + dec) / 255.0,(o.b + dec) / 255.0,0.0);
+		var o = mt_bumdum_Col.colToObj(col != null ? col : 0);
+		mt_bumdum_Col.setAdditiveColorOffset(mc,(o.r + dec) / 255.0,(o.g + dec) / 255.0,(o.b + dec) / 255.0);
 	}
 };
 mt_bumdum_Col.mergeCol = function(col,col2,c) {

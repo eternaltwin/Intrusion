@@ -271,7 +271,8 @@ export type GoalId =
   | 'log'
   | 'passwd'
   | 'eextra'
-  | 'mextra';
+  | 'mextra'
+  | 'cards_redeemed';
 
 export interface MissionEndSummary {
   missionKey: string;

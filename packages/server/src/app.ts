@@ -1188,6 +1188,10 @@ export function createApp(opts: CreateAppOptions) {
 
     db.prepare('UPDATE stolen_cards SET redeemed = 1 WHERE user_id = ? AND id = ?').run(userId, cardId);
     db.prepare('UPDATE users SET money = money + ? WHERE id = ?').run(row.amount, userId);
+    db.prepare(`
+      INSERT INTO user_goals (user_id, goal_id, value) VALUES (?, 'cards_redeemed', 1)
+      ON CONFLICT(user_id, goal_id) DO UPDATE SET value = value + 1
+    `).run(userId);
 
     return c.json({
       earned: row.amount,
@@ -1219,6 +1223,10 @@ export function createApp(opts: CreateAppOptions) {
       match.id
     );
     db.prepare('UPDATE users SET money = money + ? WHERE id = ?').run(match.amount, userId);
+    db.prepare(`
+      INSERT INTO user_goals (user_id, goal_id, value) VALUES (?, 'cards_redeemed', 1)
+      ON CONFLICT(user_id, goal_id) DO UPDATE SET value = value + 1
+    `).run(userId);
 
     return c.json({
       earned: match.amount,

@@ -11,6 +11,7 @@ const STAT_ROWS: Array<{ keys: string[]; label: string; icon: string }> = [
   { keys: ['passwd'], label: 'Mots de passe crackés', icon: 'id' },
   { keys: ['eextra'], label: 'Extraction de ressources', icon: 'mana' },
   { keys: ['mextra'], label: 'Extraction de fichiers de valeur', icon: 'pack' },
+  { keys: ['cards_redeemed'], label: 'Cartes bancaires détournées', icon: 'cb' },
 ];
 
 export function ProfileView({

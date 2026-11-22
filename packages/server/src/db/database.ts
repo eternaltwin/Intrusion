@@ -128,6 +128,17 @@ export function openDatabase(dbPath: string): DatabaseSync {
     db.exec('ALTER TABLE challenge_runs ADD COLUMN challenge_level INTEGER NOT NULL DEFAULT 7;');
   }
 
+  // Backfill cards_redeemed goal from already-redeemed stolen_cards rows
+  db.exec(`
+    INSERT INTO user_goals (user_id, goal_id, value)
+    SELECT user_id, 'cards_redeemed', COUNT(*)
+    FROM stolen_cards
+    WHERE redeemed = 1
+    GROUP BY user_id
+    ON CONFLICT(user_id, goal_id) DO UPDATE SET
+      value = MAX(user_goals.value, excluded.value);
+  `);
+
   // Ensure existing decks do not exceed owned virus quantities across a user's decks
   const usersRows = db.prepare('SELECT id FROM users').all() as Array<{ id: number }>;
   for (const u of usersRows) {
