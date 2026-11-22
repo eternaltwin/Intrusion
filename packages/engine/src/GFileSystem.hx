@@ -833,6 +833,8 @@ class GFileSystem {
 	}
 
 	public function crash() {
+		if ( fl_crashed )
+			return;
 		if(!fl_auth)
 			term.kills++;
 		term.onNodeStatusChanged( term.net.curNode );
@@ -1157,7 +1159,7 @@ class GFileSystem {
 		term.avman.onDeleteFile(f,fl_stealth);
 		term.onDeleteFile(f);
 
-		if ( getFilesByKey("file.core").length<=0 )
+		if ( !fl_crashed && getFilesByKey("file.core").length<=0 )
 			crash();
 //		if ( oldAvKey=="crypto" )
 //			onDeleteCrypto();

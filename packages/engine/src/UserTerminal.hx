@@ -147,6 +147,7 @@ class UserTerminal {
 	public var fl_end		: Volatile<Bool>;
 	public var fl_lowq		: Bool;
 	public var fl_leet		: Bool;
+	var fl_disconnecting	: Bool;
 
 	public var channelPrefs	: Array<Bool>;
 
@@ -1330,14 +1331,18 @@ class UserTerminal {
 	}
 
 	public function disconnectFS(?fl_stealth=false) {
-		if ( fs==null )
+		if ( fs==null || fl_disconnecting )
 			return;
+		fl_disconnecting = true;
 //		if ( fs.fl_crashed )
 //			popUp(Lang.get.SystemCrashed);
 //		else
 //			popUp(Lang.get.Disconnected);
-		if ( !fl_stealth )
+		avman.onEndTurn();
+		if ( !fl_stealth ) {
 			avman.onDisconnect();
+			avman.onEndTurn();
+		}
 		avman.endTurn = new List();
 		vman.endTurn = new List();
 		log(Lang.get.Disconnected);
@@ -1358,6 +1363,7 @@ class UserTerminal {
 		clearEffect(UE_Furtivity);
 		clearEffect(UE_MoveFurtivity);
 		bigLog(Lang.get.BigDisconnected,-30);
+		fl_disconnecting = false;
 //		furtivity = 0;
 //		spamLog._visible = false;
 	}
@@ -1963,6 +1969,8 @@ class UserTerminal {
 		var padX = 12;
 		var padY = 8;
 		popMC.field.style.align = "center";
+		untyped popMC.field.style.padding = 4;
+		popMC.field.style.lineHeight = popMC.field.style.fontSize + 4;
 		popMC.field.anchor.set(0, 0);
 		popMC.field.text = str + "_";
 		var cursorW = popMC.field.textWidth;
@@ -2457,12 +2465,14 @@ class UserTerminal {
 		for (b in blist) {
 			var mmc = cmenu.attachMovie("menuButton","menu_"+Data.UNIQ, Data.UNIQ++);
 			var mc : MCField = cast mmc;
+			untyped mc.field.style.padding = 4;
+			mc.field.style.lineHeight = mc.field.style.fontSize + 4;
 			mc.field.text = b.label;
 			if (mc.field.width + 12 > mc.smc._width)
 				mc.smc._width = Math.ceil(mc.field.width) + 12;
 			mc.field.anchor.set(0.5, 0.5);
 			mc.field._x = mc.smc._x + Math.round(mc.smc._width * 0.5);
-			mc.field._y = mc.smc._y + Math.round(mc.smc._height * 0.5);
+			mc.field._y = mc.smc._y + Math.round(mc.smc._height * 0.5) + 1;
 			mc._y = i*(mc.smc._height+2);
 			initStandardButton(mc, b.cb);
 			startAnim(A_MenuIn, mc, -i*0.2).spd*=2;

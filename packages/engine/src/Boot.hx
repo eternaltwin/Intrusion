@@ -36,7 +36,6 @@ class Boot {
 		}
 
 		js.Syntax.code("if (window.PIXI && PIXI.settings) { PIXI.settings.ROUND_PIXELS = true; }");
-		js.Syntax.code("if (window.PIXI && PIXI.TextMetrics) { PIXI.TextMetrics.HEIGHT_MULTIPLIER = 4.5; PIXI.TextMetrics.BASELINE_MULTIPLIER = 3.0; PIXI.TextMetrics.METRICS_STRING = '|ÉÈÀÂÊÎÔÛÇMÉqgyp'; PIXI.TextMetrics._fonts = {}; }");
 
 		var view = viewElem != null ? viewElem : cast js.Browser.document.getElementById("main");
 		Manager.app = new pixi.core.Application(cast {

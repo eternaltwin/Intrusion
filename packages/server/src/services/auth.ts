@@ -111,10 +111,16 @@ export function buildPlayerDto(db: DatabaseSync, userId: number): PlayerDto | nu
   if (!user) return null;
 
   const items = db
-    .prepare('SELECT item_type, item_id FROM user_items WHERE user_id = ?')
-    .all(userId) as Array<{ item_type: string; item_id: string }>;
+    .prepare('SELECT item_type, item_id, quantity FROM user_items WHERE user_id = ?')
+    .all(userId) as Array<{ item_type: string; item_id: string; quantity: number }>;
 
-  const viruses = items.filter((i) => i.item_type === 'virus').map((i) => i.item_id);
+  const viruses: string[] = [];
+  for (const i of items) {
+    if (i.item_type === 'virus') {
+      const qty = Math.max(1, i.quantity ?? 1);
+      for (let k = 0; k < qty; k++) viruses.push(i.item_id);
+    }
+  }
   const chipsets = items.filter((i) => i.item_type === 'chipset').map((i) => i.item_id);
 
   const deckRows = db

@@ -92,8 +92,8 @@ export function StoreView({
                 <th />
               </tr>
               {items.map((v) => {
-                const bought = player.viruses.includes(v.id);
-                const out = !bought && v.price > player.money;
+                const ownedCount = player.viruses.filter((id) => id === v.id).length;
+                const out = v.price > player.money;
                 return (
                   <tr
                     key={v.id}
@@ -107,17 +107,22 @@ export function StoreView({
                     </td>
                     <td className="desc">
                       <div>
-                        {v.level === player.level && !bought && (
+                        {v.level === player.level && ownedCount === 0 && (
                           <img className="new" src="/img/design/new.png" alt="Nouveau" />
                         )}{' '}
                         <strong>{v.name}</strong>{' '}
+                        {ownedCount > 0 && (
+                          <span style={{ color: '#d0d194', fontSize: '8pt' }}>
+                            (x{ownedCount})
+                          </span>
+                        )}{' '}
                         {v.recom && <span className="recom">Recommandé</span>}
                       </div>
                     </td>
                     <td className="cc">
                       <div>{v.cc}</div>
                     </td>
-                    <td className={`price${bought ? ' bought' : ''}`}>
+                    <td className="price">
                       <div className={out ? 'out' : ''}>
                         <div className="gameMoney">
                           {v.price} <img src="/img/icons/money.png" alt="" />
@@ -125,9 +130,7 @@ export function StoreView({
                       </div>
                     </td>
                     <td>
-                      {bought ? (
-                        <div className="offButton">Acquis</div>
-                      ) : out || busyId === v.id ? (
+                      {out || busyId === v.id ? (
                         <div className="offButton">Acheter</div>
                       ) : (
                         <a className="button" onClick={() => buyVirus(v)}>

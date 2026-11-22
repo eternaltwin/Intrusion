@@ -193,5 +193,30 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     const afterRefresh = await (await app.request('/api/missions', { headers: { Cookie: cookie } })).json();
     expect(afterRefresh.active.length).toBe(0);
     expect(afterRefresh.completed.length).toBe(0);
+
+    // 8. Multi-copy virus purchase & shared virus pool across decks
+    const buySecondDmgs = await app.request('/api/store/buy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ kind: 'virus', id: 'dmgs' }), // 700 CR
+    });
+    expect(buySecondDmgs.status).toBe(200);
+    const secondDmgsJson = await buySecondDmgs.json();
+    expect(secondDmgsJson.player.viruses.filter((v: string) => v === 'dmgs').length).toBe(2);
+
+    const [d1, d2] = secondDmgsJson.player.decks;
+    const putTwoInD1 = await app.request(`/api/decks/${d1.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ deckId: d1.id, name: d1.name, content: ['dmgs', 'dmgs'] }),
+    });
+    expect(putTwoInD1.status).toBe(200);
+
+    const putThirdInD2 = await app.request(`/api/decks/${d2.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ deckId: d2.id, name: d2.name, content: ['dmgs'] }),
+    });
+    expect(putThirdInD2.status).toBe(400);
   });
 });

@@ -182,10 +182,9 @@ class MovieClipBuilder {
             case "DefineEditTextTag" | "DefineTextTag":
               var bounds = getBounds(if (t.att.type == "DefineEditTextTag") t.node.bounds else t.node.textBounds);
               var text: Text = buildTextField(t, bounds.width, bounds.height);
-              var posY = if (text.anchor.y == 0.5) transform.y + bounds.y + (bounds.height * 0.5) else transform.y + bounds.y;
               transform = {
-                x: transform.x + bounds.x + (text.anchor.x * bounds.width),
-                y: posY,
+                x: transform.x + bounds.x,
+                y: transform.y + bounds.y,
                 scaleX: transform.scaleX,
                 scaleY: transform.scaleY,
                 rotation: transform.rotation,
@@ -325,7 +324,7 @@ class MovieClipBuilder {
       var colorTag = record.node.textColor;
       style.fontFamily = '${record.att.fontId}';
       style.fontSize = Std.parseInt(record.att.textHeight) / 20;
-      style.padding = 3;
+      style.lineHeight = style.fontSize;
       style.fill = getColor(colorTag);
 
       textField.style = style;
@@ -343,30 +342,20 @@ class MovieClipBuilder {
       }
 
       var alignments = ["left", "right", "center", "justify"];
-      var align = alignments[Std.parseInt(textTag.att.align)];
 
-      var textField = new Text(width, height, initialText, align);
+      var textField = new Text(width, height, initialText, alignments[Std.parseInt(textTag.att.align)]);
 
       var style = new TextStyle();
       // TODO: dropshadow can be set on textstyle directly.
       style.fontFamily = '${textTag.att.fontId}';
       style.fontSize = Std.parseInt(textTag.att.fontHeight) / 20;
+      style.lineHeight = style.fontSize;
       style.leading = Std.parseInt(textTag.att.leading) / 20;
       //style.letterSpacing = style.leading;
       style.fill = getColor(textTag.node.textColor);
-      style.padding = 3;
-      style.align = align;
       style.wordWrap = textTag.att.wordWrap == "true";
       style.wordWrapWidth = width;
       textField.style = style;
-      var anchorY = if (textTag.att.multiline != "true") 0.5 else 0.0;
-      if (align == "center") {
-        textField.anchor.set(0.5, anchorY);
-      } else if (align == "right") {
-        textField.anchor.set(1.0, anchorY);
-      } else if (anchorY != 0.0) {
-        textField.anchor.set(0.0, anchorY);
-      }
       return textField;
     }
 

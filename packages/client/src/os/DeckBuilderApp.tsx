@@ -22,15 +22,23 @@ export function DeckBuilderApp({ player, catalog, onPlayerUpdate }: DeckBuilderA
   const activeDeck =
     player.decks.find((d) => d.id === selectedDeckId) ?? player.decks[0];
 
-  const ownedViruses = player.viruses
-    .map((id) => catalog.viruses.find((v) => v.id === id))
-    .filter((v): v is VirusDef => Boolean(v));
-
-  const poolViruses = ownedViruses.filter((v) => {
-    if (activeDeck?.content.includes(v.id)) return false;
-    if (catFilter !== 'all' && v.cat !== catFilter) return false;
-    return true;
-  });
+  const usedAcrossAllDecks = new Map<string, number>();
+  for (const d of player.decks) {
+    for (const vid of d.content) {
+      usedAcrossAllDecks.set(vid, (usedAcrossAllDecks.get(vid) ?? 0) + 1);
+    }
+  }
+  const seenOwned = new Map<string, number>();
+  const poolViruses: Array<{ def: VirusDef; copyKey: string }> = [];
+  for (const id of player.viruses) {
+    const seen = (seenOwned.get(id) ?? 0) + 1;
+    seenOwned.set(id, seen);
+    if (seen <= (usedAcrossAllDecks.get(id) ?? 0)) continue;
+    const def = catalog.viruses.find((v) => v.id === id);
+    if (!def) continue;
+    if (catFilter !== 'all' && def.cat !== catFilter) continue;
+    poolViruses.push({ def, copyKey: `${id}_${seen}` });
+  }
 
   async function updateDeckContent(nextContent: string[], overrides?: { name?: string; isFavorite?: boolean }) {
     if (!activeDeck) return;
@@ -49,7 +57,10 @@ export function DeckBuilderApp({ player, catalog, onPlayerUpdate }: DeckBuilderA
 
   async function addVirusToDeck(vid: string) {
     if (!activeDeck) return;
-    if (activeDeck.content.includes(vid)) return;
+    if (!poolViruses.some((p) => p.def.id === vid)) {
+      setError('Aucun exemplaire disponible dans votre réserve.');
+      return;
+    }
     if (activeDeck.content.length >= activeDeck.capacity) {
       setError(`Capacité maximale atteinte (${activeDeck.capacity} emplacements).`);
       return;
@@ -57,9 +68,11 @@ export function DeckBuilderApp({ player, catalog, onPlayerUpdate }: DeckBuilderA
     await updateDeckContent([...activeDeck.content, vid]);
   }
 
-  async function removeVirusFromDeck(vid: string) {
+  async function removeVirusAtSlot(slotIdx: number) {
     if (!activeDeck) return;
-    await updateDeckContent(activeDeck.content.filter((x) => x !== vid));
+    const next = [...activeDeck.content];
+    next.splice(slotIdx, 1);
+    await updateDeckContent(next);
   }
 
   async function handleBuyNewDeck() {
@@ -210,7 +223,7 @@ export function DeckBuilderApp({ player, catalog, onPlayerUpdate }: DeckBuilderA
                     <div
                       key={idx}
                       onMouseEnter={() => vDef && setHoveredVirus(vDef)}
-                      onClick={() => vid && removeVirusFromDeck(vid)}
+                      onClick={() => vid && removeVirusAtSlot(idx)}
                       className={`group relative flex h-24 flex-col items-center justify-center rounded border p-2 transition ${
                         vDef
                           ? 'border-[#5a6b3e] bg-[#1d2616] hover:border-rose-400 cursor-pointer'
@@ -320,9 +333,9 @@ export function DeckBuilderApp({ player, catalog, onPlayerUpdate }: DeckBuilderA
           </div>
 
           <div className="grid flex-1 grid-cols-3 gap-2 overflow-y-auto p-3 sm:grid-cols-4">
-            {poolViruses.map((v) => (
+            {poolViruses.map(({ def: v, copyKey }) => (
               <button
-                key={v.id}
+                key={copyKey}
                 type="button"
                 draggable
                 onDragStart={(e) => e.dataTransfer.setData('text/virus-id', v.id)}

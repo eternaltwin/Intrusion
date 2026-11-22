@@ -156,4 +156,97 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
     expect(end.summary.success).toBe(true);
     expect(end.summary.score).toBeGreaterThan(1000);
   });
+
+  it('triggers all N sysdef antiviruses on file.core destruction and respects furtivity', () => {
+    const fr = loadBundleFromDisk('fr');
+    const mission = generateMission(fr, 1, 4242, true);
+    const makeInit = (): MissionInitParams => ({
+      missionKey: 'tuto_1',
+      seed: 4242,
+      gl: 1,
+      mission,
+      decks: [
+        {
+          id: 'd1',
+          name: 'Deck Principal',
+          capacity: 5,
+          isFavorite: true,
+          content: ['dmgxl', 'invis'],
+        },
+      ],
+      chipset: 'turbo',
+      isChallenge: false,
+      biosLevel: 2,
+      tries: 0,
+      profile: {
+        username: 'Neo',
+        level: 6,
+        leet: false,
+        adult: true,
+        cfg: '',
+        sfx: true,
+        ambiant: true,
+        beat: true,
+        lang: 'fr',
+      },
+    });
+
+    // 1) Without invisibility: 3 sysdef must deal 3 * 15 = 45 damage on guardian AND 45 damage on core
+    const session = new MissionSession(fr, makeInit());
+    const targetNode = Object.values(session.nodes).find((n) => n.isMissionTarget)!;
+    session.connectToNode(targetNode.id);
+    session.tick(3000);
+    const sys = session.currentSystem!;
+
+    // Inject 3 sysdef AV files into the system
+    const docs = Object.values(sys.files).filter((f) => !f.isFolder && f.key === 'file.doc').slice(0, 3);
+    expect(docs.length).toBe(3);
+    for (const d of docs) {
+      d.avKey = 'sysdef';
+      d.key = 'file.antivir';
+    }
+
+    const guardian = Object.values(sys.files).find((f) => f.key === 'file.guardian')!;
+    const core = Object.values(sys.files).find((f) => f.key === 'file.core')!;
+    session.currentFolderId = guardian.parentId;
+
+    const hpBeforeGuardian = session.life;
+    guardian.life = 1;
+    session.selectFile(guardian.id);
+    session.useVirusById('dmgxl', guardian.id);
+    session.tick(3000);
+    expect(hpBeforeGuardian - session.life).toBe(45);
+
+    const hpBeforeCore = session.life;
+    core.life = 1;
+    delete core.effects.E_CShield;
+    session.selectFile(core.id);
+    session.useVirusById('dmgxl', core.id);
+    session.tick(3000);
+    expect(sys.crashed).toBe(true);
+    expect(hpBeforeCore - session.life).toBe(45);
+
+    // 2) With invisibility active: 3 sysdef must deal 0 damage when destroying file.core
+    const stealthSession = new MissionSession(fr, makeInit());
+    const stealthTarget = Object.values(stealthSession.nodes).find((n) => n.isMissionTarget)!;
+    stealthSession.connectToNode(stealthTarget.id);
+    stealthSession.tick(3000);
+    const stealthSys = stealthSession.currentSystem!;
+    for (const d of Object.values(stealthSys.files).filter((f) => !f.isFolder && f.key === 'file.doc').slice(0, 3)) {
+      d.avKey = 'sysdef';
+      d.key = 'file.antivir';
+    }
+    const stealthCore = Object.values(stealthSys.files).find((f) => f.key === 'file.core')!;
+    stealthCore.life = 1;
+    delete stealthCore.effects.E_CShield;
+    stealthSession.currentFolderId = stealthCore.parentId;
+    stealthSession.useVirusById('invis');
+    stealthSession.tick(3000);
+    const hpStealthBefore = stealthSession.life;
+    stealthSession.selectFile(stealthCore.id);
+    stealthSession.useVirusById('dmgxl', stealthCore.id);
+    stealthSession.tick(3000);
+    expect(stealthSys.crashed).toBe(true);
+    expect(stealthSession.life).toBe(hpStealthBefore);
+  });
 });

@@ -692,12 +692,41 @@ export function createApp(opts: CreateAppOptions) {
     const deck = player.decks.find((d) => d.id === deckId);
     if (!deck) return c.json({ error: 'Deck introuvable.' }, 404);
 
-    // Ensure all viruses in content are owned and within capacity
-    const uniqueOwned = Array.from(new Set(body.content)).filter((vid) =>
-      player.viruses.includes(vid)
-    );
-    if (uniqueOwned.length > deck.capacity) {
+    // Ensure all viruses in content are owned and shared pool across all decks is respected
+    if (body.content.length > deck.capacity) {
       return c.json({ error: `Capacité maximale dépassée (${deck.capacity} slots).` }, 400);
+    }
+
+    const ownedCounts = new Map<string, number>();
+    for (const vid of player.viruses) {
+      ownedCounts.set(vid, (ownedCounts.get(vid) ?? 0) + 1);
+    }
+
+    const otherUsedCounts = new Map<string, number>();
+    for (const otherDeck of player.decks) {
+      if (otherDeck.id === deckId) continue;
+      for (const vid of otherDeck.content) {
+        otherUsedCounts.set(vid, (otherUsedCounts.get(vid) ?? 0) + 1);
+      }
+    }
+
+    const requestedCounts = new Map<string, number>();
+    const validatedContent: string[] = [];
+    for (const vid of body.content) {
+      const owned = ownedCounts.get(vid) ?? 0;
+      if (owned <= 0) {
+        return c.json({ error: `Programme ${vid} non possédé.` }, 400);
+      }
+      const nextReq = (requestedCounts.get(vid) ?? 0) + 1;
+      const otherUsed = otherUsedCounts.get(vid) ?? 0;
+      if (otherUsed + nextReq > owned) {
+        return c.json(
+          { error: `Exemplaires insuffisants pour ${vid} (${owned} possédé(s), partagé(s) entre vos decks).` },
+          400
+        );
+      }
+      requestedCounts.set(vid, nextReq);
+      validatedContent.push(vid);
     }
 
     if (body.isFavorite) {
@@ -708,7 +737,7 @@ export function createApp(opts: CreateAppOptions) {
       'UPDATE decks SET name = ?, content_json = ?, is_favorite = ? WHERE id = ? AND user_id = ?'
     ).run(
       body.name,
-      JSON.stringify(uniqueOwned),
+      JSON.stringify(validatedContent),
       body.isFavorite !== undefined ? (body.isFavorite ? 1 : 0) : deck.isFavorite ? 1 : 0,
       deckId,
       userId
@@ -741,16 +770,15 @@ export function createApp(opts: CreateAppOptions) {
     if (req.kind === 'virus') {
       const v = bundle.viruses.get(req.id);
       if (!v || v.price <= 0) return c.json({ error: 'Programme indisponible.' }, 400);
-      if (player.viruses.includes(v.id)) return c.json({ error: 'Déjà acquis.' }, 400);
       if (player.level < v.level) return c.json({ error: `Niveau ${v.level} requis.` }, 400);
       if (player.money < v.price) return c.json({ error: 'Crédits insuffisants.' }, 400);
 
       db.prepare('UPDATE users SET money = money - ? WHERE id = ?').run(v.price, userId);
-      db.prepare('INSERT INTO user_items (user_id, item_type, item_id) VALUES (?, ?, ?)').run(
-        userId,
-        'virus',
-        v.id
-      );
+      db.prepare(
+        `INSERT INTO user_items (user_id, item_type, item_id, quantity)
+         VALUES (?, 'virus', ?, 1)
+         ON CONFLICT(user_id, item_type, item_id) DO UPDATE SET quantity = quantity + 1`
+      ).run(userId, v.id);
     } else if (req.kind === 'chipset') {
       const chip = bundle.chipsets.get(req.id);
       if (!chip || chip.price <= 0) return c.json({ error: 'Chipset indisponible.' }, 400);

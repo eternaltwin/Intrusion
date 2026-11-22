@@ -548,12 +548,6 @@ Boot.mountEngine = function(viewElem) {
 		dpr = window.devicePixelRatio;
 	}
 	if (window.PIXI && PIXI.settings) { PIXI.settings.ROUND_PIXELS = true; }
-	if (window.PIXI && PIXI.TextMetrics) {
-		PIXI.TextMetrics.HEIGHT_MULTIPLIER = 4.5;
-		PIXI.TextMetrics.BASELINE_MULTIPLIER = 3.0;
-		PIXI.TextMetrics.METRICS_STRING = "|ÉÈÀÂÊÎÔÛÇMÉqgyp";
-		PIXI.TextMetrics._fonts = {};
-	}
 	var view = viewElem != null ? viewElem : window.document.getElementById("main");
 	Manager.app = new PIXI.Application({ width : 600, height : 400, view : view, resolution : dpr, autoDensity : true, antialias : true});
 	globalThis.__PIXI_APP__ = Manager.app;
@@ -1433,9 +1427,14 @@ FSNode.attach = function(dm,fl_anim,fnode,index) {
 	var _this = mc;
 	_this.y = 200 + -x * hexHei * 0.5 + y * hexHei * 0.5;
 	var name = fnode != null ? fnode.getName() : null;
-	MCField.get_field(mc).text = name;
-	MCField.get_field(mc).x += (120 - MCField.get_field(mc).width) / 2;
-	MCField.get_field(mc).y += 5;
+	var mcField = MCField.get_field(mc);
+	if (mcField._baseX == null) {
+		mcField._baseX = mcField.x;
+		mcField._baseY = mcField.y;
+	}
+	mcField.text = name;
+	mcField.x = mcField._baseX + (120 - mcField.width) / 2;
+	mcField.y = mcField._baseY + 5;
 	var _this = MCField.get_field(MCFile.get_bar(mc));
 	_this.visible = false;
 	var _this = MCFile.get_bar(mc);
@@ -1710,9 +1709,14 @@ FSNode.prototype = {
 			var mcc = MCFile.get_icon(this.mc);
 			var str = TD.fsNames.exists(this.key + "_short") ? TD.fsNames.get(this.key + "_short") : "";
 			var tmp = this.hasEffect(EffectType.E_Masked) ? "" : str;
-			MCField.get_field(mcc).text = tmp;
-			MCField.get_field(mcc).x += 8;
-			MCField.get_field(mcc).y += 2;
+			var iconField = MCField.get_field(mcc);
+			if (iconField._baseX == null) {
+				iconField._baseX = iconField.x;
+				iconField._baseY = iconField.y;
+			}
+			iconField.text = tmp;
+			iconField.x = iconField._baseX + 8;
+			iconField.y = iconField._baseY + 2;
 			if(this.password != null || FSNode.term.avman.folderContains(this,data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"passwd"))) {
 				var _this = MCFolder.get_lockIcon(mcc);
 				_this.visible = true;
@@ -1729,14 +1733,19 @@ FSNode.prototype = {
 		} else if(this.ext("antivir")) {
 			MCFile.get_icon(this.mc).gotoAndStop("antivir");
 			var mcc = MCFile.get_icon(this.mc);
+			var avField = MCField.get_field(mcc);
+			if (avField._baseX == null) {
+				avField._baseX = avField.x;
+				avField._baseY = avField.y;
+			}
 			if(this.av == null) {
-				MCField.get_field(mcc).text = ":-)";
+				avField.text = ":-)";
 			} else {
 				var tmp = HxOverrides.substr(this.av.key,0,3);
-				MCField.get_field(mcc).text = tmp.toUpperCase();
+				avField.text = tmp.toUpperCase();
 			}
-			MCField.get_field(mcc).x = MCField.get_field(mcc).x + 6;
-			MCField.get_field(mcc).y = MCField.get_field(mcc).y + 6;
+			avField.x = avField._baseX + 6;
+			avField.y = avField._baseY + 6;
 		} else {
 			MCFile.get_icon(this.mc).gotoAndStop("misc");
 			var e = this.name.split(".")[1];
@@ -1874,6 +1883,11 @@ FSNode.prototype = {
 					}
 				}
 			}
+			var dmgNotified = false;
+			if(final_dmg > 0 && this.key == "file.core") {
+				dmgNotified = true;
+				FSNode.term.avman.onDamageFile(final_dmg,this);
+			}
 			FSNode.term.fs.delete(this);
 			Tutorial.play(_$Tutorial_AllData.getTutorial(Tutorial.get,"first"),"coreExposed");
 		} else if(this.mc != null) {
@@ -1885,7 +1899,7 @@ FSNode.prototype = {
 		} else if(final_dmg > 0) {
 			FSNode.term.log((_$Lang_AllTextsFormat.getText(Lang.fmt,"Log_DistantDamage"))({ _name : this.name, _n : final_dmg}));
 		}
-		if(final_dmg > 0) {
+		if(final_dmg > 0 && (this.life > 0 || !dmgNotified)) {
 			FSNode.term.avman.onDamageFile(final_dmg,this);
 		}
 		return final_dmg;
@@ -2045,7 +2059,11 @@ FSNode.prototype = {
 		var _this = MCFile.get_bar(this.mc);
 		_this.visible = this.lifeTotal > 1 && (fl_crypted && this.life < this.lifeTotal || !fl_crypted);
 		MCFile.get_bar(this.mc).get_smc().set__xscale(100 * this.life / this.lifeTotal);
-		MCField.get_field(this.mc).text = this.getName();
+		var mcField = MCField.get_field(this.mc);
+		mcField.text = this.getName();
+		if (mcField._baseX != null) {
+			mcField.x = mcField._baseX + (120 - mcField.width) / 2;
+		}
 		var _this = this.mc;
 		_this.visible = !this.fl_deleted;
 		if(fl_crypted) {
@@ -3238,6 +3256,9 @@ GFileSystem.prototype = {
 		this.term.disconnectFS();
 	}
 	,crash: function() {
+		if(this.fl_crashed) {
+			return;
+		}
 		if(!this.fl_auth) {
 			this.term.kills++;
 		}
@@ -3641,7 +3662,7 @@ GFileSystem.prototype = {
 		}
 		this.term.avman.onDeleteFile(f,fl_stealth);
 		this.term.onDeleteFile(f);
-		if(this.getFilesByKey("file.core").length <= 0) {
+		if(!this.fl_crashed && this.getFilesByKey("file.core").length <= 0) {
 			this.crash();
 		}
 		Tutorial.play(_$Tutorial_AllData.getTutorial(Tutorial.get,"first"),"fileDestroyed");
@@ -11701,11 +11722,14 @@ UserTerminal.prototype = {
 		if(fl_stealth == null) {
 			fl_stealth = false;
 		}
-		if(this.fs == null) {
+		if(this.fs == null || this.fl_disconnecting) {
 			return;
 		}
+		this.fl_disconnecting = true;
+		this.avman.onEndTurn();
 		if(!fl_stealth) {
 			this.avman.onDisconnect();
+			this.avman.onEndTurn();
 		}
 		this.avman.endTurn = new haxe_ds_List();
 		this.vman.endTurn = new haxe_ds_List();
@@ -11726,6 +11750,7 @@ UserTerminal.prototype = {
 		this.clearEffect(UserEffectType.UE_Furtivity);
 		this.clearEffect(UserEffectType.UE_MoveFurtivity);
 		this.bigLog(_$Lang_AllTexts.getText(Lang.get,"BigDisconnected"),null,-30);
+		this.fl_disconnecting = false;
 	}
 	,logout: function(fl_abandon) {
 		if(fl_abandon == null) {
@@ -12391,6 +12416,8 @@ UserTerminal.prototype = {
 		var padY = 8;
 		var popField = MCField.get_field(this.popMC);
 		popField.style.align = "center";
+		popField.style.padding = 4;
+		popField.style.lineHeight = popField.style.fontSize + 4;
 		popField.anchor.set(0, 0);
 		popField.text = str + "_";
 		var cursorW = popField.get_textWidth();
@@ -12473,10 +12500,8 @@ UserTerminal.prototype = {
 		var maxWid = Math.max(BubbleMC.get_field(this.bmc).width,BubbleMC.get_title(this.bmc).width);
 		var totHei = BubbleMC.get_field(this.bmc).get_textHeight() + BubbleMC.get_title(this.bmc).get_textHeight();
 		var _this = BubbleMC.get_title(this.bmc);
-		_this.x = 5;
 		_this.y = -Math.round(totHei * 0.5);
 		var _this = BubbleMC.get_field(this.bmc);
-		_this.x = 5;
 		_this.y = BubbleMC.get_title(this.bmc).y + BubbleMC.get_title(this.bmc).get_textHeight();
 		var resizeBubbleBg = function() {
 			if (_gthis.bmc == null) return;
@@ -12952,13 +12977,15 @@ UserTerminal.prototype = {
 			var mc = mmc;
 			var smc = mc.get_smc();
 			var btnField = MCField.get_field(mc);
+			btnField.style.padding = 4;
+			btnField.style.lineHeight = btnField.style.fontSize + 4;
 			btnField.text = b.label;
 			if (btnField.width + 12 > smc.width) {
 				smc.width = Math.ceil(btnField.width) + 12;
 			}
 			btnField.anchor.set(0.5, 0.5);
 			btnField.x = smc.x + Math.round(smc.width * 0.5);
-			btnField.y = smc.y + Math.round(smc.height * 0.5);
+			btnField.y = smc.y + Math.round(smc.height * 0.5) + 1;
 			var _this = mc;
 			_this.y = i * (smc.height + 2);
 			this.initStandardButton(mc,b.cb);
@@ -15698,8 +15725,11 @@ WinApp.prototype = {
 		}
 		var tmp = this.win;
 		if((tmp != null ? WindowMC.get_field(tmp) : null) != null) {
+			var wf = WindowMC.get_field(this.win);
+			wf.style.padding = 4;
+			wf.style.lineHeight = wf.style.fontSize + 4;
 			var tmp = this.title.toUpperCase();
-			WindowMC.get_field(this.win).text = tmp + ".PRG";
+			wf.text = tmp + ".PRG";
 		}
 	}
 	,start: function() {
@@ -15859,6 +15889,8 @@ WinApp.prototype = {
 		_this.y = y;
 		var smc = mc.get_smc();
 		var btnField = MCField.get_field(mc);
+		btnField.style.padding = 4;
+		btnField.style.lineHeight = btnField.style.fontSize + 4;
 		btnField.text = label;
 		if(fl_resize) {
 			smc.width = Math.max(22, Math.ceil(btnField.width) + 14);
@@ -15867,7 +15899,7 @@ WinApp.prototype = {
 		}
 		btnField.anchor.set(0.5, 0.5);
 		btnField.x = smc.x + Math.round(smc.width * 0.5);
-		btnField.y = smc.y + Math.round(smc.height * 0.5);
+		btnField.y = smc.y + Math.round(smc.height * 0.5) + 1;
 		var me = this;
 		mc.set_onRelease(function() {
 			me.term.playSound("single_01");
@@ -17575,8 +17607,7 @@ common_MovieClipBuilder.prototype = {
 		case "DefineEditTextTag":case "DefineTextTag":
 			var bounds = this.getBounds(haxe_xml__$Access_AttribAccess.resolve(t,"type") == "DefineEditTextTag" ? haxe_xml__$Access_NodeAccess.resolve(t,"bounds") : haxe_xml__$Access_NodeAccess.resolve(t,"textBounds"));
 			var text = this.buildTextField(t,bounds.width,bounds.height);
-			var posY = text.anchor.y == 0.5 ? transform.y + bounds.y + bounds.height * 0.5 : transform.y + bounds.y;
-			transform = { x : transform.x + bounds.x + text.anchor.x * bounds.width, y : posY, scaleX : transform.scaleX, scaleY : transform.scaleY, rotation : transform.rotation, skewX : transform.skewX, skewY : transform.skewY, pivotX : 0.0, pivotY : 0.0};
+			transform = { x : transform.x + bounds.x, y : transform.y + bounds.y, scaleX : transform.scaleX, scaleY : transform.scaleY, rotation : transform.rotation, skewX : transform.skewX, skewY : transform.skewY, pivotX : 0.0, pivotY : 0.0};
 			sprite = text;
 			break;
 		default:
@@ -17683,7 +17714,7 @@ common_MovieClipBuilder.prototype = {
 		var colorTag = haxe_xml__$Access_NodeAccess.resolve(record,"textColor");
 		style.fontFamily = "" + haxe_xml__$Access_AttribAccess.resolve(record,"fontId");
 		style.fontSize = Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(record,"textHeight")) / 20;
-		style.padding = 3;
+		style.lineHeight = style.fontSize;
 		style.fill = this.getColor(colorTag);
 		textField.style = style;
 		return textField;
@@ -17692,25 +17723,20 @@ common_MovieClipBuilder.prototype = {
 		var initialText = haxe_xml__$Access_HasAttribAccess.resolve(textTag,"initialText") ? haxe_xml__$Access_AttribAccess.resolve(textTag,"initialText") : "";
 		var regex_r = new RegExp("\\\\r","g".split("u").join(""));
 		initialText = initialText.replace(regex_r,"\r");
-		if(haxe_xml__$Access_HasAttribAccess.resolve(textTag,"useOutlines") && haxe_xml__$Access_AttribAccess.resolve(textTag,"useOutlines") == "true" && haxe_xml__$Access_AttribAccess.resolve(textTag,"multiline") == "true") {
+		if(haxe_xml__$Access_HasAttribAccess.resolve(textTag,"useOutlines") && haxe_xml__$Access_AttribAccess.resolve(textTag,"useOutlines") == "true") {
 			initialText += "\n";
 		}
 		var alignments = ["left","right","center","justify"];
-		var align = alignments[Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(textTag,"align"))];
-		var textField = new common_Text(width,height,initialText,align);
+		var textField = new common_Text(width,height,initialText,alignments[Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(textTag,"align"))]);
 		var style = new PIXI.TextStyle();
 		style.fontFamily = "" + haxe_xml__$Access_AttribAccess.resolve(textTag,"fontId");
 		style.fontSize = Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(textTag,"fontHeight")) / 20;
+		style.lineHeight = style.fontSize;
 		style.leading = Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(textTag,"leading")) / 20;
 		style.fill = this.getColor(haxe_xml__$Access_NodeAccess.resolve(textTag,"textColor"));
-		style.padding = 3;
-		style.align = align;
 		style.wordWrap = haxe_xml__$Access_AttribAccess.resolve(textTag,"wordWrap") == "true";
 		style.wordWrapWidth = width;
 		textField.style = style;
-		var anchorY = haxe_xml__$Access_AttribAccess.resolve(textTag,"multiline") != "true" ? 0.5 : 0.0;
-		var anchorX = align == "center" ? 0.5 : (align == "right" ? 1.0 : 0.0);
-		textField.anchor.set(anchorX, anchorY);
 		return textField;
 	}
 	,getSpriteTag: function(id) {

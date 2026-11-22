@@ -33,6 +33,7 @@ export function openDatabase(dbPath: string): DatabaseSync {
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       item_type TEXT NOT NULL CHECK(item_type IN ('virus', 'chipset')),
       item_id TEXT NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 1,
       PRIMARY KEY (user_id, item_type, item_id)
     );
 
@@ -113,5 +114,43 @@ export function openDatabase(dbPath: string): DatabaseSync {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  // Safe schema migration: add quantity column to user_items if missing on existing DBs
+  const userItemsCols = db.prepare("PRAGMA table_info('user_items')").all() as Array<{ name: string }>;
+  if (!userItemsCols.some((c) => c.name === 'quantity')) {
+    db.exec('ALTER TABLE user_items ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1;');
+  }
+
+  // Ensure existing decks do not exceed owned virus quantities across a user's decks
+  const usersRows = db.prepare('SELECT id FROM users').all() as Array<{ id: number }>;
+  for (const u of usersRows) {
+    const ownedRows = db
+      .prepare("SELECT item_id, quantity FROM user_items WHERE user_id = ? AND item_type = 'virus'")
+      .all(u.id) as Array<{ item_id: string; quantity: number }>;
+    const remaining = new Map<string, number>();
+    for (const r of ownedRows) remaining.set(r.item_id, Math.max(1, r.quantity ?? 1));
+
+    const deckRows = db
+      .prepare('SELECT id, content_json FROM decks WHERE user_id = ? ORDER BY is_favorite DESC, slot_index ASC')
+      .all(u.id) as Array<{ id: string; content_json: string }>;
+    for (const d of deckRows) {
+      const content: string[] = JSON.parse(d.content_json || '[]');
+      const filtered: string[] = [];
+      let changed = false;
+      for (const vid of content) {
+        const left = remaining.get(vid) ?? 0;
+        if (left > 0) {
+          filtered.push(vid);
+          remaining.set(vid, left - 1);
+        } else {
+          changed = true;
+        }
+      }
+      if (changed) {
+        db.prepare('UPDATE decks SET content_json = ? WHERE id = ?').run(JSON.stringify(filtered), d.id);
+      }
+    }
+  }
+
   return db;
 }

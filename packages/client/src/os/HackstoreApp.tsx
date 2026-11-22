@@ -211,9 +211,9 @@ export function HackstoreApp({ player, catalog, onPlayerUpdate }: HackstoreAppPr
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {buyableViruses.map((v) => {
-              const owned = player.viruses.includes(v.id);
+              const ownedCount = player.viruses.filter((id) => id === v.id).length;
               const locked = player.level < v.level;
-              const isNew = v.level === player.level && !owned;
+              const isNew = v.level === player.level && ownedCount === 0;
               return (
                 <div
                   key={v.id}
@@ -233,11 +233,18 @@ export function HackstoreApp({ player, catalog, onPlayerUpdate }: HackstoreAppPr
                         <span className="truncate font-mono text-sm font-bold text-[#e8efd0]">
                           {v.name}
                         </span>
-                        {isNew && (
-                          <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[10px] text-emerald-300">
-                            NEW
-                          </span>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {ownedCount > 0 && (
+                            <span className="rounded bg-[#253119] px-1.5 py-0.5 font-mono text-[10px] text-[#a7d875]">
+                              x{ownedCount}
+                            </span>
+                          )}
+                          {isNew && (
+                            <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[10px] text-emerald-300">
+                              NEW
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div className="font-mono text-[11px] text-[#97a574]">
                         {v.id.toUpperCase()} · {v.cc} CC · Niv.{v.level}
@@ -251,11 +258,7 @@ export function HackstoreApp({ player, catalog, onPlayerUpdate }: HackstoreAppPr
 
                   <div className="mt-3 flex items-center justify-between border-t border-[#28311c] pt-2.5 font-mono text-xs">
                     <span className="font-bold text-[#fed82a]">{v.price.toLocaleString()} CR</span>
-                    {owned ? (
-                      <span className="flex items-center gap-1 text-emerald-400">
-                        <Check className="h-4 w-4" /> En réserve
-                      </span>
-                    ) : locked ? (
+                    {locked ? (
                       <span className="flex items-center gap-1 text-[#7b885b]">
                         <Lock className="h-3.5 w-3.5" /> Niv.{v.level}
                       </span>

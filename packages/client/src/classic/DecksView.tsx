@@ -27,7 +27,9 @@ export function DecksView({
 
   const [deckViruses, setDeckViruses] = useState<string[]>(activeDeck?.content ?? []);
   const [deckName, setDeckName] = useState<string>(activeDeck?.name ?? '');
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [draggingSlotIdx, setDraggingSlotIdx] = useState<number | null>(null);
   const [dragSource, setDragSource] = useState<'deck' | 'pool' | null>(null);
   const [dragTargetZone, setDragTargetZone] = useState<'deck' | 'pool' | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
@@ -40,7 +42,28 @@ export function DecksView({
 
   if (!activeDeck) return null;
 
-  const poolViruses = player.viruses.filter((vid) => !deckViruses.includes(vid));
+  // Shared virus pool across ALL decks: subtract copies equipped in other decks + current deck
+  const usedCounts = new Map<string, number>();
+  for (const d of player.decks) {
+    if (d.id === activeDeck.id) continue;
+    for (const vid of d.content) {
+      usedCounts.set(vid, (usedCounts.get(vid) ?? 0) + 1);
+    }
+  }
+  for (const vid of deckViruses) {
+    usedCounts.set(vid, (usedCounts.get(vid) ?? 0) + 1);
+  }
+  const seenCounts = new Map<string, number>();
+  const poolViruses: Array<{ vid: string; copyKey: string }> = [];
+  for (const vid of player.viruses) {
+    const seen = (seenCounts.get(vid) ?? 0) + 1;
+    seenCounts.set(vid, seen);
+    const used = usedCounts.get(vid) ?? 0;
+    if (seen > used) {
+      poolViruses.push({ vid, copyKey: `${vid}_${seen}` });
+    }
+  }
+
   const ownedChipsets = chipsets.filter((c) => player.chipsets.includes(c.id));
 
   const persistDeck = async (
@@ -72,7 +95,11 @@ export function DecksView({
   };
 
   const addFromPool = (vid: string, insertIndex?: number) => {
-    if (deckViruses.includes(vid)) return;
+    const hasFreeCopy = poolViruses.some((p) => p.vid === vid);
+    if (!hasFreeCopy) {
+      onNotify('Aucun exemplaire disponible dans votre réserve.', true);
+      return;
+    }
     if (deckViruses.length >= activeDeck.capacity) {
       onNotify(`Ce deck est plein (${activeDeck.capacity} emplacements maximum).`, true);
       return;
@@ -87,34 +114,45 @@ export function DecksView({
     persistDeck(next);
   };
 
-  const removeFromDeck = (vid: string) => {
-    const next = deckViruses.filter((x) => x !== vid);
-    setDeckViruses(next);
-    persistDeck(next);
-  };
-
-  const reorderInDeck = (vid: string, targetIndex: number) => {
-    const curIdx = deckViruses.indexOf(vid);
-    if (curIdx === -1) return;
-    const clampedIdx = Math.min(targetIndex, Math.max(0, deckViruses.length - 1));
-    if (curIdx === clampedIdx) return;
+  const removeFromDeck = (slotIdx: number) => {
+    if (slotIdx < 0 || slotIdx >= deckViruses.length) return;
     const next = [...deckViruses];
-    next.splice(curIdx, 1);
-    next.splice(clampedIdx, 0, vid);
+    next.splice(slotIdx, 1);
     setDeckViruses(next);
     persistDeck(next);
   };
 
-  const onDragStartItem = (e: DragEvent, vid: string, src: 'deck' | 'pool') => {
+  const reorderInDeck = (fromIdx: number, targetIndex: number) => {
+    if (fromIdx < 0 || fromIdx >= deckViruses.length) return;
+    const clampedIdx = Math.min(targetIndex, Math.max(0, deckViruses.length - 1));
+    if (fromIdx === clampedIdx) return;
+    const next = [...deckViruses];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(clampedIdx, 0, moved);
+    setDeckViruses(next);
+    persistDeck(next);
+  };
+
+  const onDragStartItem = (
+    e: DragEvent,
+    vid: string,
+    src: 'deck' | 'pool',
+    key: string,
+    slotIdx?: number
+  ) => {
     hideVirus();
+    setDraggingKey(key);
     setDraggingId(vid);
+    setDraggingSlotIdx(slotIdx ?? null);
     setDragSource(src);
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', `${src}:${vid}`);
+    e.dataTransfer.setData('text/plain', `${src}:${vid}:${slotIdx ?? -1}`);
   };
 
   const onDragEndItem = () => {
+    setDraggingKey(null);
     setDraggingId(null);
+    setDraggingSlotIdx(null);
     setDragSource(null);
     setDragTargetZone(null);
     setDragOverSlot(null);
@@ -126,12 +164,16 @@ export function DecksView({
     setDragTargetZone(null);
     setDragOverSlot(null);
     const raw = e.dataTransfer.getData('text/plain');
-    const [src, vid] = raw.includes(':') ? raw.split(':') : [dragSource, draggingId];
+    const parts = raw.split(':');
+    const src = (parts[0] as 'deck' | 'pool') || dragSource;
+    const vid = parts[1] || draggingId;
+    const parsedSlot = parts[2] !== undefined ? parseInt(parts[2], 10) : NaN;
+    const fromSlot = !Number.isNaN(parsedSlot) && parsedSlot >= 0 ? parsedSlot : draggingSlotIdx;
     if (!vid) return;
     if (src === 'pool') {
       addFromPool(vid, targetIndex);
-    } else if (src === 'deck' && targetIndex !== undefined) {
-      reorderInDeck(vid, targetIndex);
+    } else if (src === 'deck' && fromSlot !== null && targetIndex !== undefined) {
+      reorderInDeck(fromSlot, targetIndex);
     }
     onDragEndItem();
   };
@@ -140,9 +182,12 @@ export function DecksView({
     e.preventDefault();
     setDragTargetZone(null);
     const raw = e.dataTransfer.getData('text/plain');
-    const [src, vid] = raw.includes(':') ? raw.split(':') : [dragSource, draggingId];
-    if (vid && src === 'deck') {
-      removeFromDeck(vid);
+    const parts = raw.split(':');
+    const src = (parts[0] as 'deck' | 'pool') || dragSource;
+    const parsedSlot = parts[2] !== undefined ? parseInt(parts[2], 10) : NaN;
+    const fromSlot = !Number.isNaN(parsedSlot) && parsedSlot >= 0 ? parsedSlot : draggingSlotIdx;
+    if (src === 'deck' && fromSlot !== null) {
+      removeFromDeck(fromSlot);
     }
     onDragEndItem();
   };
@@ -265,12 +310,13 @@ export function DecksView({
             {Array.from({ length: activeDeck.capacity }, (_, idx) => {
               const vid = deckViruses[idx];
               const isOver = dragOverSlot === idx;
+              const slotKey = `slot_${idx}_${vid ?? 'empty'}`;
               return vid ? (
                 <li
-                  key={`slot_${idx}_${vid}`}
+                  key={slotKey}
                   draggable
-                  className={`filledSlot${draggingId === vid ? ' dragging' : ''}${isOver ? ' slotDragOver' : ''}`}
-                  onDragStart={(e) => onDragStartItem(e, vid, 'deck')}
+                  className={`filledSlot${draggingKey === slotKey ? ' dragging' : ''}${isOver ? ' slotDragOver' : ''}`}
+                  onDragStart={(e) => onDragStartItem(e, vid, 'deck', slotKey, idx)}
                   onDragEnd={onDragEndItem}
                   onDragOver={(e) => {
                     e.preventDefault();
@@ -280,7 +326,7 @@ export function DecksView({
                   onDrop={(e) => onDropDeckZone(e, idx)}
                   onClick={() => {
                     hideVirus(vid);
-                    removeFromDeck(vid);
+                    removeFromDeck(idx);
                   }}
                   onMouseEnter={() => showVirus(vid)}
                   onMouseLeave={() => hideVirus(vid)}
@@ -387,12 +433,12 @@ export function DecksView({
             onDragLeave={() => setDragTargetZone(null)}
             onDrop={onDropPoolZone}
           >
-            {poolViruses.map((vid) => (
+            {poolViruses.map(({ vid, copyKey }) => (
               <li
-                key={vid}
+                key={copyKey}
                 draggable
-                className={draggingId === vid ? 'dragging' : ''}
-                onDragStart={(e) => onDragStartItem(e, vid, 'pool')}
+                className={draggingKey === copyKey ? 'dragging' : ''}
+                onDragStart={(e) => onDragStartItem(e, vid, 'pool', copyKey)}
                 onDragEnd={onDragEndItem}
                 onClick={() => {
                   hideVirus(vid);

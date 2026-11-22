@@ -130,6 +130,7 @@ export class MissionSession {
   public tutorialIndex = 0;
 
   private endTurnQueue: Array<() => void> = [];
+  private isDisconnecting = false;
 
   constructor(bundle: GameDataBundle, init: MissionInitParams) {
     this.bundle = bundle;
@@ -592,15 +593,26 @@ export class MissionSession {
   public useDockSlot(slotIndex: number, explicitFileId?: number): { ok: boolean; error?: string } {
     const slot = this.currentDeck[slotIndex];
     if (!slot) return { ok: false, error: 'Empty slot' };
-    return this.useVirusById(slot.virus.id, explicitFileId);
+    return this.useVirusById(slot.virus.id, explicitFileId, slotIndex);
   }
 
-  public useVirusById(virusId: string, explicitFileId?: number): { ok: boolean; error?: string } {
+  public useVirusById(
+    virusId: string,
+    explicitFileId?: number,
+    explicitSlotIndex?: number
+  ): { ok: boolean; error?: string } {
     const ui = this.bundle.uiStrings;
     if (this.activeCast) return this.failAction(formatLang(ui, 'Wait'));
 
-    // Find in deck or hidden viruses
-    const slot = this.currentDeck.find((s) => s.virus.id.toLowerCase() === virusId.toLowerCase());
+    // Find in deck (prefer explicit slot or a copy that still has charges) or hidden viruses
+    const slot =
+      explicitSlotIndex !== undefined
+        ? this.currentDeck[explicitSlotIndex]
+        : this.currentDeck.find(
+            (s) =>
+              s.virus.id.toLowerCase() === virusId.toLowerCase() &&
+              (s.remainingUses === null || s.remainingUses > 0)
+          ) ?? this.currentDeck.find((s) => s.virus.id.toLowerCase() === virusId.toLowerCase());
     const virus = slot?.virus ?? this.bundle.viruses.get(virusId.toLowerCase());
     if (!virus) return this.failAction(formatLang(ui, 'UnknownVirus'));
 
@@ -931,7 +943,10 @@ export class MissionSession {
     const sys = this.currentSystem;
     if (!sys) return;
 
-    const slot = this.currentDeck.find((s) => s.virus.id === cast.virusId);
+    const slot =
+      this.currentDeck.find(
+        (s) => s.virus.id === cast.virusId && (s.remainingUses === null || s.remainingUses > 0)
+      ) ?? this.currentDeck.find((s) => s.virus.id === cast.virusId);
     const virus = slot?.virus ?? this.bundle.viruses.get(cast.virusId);
     if (!virus) return;
 
@@ -1360,32 +1375,41 @@ export class MissionSession {
   }
 
   public disconnectFromSystem(stealth: boolean): void {
-    const sys = this.currentSystem;
-    if (sys && !stealth) {
-      if (this.currentFolderId !== null) {
-        this.queueAvAttacks(sys, 'mine', this.currentFolderId);
+    if (this.isDisconnecting) return;
+    this.isDisconnecting = true;
+    try {
+      const sys = this.currentSystem;
+      if (sys) {
+        this.drainEndTurn();
+        if (!stealth) {
+          if (this.currentFolderId !== null) {
+            this.queueAvAttacks(sys, 'mine', this.currentFolderId);
+          }
+          this.queueAvAttacks(sys, 'oxy', null);
+          this.queueAvAttacks(sys, 'bigoxy', null);
+          this.drainEndTurn();
+        }
       }
-      this.queueAvAttacks(sys, 'oxy', null);
-      this.queueAvAttacks(sys, 'bigoxy', null);
-      this.drainEndTurn();
+
+      // Clear per-connection effects
+      delete this.userEffects.UE_Furtivity;
+      delete this.userEffects.UE_MoveFurtivity;
+      this.connectedNodeId = null;
+      this.currentFolderId = null;
+      this.selectedFileId = null;
+      this.canSwitchDeckInFs = false;
+      this.scannerState = null;
+
+      this.emitSound({ kind: 'loop_stop', id: 'drone_02' });
+      this.emitSound({ kind: 'loop_stop', id: 'rythme_02' });
+      this.emitSound({ kind: 'loop_stop', id: 'rythme_03' });
+      this.emitSound({ kind: 'loop_start', id: 'menu', channel: 'beat' });
+
+      this.refreshFogOfWar();
+      this.evaluateMissionObjective();
+    } finally {
+      this.isDisconnecting = false;
     }
-
-    // Clear per-connection effects
-    delete this.userEffects.UE_Furtivity;
-    delete this.userEffects.UE_MoveFurtivity;
-    this.connectedNodeId = null;
-    this.currentFolderId = null;
-    this.selectedFileId = null;
-    this.canSwitchDeckInFs = false;
-    this.scannerState = null;
-
-    this.emitSound({ kind: 'loop_stop', id: 'drone_02' });
-    this.emitSound({ kind: 'loop_stop', id: 'rythme_02' });
-    this.emitSound({ kind: 'loop_stop', id: 'rythme_03' });
-    this.emitSound({ kind: 'loop_start', id: 'menu', channel: 'beat' });
-
-    this.refreshFogOfWar();
-    this.evaluateMissionObjective();
   }
 
   // --- Damage & Combat Math ---

@@ -61,8 +61,11 @@ class WinApp {
 	public function setTitle(?t:String) {
 		if ( t!=null )
 			title = t;
-		if ( win?.field!=null )
+		if ( win?.field!=null ) {
+			untyped win.field.style.padding = 4;
+			win.field.style.lineHeight = win.field.style.fontSize + 4;
 			win.field.text = title.toUpperCase()+".PRG";
+		}
 	}
 
 	public function start() {
@@ -179,6 +182,8 @@ class WinApp {
 		var mc : MCField = cast fdm.attach("menuButton", Data.DP_TOP);
 		mc._x = x;
 		mc._y = y;
+		untyped mc.field.style.padding = 4;
+		mc.field.style.lineHeight = mc.field.style.fontSize + 4;
 		mc.field.text = label;
 		if ( fl_resize )
 			mc.smc._width = Math.max(22, Math.ceil(mc.field.width) + 14);
@@ -186,7 +191,7 @@ class WinApp {
 			mc.smc._width = Math.ceil(mc.field.width) + 12;
 		mc.field.anchor.set(0.5, 0.5);
 		mc.field._x = mc.smc._x + Math.round(mc.smc._width * 0.5);
-		mc.field._y = mc.smc._y + Math.round(mc.smc._height * 0.5);
+		mc.field._y = mc.smc._y + Math.round(mc.smc._height * 0.5) + 1;
 		var me = this;
 		mc.onRelease = function() {
 			me.term.playSound("single_01");

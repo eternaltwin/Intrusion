@@ -294,10 +294,14 @@ class FSNode {
 		}
 
 		var name = fnode?.getName();
+		if ( untyped mc.field._baseX == null ) {
+			untyped mc.field._baseX = mc.field.x;
+			untyped mc.field._baseY = mc.field.y;
+		}
 		mc.field.text = name;
 		// TODO: text position is off, adjusting for it here..
-		mc.field.x += (120 - mc.field.width) / 2;
-		mc.field.y += 5;
+		mc.field.x = (untyped mc.field._baseX) + (120 - mc.field.width) / 2;
+		mc.field.y = (untyped mc.field._baseY) + 5;
 		mc.bar.field._visible = false;
 		mc.bar._visible = false;
 //		mc.icon.cacheAsBitmap = true;
@@ -349,10 +353,13 @@ class FSNode {
 			mc.icon.gotoAndStop("folder");
 			var mcc: MCFolder = cast mc.icon;
 			var str =  if ( TD.fsNames.exists(key+"_short") ) TD.fsNames.get(key+"_short") else "";
+			if ( untyped mcc.field._baseX == null ) {
+				untyped mcc.field._baseX = mcc.field.x;
+				untyped mcc.field._baseY = mcc.field.y;
+			}
 			mcc.field.text = hasEffect(E_Masked) ? "" : str;
-			// Position isn't rendered correctly, adjusting it here
-			mcc.field.x += 8;
-			mcc.field.y += 2;
+			mcc.field.x = (untyped mcc.field._baseX) + 8;
+			mcc.field.y = (untyped mcc.field._baseY) + 2;
 			if ( password!=null || term.avman.folderContains(this, AntivirusXml.get.passwd) ) {
 				mcc.lockIcon._visible = true;
 				mcc.field._visible = false;
@@ -371,13 +378,16 @@ class FSNode {
 					// antivirus
 					mc.icon.gotoAndStop("antivir");
 					var mcc : MCFolder = cast mc.icon;
+					if ( untyped mcc.field._baseX == null ) {
+						untyped mcc.field._baseX = mcc.field.x;
+						untyped mcc.field._baseY = mcc.field.y;
+					}
 					if ( av==null )
 						mcc.field.text = ":-)";
 					else
 						mcc.field.text = av.key.substr(0,3).toUpperCase();
-					// TODO: text position is off, adjusting for it here, but should be fixed when building MovieClip
-					mcc.field.x = mcc.field.x + 6;
-					mcc.field.y = mcc.field.y + 6;
+					mcc.field.x = (untyped mcc.field._baseX) + 6;
+					mcc.field.y = (untyped mcc.field._baseY) + 6;
 
 //					mc.icon.gotoAndStop("unknownAV");
 //					if ( av!=null )
@@ -557,6 +567,11 @@ class FSNode {
 							term.vman.addEndEvent( neig.damage.bind(sdamage, true, false, true) );
 			}
 
+			var dmgNotified = false;
+			if ( final_dmg>0 && key=="file.core" ) {
+				dmgNotified = true;
+				term.avman.onDamageFile(final_dmg,this);
+			}
 			term.fs.delete(this);
 			Tutorial.play(Tutorial.get.first, "coreExposed");
 		}
@@ -572,7 +587,7 @@ class FSNode {
 				if ( final_dmg>0 )
 					term.log( Lang.fmt.Log_DistantDamage({_name:name, _n:final_dmg}) );
 
-		if ( final_dmg>0 )
+		if ( final_dmg>0 && (life>0 || !dmgNotified) )
 			term.avman.onDamageFile(final_dmg,this);
 
 		return final_dmg;
@@ -735,6 +750,8 @@ class FSNode {
 		mc.bar._visible = (lifeTotal>1 && (fl_crypted && life<lifeTotal || !fl_crypted));
 		mc.bar.smc._xscale = 100 * life/lifeTotal;
 		mc.field.text = getName();
+		if ( untyped mc.field._baseX != null )
+			mc.field.x = (untyped mc.field._baseX) + (120 - mc.field.width) / 2;
 		mc._visible = !fl_deleted;
 
 		if ( fl_crypted )
