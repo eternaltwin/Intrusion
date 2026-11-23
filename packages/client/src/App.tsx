@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getAdjustedPrime, type MissionEndSummary, type MissionInitParams, type PlayerDto } from '@intrusion/shared';
+import { getAdjustedPrime, type GoalId, type MissionEndSummary, type MissionInitParams, type PlayerDto } from '@intrusion/shared';
 import { api, type CatalogResponse } from './api/client';
 import { VirusTooltipProvider } from './classic/TooltipContext';
 import { ClassicLayout, type ClassicRoute } from './classic/ClassicLayout';
@@ -190,10 +190,15 @@ export function App() {
     try {
       if (summary.isChallenge) {
         const res = await api.endChallenge({ ...summary, scoutRun: summary.scoutRun });
+        const tierLvl = res.level ?? summary.gl;
+        const challengeGoals: MissionEndSummary['goals'] =
+          res.isRanked && summary.success
+            ? { [`challenge_pass_${tierLvl}` as GoalId]: 1 }
+            : {};
         setPlayer(res.player);
         setActiveMission(null);
         setDebrief({
-          summary: { ...summary, score: res.score ?? summary.score },
+          summary: { ...summary, score: res.score ?? summary.score, goals: challengeGoals },
           earnedMoney: res.rewardMoney,
           earnedXp: res.rewardXp ?? (res.isRanked && summary.success ? 2 : 0),
           scoutRun: res.scoutRun ?? summary.scoutRun,

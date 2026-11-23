@@ -12,6 +12,12 @@ const GOAL_LABELS: Record<string, string> = {
   success: 'Missions remplies',
   missions_fulfilled: 'Missions remplies',
   firsttry: 'Missions sans échec',
+  challenge_pass_5: 'Challenges Faciles réussis',
+  challenge_pass_7: 'Challenges Moyens réussis',
+  challenge_pass_9: 'Challenges Difficiles réussis',
+  challenge_top3_5: 'Top 3 Challenge Facile',
+  challenge_top3_7: 'Top 3 Challenge Moyen',
+  challenge_top3_9: 'Top 3 Challenge Difficile',
 };
 
 export interface DebriefState {

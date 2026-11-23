@@ -757,7 +757,7 @@ export function createApp(opts: CreateAppOptions) {
        FROM challenge_runs
        WHERE challenge_date = ? AND challenge_level = ? AND is_ranked = 1 AND success = 1
        GROUP BY user_id
-       ORDER BY bestScore DESC, remainingSec DESC
+       ORDER BY bestScore DESC, remainingSec DESC, MIN(id) ASC
        LIMIT 25`
     );
     const rankedRunStmt = db.prepare(
@@ -921,6 +921,10 @@ export function createApp(opts: CreateAppOptions) {
           rewardXp,
           userId
         );
+        db.prepare(`
+          INSERT INTO user_goals (user_id, goal_id, value) VALUES (?, ?, 1)
+          ON CONFLICT(user_id, goal_id) DO UPDATE SET value = value + 1
+        `).run(userId, `challenge_pass_${tier.level}`);
       }
       db.exec('COMMIT');
     } catch (err) {

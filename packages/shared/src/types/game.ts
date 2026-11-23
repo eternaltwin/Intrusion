@@ -272,7 +272,13 @@ export type GoalId =
   | 'passwd'
   | 'eextra'
   | 'mextra'
-  | 'cards_redeemed';
+  | 'cards_redeemed'
+  | 'challenge_pass_5'
+  | 'challenge_pass_7'
+  | 'challenge_pass_9'
+  | 'challenge_top3_5'
+  | 'challenge_top3_7'
+  | 'challenge_top3_9';
 
 export interface MissionEndSummary {
   missionKey: string;

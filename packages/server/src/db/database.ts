@@ -128,6 +128,22 @@ export function openDatabase(dbPath: string): DatabaseSync {
     db.exec('ALTER TABLE challenge_runs ADD COLUMN challenge_level INTEGER NOT NULL DEFAULT 7;');
   }
 
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_challenge_runs_leaderboard
+      ON challenge_runs (is_ranked, success, challenge_date, challenge_level, score DESC, remaining_sec DESC, id ASC);
+  `);
+
+  // Backfill first-try challenge completions (challenge_pass_5 / 7 / 9) from challenge_runs
+  db.exec(`
+    INSERT INTO user_goals (user_id, goal_id, value)
+    SELECT user_id, 'challenge_pass_' || challenge_level, COUNT(*)
+    FROM challenge_runs
+    WHERE is_ranked = 1 AND success = 1 AND challenge_level IN (5, 7, 9)
+    GROUP BY user_id, challenge_level
+    ON CONFLICT(user_id, goal_id) DO UPDATE SET
+      value = MAX(user_goals.value, excluded.value);
+  `);
+
   // Backfill cards_redeemed goal from already-redeemed stolen_cards rows
   db.exec(`
     INSERT INTO user_goals (user_id, goal_id, value)

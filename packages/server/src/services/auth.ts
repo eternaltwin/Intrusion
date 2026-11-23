@@ -96,6 +96,53 @@ export function registerNewUser(
   return userId;
 }
 
+function localTodayDateStr(nowMs = Date.now()): string {
+  const d = new Date(nowMs);
+  const yyyy = String(d.getFullYear());
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+export function syncUserChallengeGoals(
+  db: DatabaseSync,
+  userId: number,
+  todayStr = localTodayDateStr()
+): void {
+  // 1) First-try ranked wins per difficulty (immediate)
+  db.prepare(
+    `INSERT INTO user_goals (user_id, goal_id, value)
+     SELECT user_id, 'challenge_pass_' || challenge_level, COUNT(*)
+     FROM challenge_runs
+     WHERE user_id = ? AND is_ranked = 1 AND success = 1 AND challenge_level IN (5, 7, 9)
+     GROUP BY user_id, challenge_level
+     ON CONFLICT(user_id, goal_id) DO UPDATE SET
+       value = MAX(user_goals.value, excluded.value)`
+  ).run(userId);
+
+  // 2) End-of-day Top 3 podiums per difficulty (awarded once challenge_date < todayStr)
+  db.prepare(
+    `WITH ranked AS (
+       SELECT
+         user_id,
+         challenge_level,
+         ROW_NUMBER() OVER (
+           PARTITION BY challenge_date, challenge_level
+           ORDER BY score DESC, remaining_sec DESC, id ASC
+         ) AS rn
+       FROM challenge_runs
+       WHERE is_ranked = 1 AND success = 1 AND challenge_date < ? AND challenge_level IN (5, 7, 9)
+     )
+     INSERT INTO user_goals (user_id, goal_id, value)
+     SELECT user_id, 'challenge_top3_' || challenge_level, COUNT(*)
+     FROM ranked
+     WHERE user_id = ? AND rn <= 3
+     GROUP BY user_id, challenge_level
+     ON CONFLICT(user_id, goal_id) DO UPDATE SET
+       value = MAX(user_goals.value, excluded.value)`
+  ).run(todayStr, userId);
+}
+
 export function buildPlayerDto(db: DatabaseSync, userId: number): PlayerDto | null {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as
     | {
@@ -109,6 +156,8 @@ export function buildPlayerDto(db: DatabaseSync, userId: number): PlayerDto | nu
       }
     | undefined;
   if (!user) return null;
+
+  syncUserChallengeGoals(db, userId);
 
   const items = db
     .prepare('SELECT item_type, item_id, quantity FROM user_items WHERE user_id = ?')

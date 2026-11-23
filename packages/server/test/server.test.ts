@@ -491,4 +491,163 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(lvl4List.available.length).toBe(9);
     expect(lvl4List.available.every((m: any) => m.level >= 4)).toBe(true);
   });
+
+  it('tracks first-try challenge completions per tier and awards end-of-day Top 3 podium goals', async () => {
+    const { app, db } = createApp({
+      dbPath: ':memory:',
+      assetsDir,
+    });
+
+    const registerAndCookie = async (username: string) => {
+      const res = await app.request('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password: 'Password123!' }),
+      });
+      expect(res.status).toBe(201);
+      const json = await res.json();
+      const setCookie = res.headers.get('set-cookie')!;
+      return { cookie: setCookie.split(';')[0], userId: json.player.id as number };
+    };
+
+    const p1 = await registerAndCookie('PodiumOne');
+    const p2 = await registerAndCookie('PodiumTwo');
+    const p3 = await registerAndCookie('PodiumThree');
+    const p4 = await registerAndCookie('PodiumFour');
+
+    // Verify all 6 challenge stat icons are served
+    for (const icon of ['ismiley_happy', 'ismiley_yeah', 'ismiley_cool', 'lead2', 'lead31', 'lead3']) {
+      const iconRes = await app.request(`/img/icons/${icon}.png`);
+      expect(iconRes.status).toBe(200);
+    }
+
+    // P1 wins Easy (5) on 1st try -> challenge_pass_5 = 1, challenge_top3_5 still undefined (today not ended)
+    const winEasy1 = await app.request('/api/challenges/today/end', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: p1.cookie },
+      body: JSON.stringify({
+        missionKey: 'challenge_2026-11-23_5',
+        seed: 555,
+        gl: 5,
+        isChallenge: true,
+        scoutRun: false,
+        success: true,
+        kills: 5,
+        remainingSec: 120,
+        valuables: [],
+        copiedFiles: [],
+        stolenCards: [],
+        goals: {},
+        score: 1800,
+      }),
+    });
+    const winEasy1Json = await winEasy1.json();
+    expect(winEasy1Json.isRanked).toBe(true);
+    expect(winEasy1Json.player.goals.challenge_pass_5).toBe(1);
+    expect(winEasy1Json.player.goals.challenge_top3_5).toBeUndefined();
+
+    // P1 replays Easy (5) -> unranked, challenge_pass_5 stays 1
+    const replayEasy = await app.request('/api/challenges/today/end', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: p1.cookie },
+      body: JSON.stringify({
+        missionKey: 'challenge_2026-11-23_5',
+        seed: 555,
+        gl: 5,
+        isChallenge: true,
+        scoutRun: false,
+        success: true,
+        kills: 8,
+        remainingSec: 200,
+        valuables: [],
+        copiedFiles: [],
+        stolenCards: [],
+        goals: {},
+        score: 2320,
+      }),
+    });
+    const replayEasyJson = await replayEasy.json();
+    expect(replayEasyJson.isRanked).toBe(false);
+    expect(replayEasyJson.player.goals.challenge_pass_5).toBe(1);
+
+    // P1 fails Hard (9) on 1st try, then succeeds on 2nd try -> challenge_pass_9 must NOT be awarded
+    await app.request('/api/challenges/today/end', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: p1.cookie },
+      body: JSON.stringify({
+        missionKey: 'challenge_2026-11-23_9',
+        seed: 999,
+        gl: 9,
+        isChallenge: true,
+        scoutRun: false,
+        success: false,
+        kills: 1,
+        remainingSec: 0,
+        valuables: [],
+        copiedFiles: [],
+        stolenCards: [],
+        goals: {},
+        score: 15,
+      }),
+    });
+    const retryHard = await app.request('/api/challenges/today/end', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: p1.cookie },
+      body: JSON.stringify({
+        missionKey: 'challenge_2026-11-23_9',
+        seed: 999,
+        gl: 9,
+        isChallenge: true,
+        scoutRun: false,
+        success: true,
+        kills: 5,
+        remainingSec: 100,
+        valuables: [],
+        copiedFiles: [],
+        stolenCards: [],
+        goals: {},
+        score: 1700,
+      }),
+    });
+    const retryHardJson = await retryHard.json();
+    expect(retryHardJson.player.goals.challenge_pass_9).toBeUndefined();
+
+    // Seed completed past-day ('2000-01-01') ranked runs across tiers 5, 7, 9 for 4 players
+    const insertPastRun = db.prepare(`
+      INSERT INTO challenge_runs (challenge_date, challenge_level, user_id, username, score, success, remaining_sec, kills, is_ranked)
+      VALUES ('2000-01-01', ?, ?, ?, ?, 1, ?, 3, 1)
+    `);
+    // Tier 5: P1 #1 (2000), P2 #2 (1800), P3 #3 (1600), P4 #4 (1400)
+    insertPastRun.run(5, p1.userId, 'PodiumOne', 2000, 120);
+    insertPastRun.run(5, p2.userId, 'PodiumTwo', 1800, 100);
+    insertPastRun.run(5, p3.userId, 'PodiumThree', 1600, 80);
+    insertPastRun.run(5, p4.userId, 'PodiumFour', 1400, 60);
+    // Tier 7: P3 #1 (2100)
+    insertPastRun.run(7, p3.userId, 'PodiumThree', 2100, 150);
+    // Tier 9: P2 #1 (2500)
+    insertPastRun.run(9, p2.userId, 'PodiumTwo', 2500, 180);
+
+    const me1 = await (await app.request('/api/auth/me', { headers: { Cookie: p1.cookie } })).json();
+    const me2 = await (await app.request('/api/auth/me', { headers: { Cookie: p2.cookie } })).json();
+    const me3 = await (await app.request('/api/auth/me', { headers: { Cookie: p3.cookie } })).json();
+    const me4 = await (await app.request('/api/auth/me', { headers: { Cookie: p4.cookie } })).json();
+
+    // P1: 2 first-try Easy wins (today + past) & 1 Top-3 Easy (past day only)
+    expect(me1.player.goals.challenge_pass_5).toBe(2);
+    expect(me1.player.goals.challenge_top3_5).toBe(1);
+
+    // P2: #2 in Easy -> Top-3 Easy = 1, #1 in Hard -> Top-3 Hard = 1 & pass Hard = 1
+    expect(me2.player.goals.challenge_top3_5).toBe(1);
+    expect(me2.player.goals.challenge_pass_9).toBe(1);
+    expect(me2.player.goals.challenge_top3_9).toBe(1);
+
+    // P3: #3 in Easy -> Top-3 Easy = 1, #1 in Medium -> Top-3 Medium = 1 & pass Medium = 1
+    expect(me3.player.goals.challenge_top3_5).toBe(1);
+    expect(me3.player.goals.challenge_pass_7).toBe(1);
+    expect(me3.player.goals.challenge_top3_7).toBe(1);
+
+    // P4: #4 in Easy -> pass Easy = 1, but NOT Top 3!
+    expect(me4.player.goals.challenge_pass_5).toBe(1);
+    expect(me4.player.goals.challenge_top3_5).toBeUndefined();
+  });
 });

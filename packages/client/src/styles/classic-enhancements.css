@@ -178,6 +178,11 @@ ul.tabs li a,
   margin-right: 8px;
 }
 
+.userInfos table.stats tbody.statsChallengeGroup tr:first-child td {
+  border-top: 1px dashed #71754c;
+  padding-top: 12px;
+}
+
 /* Auth / Register classic form alignment */
 .authSplit {
   min-height: 360px;
