@@ -730,4 +730,110 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
     oneVid.deleted = true;
     expect(camSession.evaluateMissionObjective()).toBe(false);
   });
+
+  it('triggers eject only when damaging while inside the eject folder, not remotely via E_Tag', () => {
+    const fr = loadBundleFromDisk('fr');
+    const mission = generateMission(fr, 7, 4242, false);
+    const session = new MissionSession(fr, {
+      missionKey: 'eject_tag_test',
+      seed: 4242,
+      gl: 7,
+      mission,
+      decks: [
+        {
+          id: 'd1',
+          name: 'Deck 1',
+          capacity: 8,
+          isFavorite: true,
+          content: ['tag1', 'tag1', 'dmgs', 'dmgs'],
+        },
+      ],
+      chipset: null,
+      isChallenge: false,
+      biosLevel: 2,
+      tries: 0,
+      profile: {
+        username: 'EjectTester',
+        level: 8,
+        leet: false,
+        adult: true,
+        cfg: '',
+        sfx: false,
+        ambiant: false,
+        beat: false,
+        lang: 'fr',
+      },
+    });
+
+    const targetNode = Object.values(session.nodes).find(
+      (n) => n.system !== null && session.canReachNode(n) && !session.isNodeShielded(n)
+    )!;
+    expect(session.connectToNode(targetNode.id).ok).toBe(true);
+    advanceMs(session, 3000);
+
+    const sys = session.currentSystem!;
+    // Strip existing AVs/locks/masks
+    for (const f of Object.values(sys.files)) {
+      f.avKey = null;
+      f.password = null;
+      delete f.effects.E_Masked;
+      delete f.effects.E_Encoded;
+      delete f.effects.E_Immune;
+      delete f.effects.E_Shield;
+      delete f.effects.E_CShield;
+    }
+
+    // Find two distinct folders, each with at least one non-folder file
+    const foldersWithFiles = Object.values(sys.files).filter(
+      (f) =>
+        f.isFolder &&
+        f.childrenIds.some((cid) => {
+          const ch = sys.files[cid];
+          return ch && !ch.isFolder && !ch.deleted;
+        })
+    );
+    expect(foldersWithFiles.length).toBeGreaterThanOrEqual(2);
+
+    const safeFolder = foldersWithFiles[0];
+    const ejectFolder = foldersWithFiles[1];
+
+    const safeFile = sys.files[safeFolder.childrenIds.find((cid) => !sys.files[cid].isFolder)!]!;
+    const ejectFiles = ejectFolder.childrenIds
+      .map((cid) => sys.files[cid]!)
+      .filter((ch) => ch && !ch.isFolder);
+
+    // Put an eject AV in ejectFolder and a linked target file (different file if available, or eject itself with high HP)
+    const ejectAv = ejectFiles[0];
+    ejectAv.avKey = 'eject';
+    ejectAv.life = 20;
+    ejectAv.lifeTotal = 20;
+
+    safeFile.life = 20;
+    safeFile.lifeTotal = 20;
+
+    // Link both files with tag1 (50% spread)
+    session.currentFolderId = safeFolder.id;
+    expect(session.useVirusById('tag1', safeFile.id).ok).toBe(true);
+    advanceMs(session, 2000);
+
+    session.currentFolderId = ejectFolder.id;
+    expect(session.useVirusById('tag1', ejectAv.id).ok).toBe(true);
+    advanceMs(session, 2000);
+
+    // Move back to safeFolder (no eject) and hit safeFile -> ejectAv takes linked damage, player is NOT ejected
+    session.currentFolderId = safeFolder.id;
+    const ejectHpBefore = ejectAv.life;
+    expect(session.useVirusById('dmgs', safeFile.id).ok).toBe(true);
+    advanceMs(session, 2000);
+
+    expect(ejectAv.life).toBeLessThan(ejectHpBefore);
+    expect(session.connectedNodeId).toBe(targetNode.id);
+
+    // Now move into ejectFolder and hit ejectAv directly -> player IS ejected
+    session.currentFolderId = ejectFolder.id;
+    expect(session.useVirusById('dmgs', ejectAv.id).ok).toBe(true);
+    advanceMs(session, 2000);
+
+    expect(session.connectedNodeId).toBeNull();
+  });
 });

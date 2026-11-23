@@ -1964,30 +1964,29 @@ export class MissionSession {
         }
       }
 
-      // Eject in folder (respects E_SkipAction and UE_Furtivity; queued BEFORE deleteFile/crashSystem)
-      if (f.parentId !== null) {
-        const folder = sys.files[f.parentId];
-        if (folder) {
-          for (const cid of folder.childrenIds) {
-            const ej = sys.files[cid];
-            if (ej && !ej.deleted && ej.avKey === 'eject') {
-              this.endTurnQueue.push(() => {
-                if (ej.deleted || sys.crashed || this.connectedNodeId !== sys.nodeId) return;
-                const ui = this.bundle.uiStrings;
-                if ((ej.effects.E_SkipAction ?? 0) > 0) {
-                  ej.effects.E_SkipAction!--;
-                  if (ej.effects.E_SkipAction! <= 0) delete ej.effects.E_SkipAction;
-                  this.pushLog('info', formatLang(ui, 'AntivirusBlocked', { av: 'EJECT' }));
-                  return;
-                }
-                if ((this.userEffects.UE_Furtivity ?? 0) > 0) {
-                  this.pushLog('info', formatLang(ui, 'AntivirusDodged', { av: 'EJECT' }));
-                  return;
-                }
-                this.pushLog('danger', formatLang(ui, 'Ejected', { av: 'EJECT' }));
-                this.disconnectFromSystem(false);
-              });
-            }
+      // Eject in player's current folder (matches legacy AntivirMan.onDamageFile -> curFolder;
+      // remote damage via E_Tag does not trigger eject in another folder; queued BEFORE deleteFile/crashSystem)
+      const curFolder = this.connectedNodeId === sys.nodeId ? this.currentFolder : null;
+      if (curFolder) {
+        for (const cid of curFolder.childrenIds) {
+          const ej = sys.files[cid];
+          if (ej && !ej.deleted && ej.avKey === 'eject') {
+            this.endTurnQueue.push(() => {
+              if (ej.deleted || sys.crashed || this.connectedNodeId !== sys.nodeId) return;
+              const ui = this.bundle.uiStrings;
+              if ((ej.effects.E_SkipAction ?? 0) > 0) {
+                ej.effects.E_SkipAction!--;
+                if (ej.effects.E_SkipAction! <= 0) delete ej.effects.E_SkipAction;
+                this.pushLog('info', formatLang(ui, 'AntivirusBlocked', { av: 'EJECT' }));
+                return;
+              }
+              if ((this.userEffects.UE_Furtivity ?? 0) > 0) {
+                this.pushLog('info', formatLang(ui, 'AntivirusDodged', { av: 'EJECT' }));
+                return;
+              }
+              this.pushLog('danger', formatLang(ui, 'Ejected', { av: 'EJECT' }));
+              this.disconnectFromSystem(false);
+            });
           }
         }
       }
