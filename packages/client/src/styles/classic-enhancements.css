@@ -372,3 +372,49 @@ dialog.classicPopupDialog::backdrop {
   letter-spacing: 0.4pt;
   cursor: pointer;
 }
+
+/* HackStore virus row link & .shopDetails software box panel */
+.shop table.table tr.virus a.virusDetailLink {
+  padding: 0;
+  color: inherit;
+  text-decoration: none;
+  background: transparent;
+}
+
+.shop table.table tr.virus a.virusDetailLink:hover {
+  color: inherit;
+  background: transparent;
+}
+
+.shop table.table tr.virus:hover a.virusDetailLink strong {
+  color: #3b3d28;
+}
+
+.shop table.table tr.virus a.virusDetailLink:focus-visible,
+.shopDetails a.button:focus-visible {
+  outline: 2px solid #fed82a;
+  outline-offset: 2px;
+}
+
+.shopDetails .boxPanel .vbox {
+  position: relative;
+}
+
+.shopDetails .detailsPanel h1 .recom {
+  margin-left: 6px;
+  padding: 1px 4px;
+  font-size: 7.5pt;
+  letter-spacing: 0;
+  text-transform: none;
+  vertical-align: middle;
+  color: #fed82a;
+  background-color: #3b3d28;
+  border: 1px solid #000;
+}
+
+.shopDetails .detailsPanel dl dd.virusFullDesc {
+  font-weight: normal;
+  color: #d0d194;
+  white-space: pre-line;
+  line-height: 1.4;
+}

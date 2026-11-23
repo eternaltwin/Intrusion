@@ -1,9 +1,16 @@
 import { useEffect, useState } from 'react';
-import type { ChipsetDef, PlayerDto, VirusDef } from '@intrusion/shared';
+import { formatVirusDesc, type ChipsetDef, type PlayerDto, type VirusDef, type VirusTarget } from '@intrusion/shared';
 import { api } from '../api/client';
 import { useVirusTooltip } from './TooltipContext';
 
 type StoreTab = 'home' | 'dmg' | 'debuff' | 'combo' | 'utils' | 'chipset' | 'bios';
+
+const TARGET_LABELS: Record<VirusTarget, string> = {
+  _file: 'Fichier / Anti-virus',
+  _folder: 'Dossier',
+  _none: 'Aucune (système / global)',
+  _net: 'Nœud réseau',
+};
 
 const BIOS_DESCRIPTIONS: Record<number, string> = {
   2: 'Overclocking BUS v2.0 : accélère sensiblement la vitesse d’exécution de tous vos virus et des animations terminal.',
@@ -27,6 +34,7 @@ export function StoreView({
   onNotify: (msg: string, error?: boolean) => void;
 }) {
   const [tab, setTab] = useState<StoreTab>('home');
+  const [selectedVirusId, setSelectedVirusId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const { showVirus, hideVirus } = useVirusTooltip();
 
@@ -36,7 +44,13 @@ export function StoreView({
 
   const switchTab = (next: StoreTab) => {
     hideVirus();
+    setSelectedVirusId(null);
     setTab(next);
+  };
+
+  const openVirusDetails = (virusId: string) => {
+    hideVirus();
+    setSelectedVirusId(virusId);
   };
 
   const buyVirus = async (v: VirusDef) => {
@@ -109,9 +123,10 @@ export function StoreView({
                     className="select virus"
                     onMouseEnter={() => showVirus(v.id)}
                     onMouseLeave={() => hideVirus(v.id)}
+                    onClick={() => openVirusDetails(v.id)}
                   >
                     <td className="icon">
-                      <img src={`/img/dockicons/xl/${v.id}.png`} alt={v.name} />
+                      <img src={`/img/dockicons/xl/${v.id}.png`} alt="" />
                       <div />
                     </td>
                     <td className="desc">
@@ -119,7 +134,17 @@ export function StoreView({
                         {v.level === player.level && ownedCount === 0 && (
                           <img className="new" src="/img/design/new.png" alt="Nouveau" />
                         )}{' '}
-                        <strong>{v.name}</strong>{' '}
+                        <a
+                          href={`#virus-${v.id}`}
+                          className="virusDetailLink"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            openVirusDetails(v.id);
+                          }}
+                        >
+                          <strong>{v.name}</strong>
+                        </a>{' '}
                         {ownedCount > 0 && (
                           <span style={{ color: '#d0d194', fontSize: '8pt' }}>
                             (x{ownedCount})
@@ -138,7 +163,7 @@ export function StoreView({
                         </div>
                       </div>
                     </td>
-                    <td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       {out || busyId === v.id ? (
                         <div className="offButton">Acheter</div>
                       ) : (
@@ -160,6 +185,10 @@ export function StoreView({
   const visibleChipsets = chipsets
     .filter((c) => c.price > 0 && c.level <= player.level)
     .sort((a, b) => a.level - b.level || a.price - b.price);
+
+  const selectedVirus = selectedVirusId
+    ? viruses.find((v) => v.id === selectedVirusId && v.price > 0 && v.level <= player.level) ?? null
+    : null;
 
   return (
     <div className="shop">
@@ -193,11 +222,108 @@ export function StoreView({
 
       <div className="window">
         <div className="wtitle">
-          <img className="wbutton" src="/img/design/pixel.gif" alt="" />
-          <span>Catalogue.prg</span>
+          <img
+            className="wbutton"
+            src="/img/design/pixel.gif"
+            alt=""
+            onClick={selectedVirus ? () => setSelectedVirusId(null) : undefined}
+          />
+          <span>
+            {selectedVirus ? `Catalogue.prg -- ${selectedVirus.id}.prg` : 'Catalogue.prg'}
+          </span>
         </div>
 
-        {tab === 'home' && (
+        {selectedVirus ? (
+          (() => {
+            const ownedCount = player.viruses.filter((id) => id === selectedVirus.id).length;
+            const out = selectedVirus.price > player.money;
+            return (
+              <div className="container shopDetails">
+                <div className="boxPanel">
+                  <div
+                    className="vbox"
+                    style={{
+                      backgroundImage: `url("/img/design/box_${selectedVirus.cat}.png")`,
+                    }}
+                  >
+                    <div className="name">
+                      {selectedVirus.id}
+                      <em>.prg</em>
+                    </div>
+                    <img src={`/img/dockicons/xl/${selectedVirus.id}.png`} alt="" />
+                  </div>
+                  <a
+                    href="#catalogue"
+                    className="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setSelectedVirusId(null);
+                    }}
+                  >
+                    Retour
+                  </a>
+                </div>
+
+                <div className="detailsPanel">
+                  <h1>
+                    {selectedVirus.name}{' '}
+                    {selectedVirus.recom && <span className="recom">Recommandé</span>}
+                  </h1>
+
+                  <dl>
+                    <dt>Catégorie</dt>
+                    <dd>{selectedVirus.catName}</dd>
+                    <dt>Commande terminal</dt>
+                    <dd>
+                      <code>{selectedVirus.id}.prg</code>
+                    </dd>
+                    <dt>Cible</dt>
+                    <dd>{TARGET_LABELS[selectedVirus.target]}</dd>
+                    <dt>Coût en Ressources</dt>
+                    <dd>{selectedVirus.cc}</dd>
+                    <dt>Utilisations par mission</dt>
+                    <dd>
+                      {selectedVirus.uses !== null
+                        ? `${selectedVirus.uses} par exemplaire`
+                        : 'Illimitées'}
+                    </dd>
+                    <dt>Niveau requis</dt>
+                    <dd>Niveau {selectedVirus.level}</dd>
+                    <dt>Exemplaires en réserve</dt>
+                    <dd>{ownedCount}</dd>
+                    <dt>Description</dt>
+                    <dd className="virusFullDesc">{formatVirusDesc(selectedVirus)}</dd>
+                    <dt>Prix</dt>
+                    <dd>
+                      <span className="gameMoney">
+                        {selectedVirus.price} <img src="/img/icons/money.png" alt="Crédits" />
+                      </span>
+                    </dd>
+                  </dl>
+
+                  {out || busyId === selectedVirus.id ? (
+                    <div className="offButton">Acheter</div>
+                  ) : (
+                    <a
+                      href={`#buy-${selectedVirus.id}`}
+                      className="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        buyVirus(selectedVirus);
+                      }}
+                    >
+                      Acheter
+                    </a>
+                  )}
+                </div>
+
+                <div className="clear" />
+              </div>
+            );
+          })()
+        ) : (
+          <>
+            {tab === 'home' && (
           <div id="home" className="container">
             <div className="help">
               Le HackStore est un espace vous permettant :
@@ -357,6 +483,8 @@ export function StoreView({
               </tbody>
             </table>
           </div>
+        )}
+          </>
         )}
       </div>
     </div>
