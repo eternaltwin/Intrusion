@@ -44,7 +44,7 @@ class FSNode {
 	public var emcList		: Array<MCField>;
 
 
-	public function new(pterm:UserTerminal, pfs:GFileSystem, p:FSNode, k:String) {
+	public function new(pterm:UserTerminal, pfs:GFileSystem, p:FSNode, k:String, ?fl_skipName:Bool=false) {
 		fs = pfs;
 		term = pterm;
 		parent = p;
@@ -52,7 +52,8 @@ class FSNode {
 		sortIndex = Data.UNIQ++;
 
 		depth = if(parent==null) 0 else parent.depth+1;
-		generateName();
+		if ( !fl_skipName )
+			generateName();
 		fl_folder = false;
 		fl_target = false;
 		fl_deleted = false;
@@ -92,13 +93,14 @@ class FSNode {
 
 	public function createCopy() {
 		term.playSound("bleep_06");
-		var f = new FSNode(term, fs, parent, key);
+		var f = new FSNode(term, fs, parent, key, true);
 		copyData(f);
 		return f;
 	}
 
 	public function copyData(f:FSNode) {
 		f.id = id;
+		f.seed = seed;
 		f.name = name;
 		f.owner = getOwner();
 		f.content = getContent();
@@ -123,8 +125,10 @@ class FSNode {
 	public function generateName() {
 		if ( av!=null )
 			name = av.key+TD.fsNames.get("ver")+"."+TD.fsNames.get("antivirExt");
-		else
+		else if ( TD.fsNames.exists(key.toLowerCase()) )
 			name = TD.fsNames.get(key);
+		else
+			name = key;
 	}
 
 

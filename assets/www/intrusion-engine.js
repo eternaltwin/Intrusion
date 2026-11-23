@@ -1439,14 +1439,19 @@ Dock.prototype = {
 	}
 	,__class__: Dock
 };
-var FSNode = function(pterm,pfs,p,k) {
+var FSNode = function(pterm,pfs,p,k,fl_skipName) {
+	if(fl_skipName == null) {
+		fl_skipName = false;
+	}
 	this.fs = pfs;
 	FSNode.term = pterm;
 	this.parent = p;
 	this.key = k;
 	this.sortIndex = Data.UNIQ++;
 	this.depth = this.parent == null ? 0 : this.parent.depth + 1;
-	this.generateName();
+	if(!fl_skipName) {
+		this.generateName();
+	}
 	this.fl_folder = false;
 	this.fl_target = false;
 	this.fl_deleted = false;
@@ -1565,12 +1570,13 @@ FSNode.prototype = {
 	,emcList: null
 	,createCopy: function() {
 		FSNode.term.playSound("bleep_06");
-		var f = new FSNode(FSNode.term,this.fs,this.parent,this.key);
+		var f = new FSNode(FSNode.term,this.fs,this.parent,this.key,true);
 		this.copyData(f);
 		return f;
 	}
 	,copyData: function(f) {
 		f.id = this.id;
+		f.seed = this.seed;
 		f.name = this.name;
 		f.owner = this.getOwner();
 		f.content = this.getContent();
@@ -1607,8 +1613,10 @@ FSNode.prototype = {
 	,generateName: function() {
 		if(this.av != null) {
 			this.name = this.av.key + TD.fsNames.get("ver") + "." + TD.fsNames.get("antivirExt");
-		} else {
+		} else if(TD.fsNames.exists(this.key.toLowerCase())) {
 			this.name = TD.fsNames.get(this.key);
+		} else {
+			this.name = this.key;
 		}
 	}
 	,setLife: function(n) {
