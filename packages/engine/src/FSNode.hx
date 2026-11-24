@@ -448,11 +448,11 @@ class FSNode {
 //			return false;
 //	}
 
-	public function damage(base:Int, ?fl_canBeBoosted=true, ?fl_ignoreShield=false, ?fl_canSpread=true, ?fl_applyBrute=true) {
+	public function damage(base:Int, ?fl_canBeBoosted=true, ?fl_ignoreShield=false, ?fl_canSpread=true) {
 		if ( fl_deleted || life<=0 )
 			return 0;
 		var dmg : Float = base;
-		if ( fl_applyBrute && term.hasChipset(data.ChipsetsXml.get.brute) )
+		if ( term.hasChipset(data.ChipsetsXml.get.brute) )
 			dmg = Math.round(VirusMan.BRUTE_DMG*dmg);
 		var extra = "";
 
@@ -467,10 +467,7 @@ class FSNode {
 		if ( fl_canBeBoosted ) {
 			if ( term.hasEffect(UE_DamageBurst) ) {
 				dmg+=term.getEffectSource(UE_DamageBurst).power;
-				if ( !term.vman.burstUsed ) {
-					term.vman.burstUsed = true;
-					term.vman.addEndEvent( function() {term.removeEffect(UE_DamageBurst); return 0;} );
-				}
+				term.vman.addEndEvent( function() {term.removeEffect(UE_DamageBurst); return 0;} );
 			}
 			if ( term.hasEffect(UE_Charge) ) {
 				dmg*=term.countEffect(UE_Charge);
@@ -536,12 +533,10 @@ class FSNode {
 		life = Std.int( Math.max(0, life-final_dmg) );
 
 		if ( fl_canSpread && final_dmg>0 && hasEffect(E_Tag) ) {
-			var sdamage = Math.floor( final_dmg * countEffect(E_Tag)/100 );
-			if ( sdamage>0 ) {
-				for (neig in term.fs.getFilesByEffect(E_Tag))
-					if ( neig!=this )
-						term.vman.addEndEvent( neig.damage.bind(sdamage, false, false, false, false) );
-			}
+			var sdamage = Math.floor( base * countEffect(E_Tag)/100 );
+			for (neig in term.fs.getFilesByEffect(E_Tag))
+				if ( neig!=this )
+					term.vman.addEndEvent( neig.damage.bind(sdamage, true, false, false) );
 		}
 
 		if ( mc!=null ) {
@@ -575,12 +570,10 @@ class FSNode {
 			// splash damage ! (librairie pi�g�e)
 			if ( hasEffect(E_Splash) && !fl_deleted ) {
 				var sdamage = Math.floor( dmg * countEffect(E_Splash)/100 );
-				if ( sdamage>0 ) {
-					for (neig in term.fs.getFolderFiles(parent))
-						if ( neig.key=="file.core" || neig.key=="file.guardian" || neig.av!=null )
-							if ( neig!=this && !neig.fl_folder && !neig.fl_deleted )
-								term.vman.addEndEvent( neig.damage.bind(sdamage, false, false, true, false) );
-				}
+				for (neig in term.fs.getFolderFiles(parent))
+					if ( neig.key=="file.core" || neig.key=="file.guardian" || neig.av!=null )
+						if ( neig!=this && !neig.fl_folder && !neig.fl_deleted )
+							term.vman.addEndEvent( neig.damage.bind(sdamage, true, false, true) );
 			}
 
 			var dmgNotified = false;

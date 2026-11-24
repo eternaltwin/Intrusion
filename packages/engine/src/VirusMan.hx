@@ -165,14 +165,41 @@ class VirusMan {
 				if ( f==null || v.target!="_folder" )
 					throw Lang.get.InvalidTarget;
 			}
+			else if ( term.fl_leet && v==VirusXml.get.cd && fname.indexOf("/")>=0 ) {
+				// Intentional secret Uber-Eleet perk: allow multi-hop path navigation (`cd /`, `cd /a/b`, `cd a/b`) in Leet mode.
+				// Do NOT mention or advertise this behavior in any player-facing site or UI description.
+				if ( fname=="/" ) {
+					f = term.fs.getRoot();
+				} else {
+					var isAbs = fname.charAt(0)=="/";
+					var parts = fname.split("/");
+					var nav = isAbs ? term.fs.getRoot() : term.fs.curFolder;
+					for ( seg in parts ) {
+						if ( seg.length==0 || seg=="." ) continue;
+						if ( seg==".." ) {
+							if ( nav.parent==null ) throw Lang.get.InvalidTarget;
+							nav = nav.parent;
+						} else {
+							var nextDir : FSNode = null;
+							for ( ch in term.fs.getFolderFiles(nav) )
+								if ( !ch.fl_deleted && ch.fl_folder && ch.name.toLowerCase()==seg.toLowerCase() ) {
+									nextDir = ch;
+									break;
+								}
+							if ( nextDir==null ) throw Lang.get.FileNotFound;
+							nav = nextDir;
+						}
+					}
+					f = nav;
+				}
+			}
 			else {
 				f = term.fs.getFile(fname);
 				if ( f==null )
 					throw Lang.get.FileNotFound;
 			}
 
-		// lancement
-		if ( f!=null )
+		if ( f!=null && f.mcIndex!=null )
 			term.fs.focus(f.mcIndex);
 		exec(v, f);
 	}
@@ -224,6 +251,7 @@ class VirusMan {
 
 		// d�marrage apr�s barre de progression
 		Progress.start( ct, function() {
+			var prevFs = me.term.fs;
 			if ( me.virus.uses!=null ) {
 				me.virus.uses--;
 				if ( me.virus.uses==0 )
@@ -233,13 +261,16 @@ class VirusMan {
 
 			me.term.checkMission();
 			me.term.spam(me.virus.id+" OK");
-			me.term.avman.onVirusRun(me.virus);
+			me.term.avman.onVirusRun(me.virus, prevFs);
 			me.term.decayLog();
 			me.term.hideCompletion();
 			me.term.dock.updateBubbles();
 
 			// perte furtivit�
-			if ( me.term.hasEffect(UE_Furtivity) )
+			// Intentional secret Uber-Eleet perk: cd, extrac & target do NOT consume UE_Furtivity in Leet mode.
+			// Do NOT mention or advertise this behavior in any player-facing site or UI description.
+			var skipFurtivityConsume = me.term.fl_leet && (me.virus==VirusXml.get.cd || me.virus==VirusXml.get.extrac || me.virus==VirusXml.get.target);
+			if ( me.term.hasEffect(UE_Furtivity) && !skipFurtivityConsume )
 				me.term.avman.endTurn.add( function() {
 					me.term.removeEffect(UE_Furtivity);
 					me.term.log( Lang.fmt.RemainingFurtivity({_n:me.term.countEffect(UE_Furtivity)}) );
@@ -288,7 +319,7 @@ class VirusMan {
 			for (f in term.fs.rawTree)
 				if ( f.hasEffect(E_Dot) ) {
 					hit = true;
-					f.damage( f.countEffect(E_Dot), false );
+					f.damage( f.countEffect(E_Dot), true );
 					f.removeEffect(E_DotLength);
 					if ( !f.hasEffect(E_DotLength) )
 						f.clearEffect(E_Dot);
@@ -578,6 +609,17 @@ class VirusMan {
 
 	function _cd(f:F) {
 		if ( !f.fl_folder ) throw Lang.get.NeedFolder;
+		var isAdjacent = term.fs.curFolder!=null && (f==term.fs.curFolder.parent || f.parent==term.fs.curFolder);
+		// Intentional secret Uber-Eleet perk: non-adjacent folder jumps are allowed ONLY in Uber-Eleet mode.
+		// Do NOT mention or advertise this behavior in any player-facing site or UI description.
+		if ( !term.fl_leet && !isAdjacent )
+			throw Lang.get.InvalidTarget;
+		var anc = f.parent;
+		while ( anc!=null ) {
+			if ( anc.password!=null || term.avman.folderContains(anc, AntivirusXml.get.passwd) )
+				throw Lang.get.MapLocked;
+			anc = anc.parent;
+		}
 		if ( f.password!=null || term.avman.folderContains(f, AntivirusXml.get.passwd) ) {
 			term.askPass(f);
 			throw "";
@@ -595,7 +637,8 @@ class VirusMan {
 		if ( term.avman.folderContains(term.fs.curFolder, AntivirusXml.get.glue) )
 			if ( !term.hasEffect(UE_Furtivity) && !term.hasEffect(UE_MoveFurtivity) )
 				throw Lang.get.CantGetOut;
-		term.startAnim( A_StrongBlink, cast f.mc.icon );
+		if ( f.mc!=null )
+			term.startAnim( A_StrongBlink, cast f.mc.icon );
 
 		var t = getCT()*0.6;
 		if ( f==term.fs.curFolder.parent || MissionGen.isTutorial(term.mdata) )
@@ -619,21 +662,12 @@ class VirusMan {
 		if ( term.avman.systemContains(AntivirusXml.get.sysdef) )
 			throw Lang.get.RebootBlocked;
 		start(getCT(f), function(t,v) {
-			var sys = t.fs;
-			var avFiles = new Array<FSNode>();
-			if ( sys!=null )
-				for (file in sys.rawTree)
-					if ( !file.fl_deleted && file.av!=null && !file.hasEffect(E_Disabled) )
-						avFiles.push(file);
-			t.avman.onVirusRun(v);
-			if ( sys!=null )
-				sys.reboot();
-			for (file in avFiles)
-				if ( !file.fl_deleted && file.av!=null && !file.hasEffect(E_Disabled) ) {
-					var cur = file.countEffect(E_SkipAction);
-					if ( cur<3 )
-						file.addEffect(E_SkipAction, 3-cur, 3);
-				}
+			for (lk in t.avman.fast.keys()) {
+				var list = t.avman.fast.get(lk);
+				for (file in list)
+					file.addEffect(E_SkipAction, 3, 3);
+			}
+			t.fs.reboot();
 		});
 	}
 
@@ -641,22 +675,14 @@ class VirusMan {
 		if ( term.avman.systemContains(AntivirusXml.get.sysdef) )
 			throw Lang.get.RebootBlocked;
 		start(getCT(f), function(t,v) {
-			var sys = t.fs;
-			var avFiles = new Array<FSNode>();
-			if ( sys!=null )
-				for (file in sys.rawTree)
-					if ( !file.fl_deleted && file.av!=null && !file.hasEffect(E_Disabled) )
-						avFiles.push(file);
-			t.avman.onVirusRun(v);
-			if ( sys!=null )
-				sys.reboot();
-			for (file in avFiles)
-				if ( !file.fl_deleted && file.av!=null && !file.hasEffect(E_Disabled) ) {
-					var cur = file.countEffect(E_SkipAction);
-					if ( cur<3 )
-						file.addEffect(E_SkipAction, 3-cur, 3);
+			for (lk in t.avman.fast.keys()) {
+				var list = t.avman.fast.get(lk);
+				for (file in list) {
+					file.addEffect(E_SkipAction, 3, 3);
 					file.addEffect(E_Exploit, 1, 1);
 				}
+			}
+			t.fs.reboot();
 		});
 	}
 
@@ -889,6 +915,10 @@ class VirusMan {
 
 	function _panic1(f:F) {
 		start(getCT(f)*0.5, function(t,v) {
+			if ( t.hasEffect(UE_MoveFurtivity) ) {
+				t.removeEffect(UE_MoveFurtivity);
+				t.log( Lang.fmt.RemainingMoveFurtivity({_n:t.countEffect(UE_MoveFurtivity)}) );
+			}
 			t.disconnectFS();
 		});
 	}
@@ -936,6 +966,10 @@ class VirusMan {
 			throw Lang.get.NotInRoot;
 		start(getCT(f)*0.5, function(t,v) {
 			t.fs.openFolder(t.fs.curFolder.parent, true);
+			if ( t.hasEffect(UE_MoveFurtivity) ) {
+				t.removeEffect(UE_MoveFurtivity);
+				t.log( Lang.fmt.RemainingMoveFurtivity({_n:t.countEffect(UE_MoveFurtivity)}) );
+			}
 		});
 	}
 

@@ -69,6 +69,7 @@ export function openDatabase(dbPath: string): DatabaseSync {
       prime INTEGER NOT NULL,
       status TEXT NOT NULL CHECK(status IN ('available', 'active', 'completed')),
       tries INTEGER NOT NULL DEFAULT 0,
+      scout_run INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       completed_at INTEGER DEFAULT NULL,
       PRIMARY KEY (user_id, mission_key)
@@ -114,12 +115,34 @@ export function openDatabase(dbPath: string): DatabaseSync {
       is_ranked INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS challenge_loadouts (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      challenge_level INTEGER NOT NULL CHECK(challenge_level IN (5, 7, 9)),
+      chipset_id TEXT DEFAULT NULL,
+      content_json TEXT NOT NULL DEFAULT '[]',
+      PRIMARY KEY (user_id, challenge_level)
+    );
+
+    CREATE TABLE IF NOT EXISTS challenge_active_runs (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      challenge_date TEXT NOT NULL,
+      challenge_level INTEGER NOT NULL,
+      scout_run INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, challenge_date, challenge_level)
+    );
   `);
 
   // Safe schema migration: add quantity column to user_items if missing on existing DBs
   const userItemsCols = db.prepare("PRAGMA table_info('user_items')").all() as Array<{ name: string }>;
   if (!userItemsCols.some((c) => c.name === 'quantity')) {
     db.exec('ALTER TABLE user_items ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1;');
+  }
+
+  // Safe schema migration: add scout_run column to missions if missing on existing DBs
+  const missionCols = db.prepare("PRAGMA table_info('missions')").all() as Array<{ name: string }>;
+  if (!missionCols.some((c) => c.name === 'scout_run')) {
+    db.exec('ALTER TABLE missions ADD COLUMN scout_run INTEGER NOT NULL DEFAULT 0;');
   }
 
   // Safe schema migration: add challenge_level column to challenge_runs if missing on existing DBs

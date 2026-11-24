@@ -139,8 +139,32 @@ function patternTextKey(p: MissionPattern): string {
   }
 }
 
+function ensureDataExt(name: string): string {
+  return name.toLowerCase().endsWith('.data') ? name : `${name}.data`;
+}
+
+export function buildMissionCards(seed: number, level: number, corp: string): StolenCard[] {
+  if (level < 4) return [];
+  const cardRng = Rand.fromSeed(seed ^ 0x51a9c3);
+  const out: StolenCard[] = [];
+  for (let i = 0; i < 3; i++) {
+    const p1 = String(1000 + cardRng.random(9000));
+    const p2 = String(1000 + cardRng.random(9000));
+    const p3 = String(1000 + cardRng.random(9000));
+    const num = `4971-${p1}-${p2}-${p3}`;
+    const amount = Math.min(5000, (2 + cardRng.random(level * 2)) * 100);
+    out.push({
+      id: `cc_${seed}_${i}`,
+      holder: corp,
+      number: num,
+      amount,
+    });
+  }
+  return out;
+}
+
 export function generateMission(bundle: GameDataBundle, glevel: number, seed: number, adult = true): MissionData {
-  const { texts, fsNames, names } = bundle.createTextEngines(0, adult);
+  const { texts, fsNames, names } = bundle.createTextEngines(seed, adult);
   const rseed = Rand.fromSeed(seed);
 
   const list: MissionPattern[] = [];
@@ -219,8 +243,8 @@ export function generateMission(bundle: GameDataBundle, glevel: number, seed: nu
       { kind: 'FindMails', owner: names.get('musername', rseed), n: rseed.random(3) + 2 },
       { kind: 'CompromiseMail', owner: names.get('musername', rseed) },
       { kind: 'TV', tvFrom: names.get('hotTv', rseed), tvTo: names.get('badTv', rseed) },
-      { kind: 'TVTheft', tv: names.get('tv', rseed), program: names.get('tvProgTheft', rseed) },
-      { kind: 'TVTheft', tv: names.get('hotTv', rseed), program: names.get('hotProgTheft', rseed) },
+      { kind: 'TVTheft', tv: names.get('tv', rseed), program: ensureDataExt(names.get('tvProgTheft', rseed)) },
+      { kind: 'TVTheft', tv: names.get('hotTv', rseed), program: ensureDataExt(names.get('hotProgTheft', rseed)) },
       { kind: 'TVCrash', tv: names.get('tv', rseed) },
       { kind: 'CrashDB', fname: fsNames.get('/sys_db', rseed) }
     );
@@ -384,25 +408,6 @@ export function generateMission(bundle: GameDataBundle, glevel: number, seed: nu
   } else {
     texts.set('briefing', details);
     m.details = isTutorialMission(m) ? texts.get('briefing') : texts.get('missionDetails');
-  }
-
-  // Restored Stolen Credit Cards feature (uses isolated sub-RNG so original rseed stays untouched)
-  if (!isTutorialMission(m)) {
-    const cardRng = Rand.fromSeed(seed ^ 0x5a3c19);
-    if (cardRng.random(100) < 35 + glevel * 4) {
-      const count = cardRng.random(2) + 1;
-      for (let i = 0; i < count; i++) {
-        const holder = names.get('musername', cardRng).replace(/_/g, ' ');
-        const blocks = [0, 1, 2, 3].map(() => String(1000 + cardRng.random(9000))).join('-');
-        const amount = (cardRng.random(12) + 3) * 25 * Math.max(1, glevel - 2);
-        m.cards.push({
-          id: `cc_${seed}_${i}`,
-          holder,
-          number: blocks,
-          amount,
-        });
-      }
-    }
   }
 
   return m;

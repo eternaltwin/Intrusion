@@ -280,6 +280,36 @@ export type GoalId =
   | 'challenge_top3_7'
   | 'challenge_top3_9';
 
+export const CHALLENGE_LEVELS = [5, 7, 9] as const;
+export type ChallengeLevel = (typeof CHALLENGE_LEVELS)[number];
+export const FORBIDDEN_CHALLENGE_VIRUSES = new Set<string>(['dckswi', 'dcksw2']);
+
+export function getChallengeMaxSlots(decks: Array<{ capacity: number }>): number {
+  let maxCap = 3;
+  for (const d of decks) {
+    if (d.capacity > maxCap) maxCap = d.capacity;
+  }
+  return Math.min(9, maxCap);
+}
+
+export function isVirusAllowedInChallenge(
+  v: VirusDef | undefined,
+  challengeLevel: number
+): boolean {
+  if (!v) return false;
+  if (v.cat === 'hidden' || v.cat === 'specials') return false;
+  if (FORBIDDEN_CHALLENGE_VIRUSES.has(v.id)) return false;
+  return v.level <= challengeLevel;
+}
+
+export function isChipsetAllowedInChallenge(
+  c: ChipsetDef | undefined,
+  challengeLevel: number
+): boolean {
+  if (!c || c.price <= 0) return false;
+  return c.level <= challengeLevel;
+}
+
 export interface MissionEndSummary {
   missionKey: string;
   seed: number;

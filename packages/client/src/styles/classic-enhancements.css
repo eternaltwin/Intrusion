@@ -423,3 +423,153 @@ dialog.classicPopupDialog::backdrop {
   white-space: pre-line;
   line-height: 1.4;
 }
+
+/* Minimalist Challenge-only Deck & Chipset Builder */
+.challengeDeckBuilder .challengeBuilderHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-size: 8pt;
+  font-weight: bold;
+  color: #fed82a;
+}
+
+.challengeDeckBuilder a.challengeClearLink {
+  font-size: 7.5pt;
+  font-weight: normal;
+  color: #e59f07;
+}
+
+.challengeDeckBuilder ul.challengeSlots,
+.challengeDeckBuilder ul.challengePool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  list-style: none;
+  margin: 0;
+  background-color: #4a4d32;
+  border: 1px solid #3b3d28;
+}
+
+.challengeDeckBuilder ul.challengeSlots {
+  min-height: 41px;
+  padding: 6px 6px 20px 6px;
+}
+
+.challengeDeckBuilder ul.challengePool {
+  min-height: 41px;
+  padding: 6px;
+}
+
+.challengeDeckBuilder ul.challengeSlots.dragOver,
+.challengeDeckBuilder ul.challengePool.dragOver {
+  outline: 1px dashed #fed82a;
+}
+
+.challengeDeckBuilder ul.challengeSlots li,
+.challengeDeckBuilder ul.challengePool li {
+  position: relative;
+  width: 38px;
+  height: 39px;
+  margin: 0;
+  padding: 0;
+  text-align: center;
+  background-image: url('/img/design/dockicon_border.png');
+  background-repeat: no-repeat;
+  border: 1px solid #595c3c;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.challengeDeckBuilder ul.challengeSlots li.filledSlot {
+  border: 1px dashed #a8ab76;
+}
+
+.challengeDeckBuilder ul.challengeSlots li.emptySlot {
+  background-image: none;
+  background-color: rgba(41, 43, 28, 0.42);
+  border: 1px dashed #d0d194;
+}
+
+.challengeDeckBuilder ul.challengeSlots li.slotDragOver {
+  border: 1px dashed #fed82a;
+  background-color: rgba(229, 159, 7, 0.22);
+}
+
+.challengeDeckBuilder ul.challengeSlots li.dragging,
+.challengeDeckBuilder ul.challengePool li.dragging {
+  opacity: 0.45;
+  outline: 1px dashed #fed82a;
+}
+
+.challengeDeckBuilder button.slotBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.challengeDeckBuilder button.slotBtn img {
+  width: 32px;
+  height: 32px;
+}
+
+.challengeDeckBuilder button.slotBtn:hover img {
+  outline: 1px solid #e59f07;
+}
+
+.challengeDeckBuilder button.slotBtn:focus-visible {
+  outline: none;
+}
+
+.challengeDeckBuilder li:has(button.slotBtn:focus-visible) {
+  outline: 2px solid #fed82a;
+  outline-offset: 2px;
+}
+
+.challengeDeckBuilder ul.challengeSlots li .id {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 40px;
+  text-align: center;
+  font-size: 7.5pt;
+  font-weight: bold;
+  line-height: 9pt;
+  color: #fed82a;
+  pointer-events: none;
+}
+
+.challengeDeckBuilder ul.challengeSlots li.emptySlot .id {
+  color: #d0d194;
+}
+
+.challengeDeckBuilder ul.challengePool li.challengePoolEmpty {
+  width: auto;
+  height: auto;
+  padding: 8px 4px;
+  background-image: none;
+  border: none;
+  font-size: 8pt;
+  font-style: italic;
+  color: #d0d194;
+}
+
+.challengeDeckBuilder .challengeLiveRegion {
+  position: absolute;
+  clip-path: inset(50%);
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+}

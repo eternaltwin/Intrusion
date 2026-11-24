@@ -292,19 +292,22 @@ class AntivirMan {
 		attackAll(AntivirusXml.get.bigoxy);
 	}
 
-	public function onVirusRun(v:Virus) {
-		if ( term.fs==null )
+	public function onVirusRun(v:Virus, ?targetFs:GFileSystem) {
+		var sys = targetFs!=null ? targetFs : term.fs;
+		if ( sys==null )
 			return;
 		if ( v==VirusXml.get.cd || v==VirusXml.get.connec || v==VirusXml.get.extrac || v==VirusXml.get.target )
 			return;
 
-		// fantassins
-		if ( folderContains(term.fs.curFolder, AntivirusXml.get.fantassin) )
+		// fantassins (only if player is still connected inside curFolder)
+		if ( term.fs!=null && term.fs.curFolder!=null && folderContains(term.fs.curFolder, AntivirusXml.get.fantassin) )
 			queueAttackAll(AntivirusXml.get.fantassin, true);
 
-		// bombes
+		// bombes (increments even on exit/panic1/panic2/pbomb, matching legacy AntivirMan.onVirusRun)
 		var bomb = AntivirusXml.get.bomb;
 		for (f in fast.get(bomb.key)) {
+			if ( f.fl_deleted || f.life<=0 || f.av==null )
+				continue;
 			if ( term.hasEffect(UE_Furtivity) ) {
 				term.log( Lang.fmt.AntivirusDodged({_name:f.name, _av:f.av.key.toUpperCase()}) );
 				continue;
@@ -325,8 +328,8 @@ class AntivirMan {
 	public function onDamageFile(dmg:Int,f:FSNode) {
 		if ( term.fs==null )
 			return;
-		// eject
-		if ( f!=null && f.parent==term.fs.curFolder && folderContains(term.fs.curFolder, AntivirusXml.get.eject) )
+		// eject (checks curFolder like legacy AntivirMan.onDamageFile)
+		if ( term.fs.curFolder!=null && folderContains(term.fs.curFolder, AntivirusXml.get.eject) )
 			for (fe in getAllByFolder(term.fs.curFolder,AntivirusXml.get.eject))
 				endTurn.add(onEject.bind(fe));
 		// tique

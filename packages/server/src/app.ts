@@ -8,15 +8,21 @@ import {
   ADD_DECK_COST,
   ADD_SLOT_COST,
   AuthCredentialsSchema,
+  buildMissionCards,
   BuyItemSchema,
+  FORBIDDEN_CHALLENGE_VIRUSES,
   generateMission,
   getAdjustedPrime,
+  getChallengeMaxSlots,
   getMissionDifficultyLabel,
   getMissionRefreshCost,
+  isChipsetAllowedInChallenge,
+  isVirusAllowedInChallenge,
   MissionEndPayloadSchema,
   Rand,
   RedeemCardByNumberSchema,
   RedeemCardSchema,
+  SaveChallengeLoadoutSchema,
   SaveDeckSchema,
   SellPackSchema,
   SetChipsetSchema,
@@ -83,31 +89,6 @@ function buildOwnedVirusCounts(player: PlayerDto): Record<string, number> {
   return counts;
 }
 
-function buildClassicMissionCards(
-  userId: number,
-  seed: number,
-  level: number,
-  corp: string
-): Array<{ id: string; holder: string; number: string; amount: number }> {
-  if (level < 4) return [];
-  const cardRng = Rand.fromSeed(seed ^ 0x51a9c3);
-  const out: Array<{ id: string; holder: string; number: string; amount: number }> = [];
-  for (let i = 0; i < 3; i++) {
-    const p1 = String(1000 + cardRng.random(9000));
-    const p2 = String(1000 + cardRng.random(9000));
-    const p3 = String(1000 + cardRng.random(9000));
-    const num = `4971-${p1}-${p2}-${p3}`;
-    const amount = Math.min(5000, (2 + cardRng.random(level * 2)) * 100);
-    out.push({
-      id: `cc_${userId}_${seed}_${i}`,
-      holder: corp,
-      number: num,
-      amount,
-    });
-  }
-  return out;
-}
-
 function dailySeedFromDate(dateStr: string): number {
   let h = 2166136261;
   for (let i = 0; i < dateStr.length; i++) {
@@ -145,6 +126,8 @@ const MIME_BY_EXT: Record<string, string> = {
 
 export function createApp(opts: CreateAppOptions) {
   const db = openDatabase(opts.dbPath);
+  const defaultBundle = getCatalog(opts.assetsDir, 'fr');
+  const toPlayerDto = (uid: number) => buildPlayerDto(db, uid, defaultBundle);
   const app = new Hono<{ Variables: AppVariables }>();
 
   // --- Auth Endpoints ---
@@ -166,7 +149,7 @@ export function createApp(opts: CreateAppOptions) {
       path: '/',
       maxAge: 60 * 60 * 24 * 365,
     });
-    return c.json({ player: buildPlayerDto(db, userId) }, 201);
+    return c.json({ player: toPlayerDto(userId) }, 201);
   });
 
   app.post('/api/auth/login', zValidator('json', AuthCredentialsSchema), (c) => {
@@ -186,7 +169,7 @@ export function createApp(opts: CreateAppOptions) {
       path: '/',
       maxAge: 60 * 60 * 24 * 365,
     });
-    return c.json({ player: buildPlayerDto(db, row.id) });
+    return c.json({ player: toPlayerDto(row.id) });
   });
 
   app.post('/api/auth/logout', (c) => {
@@ -200,7 +183,7 @@ export function createApp(opts: CreateAppOptions) {
     const token = getCookie(c, SESSION_COOKIE);
     const userId = getUserIdFromSession(db, token);
     if (!userId) return c.json({ player: null });
-    return c.json({ player: buildPlayerDto(db, userId) });
+    return c.json({ player: toPlayerDto(userId) });
   });
 
   // --- Public Catalog + Raw XML Bundle for Client Simulation ---
@@ -242,7 +225,7 @@ export function createApp(opts: CreateAppOptions) {
     const token = getCookie(c, SESSION_COOKIE);
     const userId = getUserIdFromSession(db, token);
     if (!userId) return c.json({ error: 'Non authentifié.' }, 401);
-    const player = buildPlayerDto(db, userId);
+    const player = toPlayerDto(userId);
     if (!player) return c.json({ error: 'Session expirée.' }, 401);
     c.set('userId', userId);
     c.set('player', player);
@@ -337,7 +320,7 @@ export function createApp(opts: CreateAppOptions) {
         const rawLvl =
           player.level < 4
             ? player.level
-            : Math.max(4, Math.min(9, player.level + Math.floor(Math.random() * 3) - 1));
+            : Math.max(4, player.level + Math.floor(Math.random() * 3) - 1);
         const mkey = `m_${seed}_${rawLvl}`;
         if (seenKeys.has(mkey)) continue;
         const mdata = generateMission(bundle, rawLvl, seed, player.settings.adult);
@@ -470,7 +453,7 @@ export function createApp(opts: CreateAppOptions) {
       }
       db.prepare('UPDATE users SET money = money - ? WHERE id = ?').run(refreshCost, userId);
       db.prepare('DELETE FROM missions WHERE user_id = ?').run(userId);
-      updatedPlayer = buildPlayerDto(db, userId) ?? { ...player, money: moneyRow.money - refreshCost };
+      updatedPlayer = toPlayerDto(userId) ?? { ...player, money: moneyRow.money - refreshCost };
       availableRows = ensureAvailableMissions(userId, updatedPlayer, updatedPlayer.settings.lang);
       db.exec('COMMIT');
     } catch (err) {
@@ -518,12 +501,10 @@ export function createApp(opts: CreateAppOptions) {
         return c.json({ error: 'Mission expirée.' }, 400);
       }
       if (row.status === 'completed') return c.json({ error: 'Mission déjà accomplie.' }, 400);
-      if (row.status === 'available') {
-        db.prepare("UPDATE missions SET status = 'active' WHERE user_id = ? AND mission_key = ?").run(
-          userId,
-          missionKey
-        );
-      }
+      const isScoutAtStart = player.activeChipset === 'scout' ? 1 : 0;
+      db.prepare(
+        "UPDATE missions SET status = 'active', scout_run = ? WHERE user_id = ? AND mission_key = ?"
+      ).run(isScoutAtStart, userId, missionKey);
       seed = row.seed;
       level = row.level;
       tries = row.tries;
@@ -532,8 +513,7 @@ export function createApp(opts: CreateAppOptions) {
     const mdata = generateMission(bundle, level, seed, player.settings.adult);
 
     // Deterministic credit cards embedded in target network mails/docs via GNetwork.dispatchCards
-    // Never insert into stolen_cards on /start — only persist when mission succeeds on /end!
-    const classicCards = buildClassicMissionCards(userId, seed, level, mdata.corp);
+    const classicCards = buildMissionCards(seed, level, mdata.corp);
     const cardStrings = classicCards.map((card) => card.number);
 
     const init: MissionInitParams = {
@@ -571,7 +551,6 @@ export function createApp(opts: CreateAppOptions) {
     const end = c.req.valid('json');
     const bundle = getCatalog(opts.assetsDir, player.settings.lang);
 
-    const isScoutRun = Boolean(end.scoutRun && player.activeChipset === 'scout');
     const isTutorial = missionKey.startsWith('tuto_');
 
     if (isTutorial) {
@@ -579,12 +558,13 @@ export function createApp(opts: CreateAppOptions) {
       if (tutoLvl === null) {
         return c.json({ error: 'Mission tutoriel invalide.' }, 400);
       }
+      const tutoScout = Boolean(end.scoutRun && player.activeChipset === 'scout');
       // Replayable tutorials in Apprentissage must never grant money, XP, goals, valuables, files, or cards
       return c.json({
         earnedMoney: 0,
         earnedXp: 0,
-        scoutRun: isScoutRun,
-        player: buildPlayerDto(db, userId),
+        scoutRun: tutoScout,
+        player: toPlayerDto(userId),
       });
     }
 
@@ -597,6 +577,7 @@ export function createApp(opts: CreateAppOptions) {
           prime: number;
           status: string;
           tries: number;
+          scout_run: number;
           created_at: number;
         }
       | undefined;
@@ -610,13 +591,18 @@ export function createApp(opts: CreateAppOptions) {
       return c.json({ error: 'Cette mission n’est pas active.' }, 400);
     }
 
+    // Lock Scout run status from /start (prevents swapping chipset in another tab before /end to dodge tries+1)
+    const isScoutRun = row.scout_run === 1;
     if (isScoutRun) {
-      // Scout chipset: exploratory run — does not consume tries or complete mission
+      db.prepare('UPDATE missions SET scout_run = 0 WHERE user_id = ? AND mission_key = ?').run(
+        userId,
+        missionKey
+      );
       return c.json({
         earnedMoney: 0,
         earnedXp: 0,
         scoutRun: true,
-        player: buildPlayerDto(db, userId),
+        player: toPlayerDto(userId),
       });
     }
 
@@ -679,20 +665,15 @@ export function createApp(opts: CreateAppOptions) {
           insertFile.run(randomUUID(), userId, sf.name, sf.content, sf.embed);
         }
 
-        // Stolen credit cards (only persisted on completed level >= 4 non-tutorial missions)
-        if (row.level >= 4) {
+        // Stolen credit cards: ONLY persist cards genuinely intercepted by the player (never auto-grant uninspected cards!)
+        if (row.level >= 4 && end.stolenCards.length > 0) {
           const mdata = generateMission(bundle, row.level, row.seed, player.settings.adult);
-          const classicCards = buildClassicMissionCards(userId, row.seed, row.level, mdata.corp);
+          const validMissionCards = buildMissionCards(row.seed, row.level, mdata.corp);
           const insertCard = db.prepare(`
             INSERT OR IGNORE INTO stolen_cards (id, user_id, holder, card_number, amount, redeemed)
             VALUES (?, ?, ?, ?, ?, 0)
           `);
-          for (const cc of classicCards) {
-            insertCard.run(cc.id, userId, cc.holder, cc.number, Math.min(5000, cc.amount));
-          }
-
           const normalizeNum = (s: string) => s.replace(/[\s-]+/g, '').toUpperCase();
-          const validMissionCards = [...mdata.cards, ...classicCards];
           for (const clientCard of end.stolenCards.slice(0, 5)) {
             const clientNorm = normalizeNum(clientCard.number);
             const matched = validMissionCards.find(
@@ -728,7 +709,7 @@ export function createApp(opts: CreateAppOptions) {
       earnedMoney,
       earnedXp,
       scoutRun: false,
-      player: buildPlayerDto(db, userId),
+      player: toPlayerDto(userId),
     });
   });
 
@@ -803,6 +784,94 @@ export function createApp(opts: CreateAppOptions) {
     });
   });
 
+  app.put('/api/challenges/loadout/:level', zValidator('json', SaveChallengeLoadoutSchema), (c) => {
+    const userId = c.get('userId');
+    const player = c.get('player');
+    const level = Number(c.req.param('level'));
+    const tier = CHALLENGE_TIERS.find((t) => t.level === level);
+    if (!tier) {
+      return c.json({ error: 'Niveau de challenge invalide (5, 7 ou 9 attendu).' }, 400);
+    }
+
+    const body = c.req.valid('json');
+    const bundle = getCatalog(opts.assetsDir, player.settings.lang);
+    const maxSlots = getChallengeMaxSlots(player.decks);
+
+    if (body.content.length > maxSlots) {
+      return c.json(
+        { error: `Capacité maximale dépassée (${maxSlots} emplacements autorisés).` },
+        400
+      );
+    }
+
+    const normalizedChipset =
+      !body.chipsetId || body.chipsetId === 'none' ? null : body.chipsetId.toLowerCase();
+    if (normalizedChipset) {
+      if (!player.chipsets.includes(normalizedChipset)) {
+        return c.json({ error: 'Chipset non possédé.' }, 400);
+      }
+      const chipDef = bundle.chipsets.get(normalizedChipset);
+      if (!isChipsetAllowedInChallenge(chipDef, level)) {
+        return c.json(
+          { error: `Ce chipset n'est pas autorisé en Challenge Niveau ${level}.` },
+          400
+        );
+      }
+    }
+
+    const ownedCounts = new Map<string, number>();
+    for (const vid of player.viruses) {
+      ownedCounts.set(vid, (ownedCounts.get(vid) ?? 0) + 1);
+    }
+
+    const requestedCounts = new Map<string, number>();
+    const validatedContent: string[] = [];
+    for (const rawVid of body.content) {
+      const vid = rawVid.toLowerCase();
+      if (FORBIDDEN_CHALLENGE_VIRUSES.has(vid)) {
+        return c.json(
+          { error: 'Les virus de changement de deck sont interdits en Challenge.' },
+          400
+        );
+      }
+      const vDef = bundle.viruses.get(vid);
+      if (!vDef || vDef.cat === 'hidden' || vDef.cat === 'specials') {
+        return c.json({ error: `Programme ${vid} interdit dans un deck Challenge.` }, 400);
+      }
+      if (!isVirusAllowedInChallenge(vDef, level)) {
+        return c.json(
+          {
+            error: `Programme ${vDef.name} interdit en Challenge Niveau ${level} (niveau ${vDef.level} requis).`,
+          },
+          400
+        );
+      }
+      const owned = ownedCounts.get(vid) ?? 0;
+      if (owned <= 0) {
+        return c.json({ error: `Programme ${vDef.name} non possédé.` }, 400);
+      }
+      const nextReq = (requestedCounts.get(vid) ?? 0) + 1;
+      if (nextReq > owned) {
+        return c.json(
+          { error: `Exemplaires insuffisants pour ${vDef.name} (${owned} possédé(s)).` },
+          400
+        );
+      }
+      requestedCounts.set(vid, nextReq);
+      validatedContent.push(vid);
+    }
+
+    db.prepare(
+      `INSERT INTO challenge_loadouts (user_id, challenge_level, chipset_id, content_json)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(user_id, challenge_level) DO UPDATE SET
+         chipset_id = excluded.chipset_id,
+         content_json = excluded.content_json`
+    ).run(userId, level, normalizedChipset, JSON.stringify(validatedContent));
+
+    return c.json({ player: toPlayerDto(userId) });
+  });
+
   app.post('/api/challenges/today/start', async (c) => {
     const player = c.get('player');
     const dateStr = todayDateStr();
@@ -824,18 +893,42 @@ export function createApp(opts: CreateAppOptions) {
     }
 
     const gl = tier.level;
+    const tierLoadout = player.challengeLoadouts[String(gl) as '5' | '7' | '9'];
+    if (!tierLoadout || tierLoadout.content.length === 0) {
+      return c.json(
+        { error: 'Votre deck Challenge est vide : sélectionnez au moins un virus avant de lancer.' },
+        400
+      );
+    }
+
+    const userId = c.get('userId');
+    db.prepare(
+      `INSERT INTO challenge_active_runs (user_id, challenge_date, challenge_level, scout_run)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(user_id, challenge_date, challenge_level) DO UPDATE SET scout_run = excluded.scout_run`
+    ).run(userId, dateStr, gl, tierLoadout.chipsetId === 'scout' ? 1 : 0);
+
     const seed = challengeSeedForTier(dateStr, gl);
     const bundle = getCatalog(opts.assetsDir, player.settings.lang);
     const mdata = generateMission(bundle, gl, seed, true);
+    const maxSlots = getChallengeMaxSlots(player.decks);
 
     const init: MissionInitParams = {
       missionKey: `challenge_${dateStr}_${gl}`,
       seed,
       gl,
       mission: mdata,
-      decks: buildOrderedDecks(player).slice(0, 1),
+      decks: [
+        {
+          id: `challenge_deck_${gl}`,
+          name: `Challenge Niv. ${gl}`,
+          capacity: maxSlots,
+          isFavorite: true,
+          content: tierLoadout.content,
+        },
+      ],
       ownedViruses: buildOwnedVirusCounts(player),
-      chipset: player.activeChipset,
+      chipset: tierLoadout.chipsetId,
       isChallenge: true,
       biosLevel: player.biosLevel,
       tries: 0,
@@ -866,7 +959,21 @@ export function createApp(opts: CreateAppOptions) {
       CHALLENGE_TIERS.find((t) => t.level === (parsedKeyLvl ?? end.gl)) ??
       CHALLENGE_TIERS.find((t) => t.level === 7)!;
 
-    if (end.scoutRun && player.activeChipset === 'scout') {
+    const tierLoadout = player.challengeLoadouts[String(tier.level) as '5' | '7' | '9'];
+    const activeChalRow = db
+      .prepare(
+        'SELECT scout_run FROM challenge_active_runs WHERE user_id = ? AND challenge_date = ? AND challenge_level = ?'
+      )
+      .get(userId, dateStr, tier.level) as { scout_run: number } | undefined;
+    if (activeChalRow) {
+      db.prepare(
+        'DELETE FROM challenge_active_runs WHERE user_id = ? AND challenge_date = ? AND challenge_level = ?'
+      ).run(userId, dateStr, tier.level);
+    }
+    const isChallengeScout = activeChalRow
+      ? activeChalRow.scout_run === 1
+      : Boolean(end.scoutRun && tierLoadout?.chipsetId === 'scout');
+    if (isChallengeScout) {
       return c.json({
         isRanked: false,
         level: tier.level,
@@ -874,7 +981,7 @@ export function createApp(opts: CreateAppOptions) {
         rewardXp: 0,
         score: 0,
         scoutRun: true,
-        player: buildPlayerDto(db, userId),
+        player: toPlayerDto(userId),
       });
     }
 
@@ -943,7 +1050,7 @@ export function createApp(opts: CreateAppOptions) {
       rewardXp,
       score: computedScore,
       scoutRun: false,
-      player: buildPlayerDto(db, userId),
+      player: toPlayerDto(userId),
     });
   });
 
@@ -1013,7 +1120,7 @@ export function createApp(opts: CreateAppOptions) {
       userId
     );
 
-    return c.json({ player: buildPlayerDto(db, userId) });
+    return c.json({ player: toPlayerDto(userId) });
   });
 
   app.post('/api/decks/chipset', zValidator('json', SetChipsetSchema), (c) => {
@@ -1027,7 +1134,7 @@ export function createApp(opts: CreateAppOptions) {
     }
 
     db.prepare('UPDATE users SET active_chipset = ? WHERE id = ?').run(normalized, userId);
-    return c.json({ player: buildPlayerDto(db, userId) });
+    return c.json({ player: toPlayerDto(userId) });
   });
 
   // --- Store & Upgrades (Viruses, Chipsets, BIOS, Deck Slots, New Decks) ---
@@ -1099,7 +1206,7 @@ export function createApp(opts: CreateAppOptions) {
       );
     }
 
-    return c.json({ player: buildPlayerDto(db, userId) });
+    return c.json({ player: toPlayerDto(userId) });
   });
 
   // --- Hard Drive & Black Market Storage Routes ---
@@ -1158,7 +1265,8 @@ export function createApp(opts: CreateAppOptions) {
     if (remainingQuota <= 0) return c.json({ error: 'Quota quotidien atteint (20/jour).' }, 400);
 
     const sellQty = Math.min(count, owned, remainingQuota);
-    const mult = getDailyMarketMultipliers(dateStr, [valuableId])[valuableId] ?? 1.0;
+    const valIds = Array.from(bundle.valuables.keys());
+    const mult = getDailyMarketMultipliers(dateStr, valIds)[valuableId] ?? 1.0;
     const unitPrice = Math.round(valDef.price * mult);
     const totalEarned = sellQty * unitPrice;
 
@@ -1177,7 +1285,7 @@ export function createApp(opts: CreateAppOptions) {
       soldQty: sellQty,
       totalEarned,
       remainingQuota: remainingQuota - sellQty,
-      player: buildPlayerDto(db, userId),
+      player: toPlayerDto(userId),
     });
   });
 
@@ -1199,12 +1307,13 @@ export function createApp(opts: CreateAppOptions) {
 
     return c.json({
       earned: row.amount,
-      player: buildPlayerDto(db, userId),
+      player: toPlayerDto(userId),
     });
   });
 
   app.post('/api/storage/redeem-card-number', zValidator('json', RedeemCardByNumberSchema), (c) => {
     const userId = c.get('userId');
+    const player = c.get('player');
     const { number } = c.req.valid('json');
     const normalizedInput = number.replace(/[\s-]+/g, '').toUpperCase();
 
@@ -1212,9 +1321,41 @@ export function createApp(opts: CreateAppOptions) {
       .prepare('SELECT id, card_number, amount, redeemed FROM stolen_cards WHERE user_id = ?')
       .all(userId) as Array<{ id: string; card_number: string; amount: number; redeemed: number }>;
 
-    const match = rows.find(
+    let match = rows.find(
       (r) => r.card_number.replace(/[\s-]+/g, '').toUpperCase() === normalizedInput
     );
+
+    if (!match) {
+      // Also validate against cards embedded in any mission the user has started or completed (including Scout/failed/Classic runs)
+      const bundle = getCatalog(opts.assetsDir, player.settings.lang);
+      const userMissions = db
+        .prepare(
+          "SELECT seed, level FROM missions WHERE user_id = ? AND status IN ('active', 'completed') AND level >= 4"
+        )
+        .all(userId) as Array<{ seed: number; level: number }>;
+
+      for (const mRow of userMissions) {
+        const mdata = generateMission(bundle, mRow.level, mRow.seed, player.settings.adult);
+        const missionCards = buildMissionCards(mRow.seed, mRow.level, mdata.corp);
+        const found = missionCards.find(
+          (mc) => mc.number.replace(/[\s-]+/g, '').toUpperCase() === normalizedInput
+        );
+        if (found) {
+          const clampedAmt = Math.min(5000, Math.max(0, found.amount));
+          db.prepare(
+            'INSERT OR IGNORE INTO stolen_cards (id, user_id, holder, card_number, amount, redeemed) VALUES (?, ?, ?, ?, ?, 0)'
+          ).run(found.id, userId, found.holder, found.number, clampedAmt);
+          match = {
+            id: found.id,
+            card_number: found.number,
+            amount: clampedAmt,
+            redeemed: 0,
+          };
+          break;
+        }
+      }
+    }
+
     if (!match) {
       return c.json({ error: 'Numéro de carte bancaire invalide ou introuvable.' }, 404);
     }
@@ -1235,7 +1376,7 @@ export function createApp(opts: CreateAppOptions) {
     return c.json({
       earned: match.amount,
       cardNumber: match.card_number,
-      player: buildPlayerDto(db, userId),
+      player: toPlayerDto(userId),
     });
   });
 
@@ -1298,7 +1439,7 @@ export function createApp(opts: CreateAppOptions) {
       JSON.stringify(updatedSettings),
       userId
     );
-    return c.json({ player: buildPlayerDto(db, userId) });
+    return c.json({ player: toPlayerDto(userId) });
   });
 
   // --- Static Assets (/assets/*) ---

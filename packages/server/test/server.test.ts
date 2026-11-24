@@ -98,7 +98,12 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
         valuables: ['mp3'],
         copiedFiles: [{ name: 'secret.mail', content: '<p>Top secret</p>', embed: null }],
         stolenCards: [
-          ...(startJson.init.mission.cards ?? []),
+          {
+            id: `cc_${firstMission.seed}_1`,
+            holder: startJson.init.mission.corp,
+            number: startJson.init.cards[1],
+            amount: 500,
+          },
           { id: 'forged_cc', holder: 'Forged Hacker', number: '4111-2222-3333-4444', amount: 4999 },
         ],
         goals: { av: 3, crash: 1, missions_fulfilled: 999 },
@@ -112,14 +117,18 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(endJson.player.goals.firsttry).toBe(1);
     expect(endJson.player.valuables.mp3).toBe(1);
 
-    // 5. Check Hard Drive storage, sell pack, redeem stolen card by id & by card number, and check classic static assets
+    // 5. Check Hard Drive storage (only genuinely intercepted card persisted, no auto-grant leak!),
+    // sell pack at exact displayed market multiplier, redeem intercepted card by id & manual card by number
     const storageRes = await app.request('/api/storage', { headers: { Cookie: cookie } });
     const storageJson = await storageRes.json();
     expect(storageJson.files.length).toBe(1);
-    expect(storageJson.cards.length).toBe(
-      3 + (startJson.init.mission.cards ? startJson.init.mission.cards.length : 0)
-    );
+    expect(storageJson.cards.length).toBe(1);
+    expect(storageJson.cards[0].number).toBe(startJson.init.cards[1]);
     expect(storageJson.cards.some((c: any) => c.id === 'forged_cc')).toBe(false);
+
+    const catRes = await (await app.request('/api/catalog?lang=fr')).json();
+    const mp3Def = catRes.valuables.find((v: any) => v.id === 'mp3');
+    const expectedMp3Price = Math.round(mp3Def.price * storageJson.marketMultipliers.mp3);
 
     const sellRes = await app.request('/api/storage/sell-pack', {
       method: 'POST',
@@ -127,10 +136,10 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
       body: JSON.stringify({ valuableId: 'mp3', count: 1 }),
     });
     expect(sellRes.status).toBe(200);
+    const sellJson = await sellRes.json();
+    expect(sellJson.totalEarned).toBe(expectedMp3Price);
 
-    const cardToRedeemById = storageJson.cards.find(
-      (c: any) => c.number !== startJson.init.cards[0]
-    );
+    const cardToRedeemById = storageJson.cards[0];
     const redeemRes = await app.request('/api/storage/redeem-card', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -490,6 +499,83 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     const lvl4List = await (await app.request('/api/missions', { headers: { Cookie: cookie } })).json();
     expect(lvl4List.available.length).toBe(9);
     expect(lvl4List.available.every((m: any) => m.level >= 4)).toBe(true);
+
+    // 4. Scout mid-run chipset swap exploit is blocked (locked at /start), and cards from failed/Scout runs redeem by number
+    const exploitTarget = lvl4List.available[0];
+    // Start WITHOUT scout equipped
+    await app.request('/api/decks/chipset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ chipsetId: null }),
+    });
+    const nonScoutStart = await (
+      await app.request(`/api/missions/${exploitTarget.missionKey}/start`, {
+        method: 'POST',
+        headers: { Cookie: cookie },
+      })
+    ).json();
+    expect(nonScoutStart.init.chipset).toBeNull();
+
+    // Swap to scout mid-run in another tab and attempt to dodge tries + 1 on failure
+    await app.request('/api/decks/chipset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ chipsetId: 'scout' }),
+    });
+    const swapEndRes = await app.request(`/api/missions/${exploitTarget.missionKey}/end`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({
+        missionKey: exploitTarget.missionKey,
+        seed: exploitTarget.seed,
+        gl: exploitTarget.level,
+        isChallenge: false,
+        scoutRun: true,
+        success: false,
+        kills: 0,
+        remainingSec: 0,
+        valuables: [],
+        copiedFiles: [],
+        stolenCards: [],
+        goals: {},
+        score: 0,
+      }),
+    });
+    expect(swapEndRes.status).toBe(200);
+    const swapEndJson = await swapEndRes.json();
+    expect(Boolean(swapEndJson.scoutRun)).toBe(false);
+
+    const afterSwapList = await (
+      await app.request('/api/missions', { headers: { Cookie: cookie } })
+    ).json();
+    const activeAfterSwap = afterSwapList.active.find(
+      (m: any) => m.missionKey === exploitTarget.missionKey
+    );
+    expect(activeAfterSwap.tries).toBe(1);
+
+    // Card number noted during that failed run can still be redeemed manually!
+    const failedRunCardRes = await app.request('/api/storage/redeem-card-number', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ number: nonScoutStart.init.cards[0] }),
+    });
+    expect(failedRunCardRes.status).toBe(200);
+
+    // 5. Level 9 player can roll Level 10 ("hard") missions
+    db.prepare('UPDATE users SET xp = 300, money = 500000 WHERE id = ?').run(userId);
+    let sawLevel10 = false;
+    for (let i = 0; i < 6 && !sawLevel10; i++) {
+      const refRes = await (
+        await app.request('/api/missions/refresh', {
+          method: 'POST',
+          headers: { Cookie: cookie },
+        })
+      ).json();
+      if (refRes.available.some((m: any) => m.level === 10)) {
+        sawLevel10 = true;
+      }
+    }
+    expect(sawLevel10).toBe(true);
   });
 
   it('tracks first-try challenge completions per tier and awards end-of-day Top 3 podium goals', async () => {
@@ -649,5 +735,155 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     // P4: #4 in Easy -> pass Easy = 1, but NOT Top 3!
     expect(me4.player.goals.challenge_pass_5).toBe(1);
     expect(me4.player.goals.challenge_top3_5).toBeUndefined();
+  });
+
+  it('enforces per-tier Challenge loadouts (virus/chipset level caps, no deck-switch, max deck capacity)', async () => {
+    const { app, db } = createApp({
+      dbPath: ':memory:',
+      assetsDir,
+    });
+
+    const regRes = await app.request('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'LoadoutMaster', password: 'Password123!' }),
+    });
+    expect(regRes.status).toBe(201);
+    const cookie = regRes.headers.get('set-cookie')!.split(';')[0];
+    const regJson = await regRes.json();
+    const userId = regJson.player.id as number;
+    const mainDeckId = regJson.player.decks[0].id as string;
+
+    // Grant high XP + credits and buy viruses/chipsets across levels 5..9 (including dckswi & dcksw2)
+    db.prepare('UPDATE users SET xp = 500, money = 500000 WHERE id = ?').run(userId);
+    for (const vid of ['dmgm', 'dmgl', 'dmgxl', 'dckswi', 'dcksw2', 'reboo2']) {
+      const r = await app.request('/api/store/buy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({ kind: 'virus', id: vid }),
+      });
+      expect(r.status).toBe(200);
+    }
+    for (const cid of ['regen', 'smana', 'brute']) {
+      const r = await app.request('/api/store/buy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({ kind: 'chipset', id: cid }),
+      });
+      expect(r.status).toBe(200);
+    }
+
+    // 1. Capacity initially matches largest normal deck (3 slots) -> 4 viruses rejected
+    const tooManyRes = await app.request('/api/challenges/loadout/5', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ chipsetId: null, content: ['dmgs', 'dmgm', 'copy', 'scan1'] }),
+    });
+    expect(tooManyRes.status).toBe(400);
+
+    // Expand normal deck to 4 slots -> 4 viruses now allowed in Challenge deck
+    const expandRes = await app.request('/api/store/buy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ kind: 'deck_slot', deckId: mainDeckId }),
+    });
+    expect(expandRes.status).toBe(200);
+
+    // 2. Deck-switch viruses (dckswi lvl 5, dcksw2 lvl 8) are strictly rejected even at matching/higher tier
+    for (const [lvl, vid] of [
+      [5, 'dckswi'],
+      [7, 'dckswi'],
+      [9, 'dcksw2'],
+    ] as const) {
+      const badSwitch = await app.request(`/api/challenges/loadout/${lvl}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({ chipsetId: null, content: ['dmgs', vid] }),
+      });
+      expect(badSwitch.status).toBe(400);
+    }
+
+    // 3. Virus level cap: dmgl (lvl 6) rejected on Challenge 5, accepted on Challenge 7; reboo2 (lvl 9) rejected on 7, accepted on 9
+    const dmglOn5 = await app.request('/api/challenges/loadout/5', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ chipsetId: 'regen', content: ['dmgs', 'dmgl'] }),
+    });
+    expect(dmglOn5.status).toBe(400);
+
+    // 4. Chipset level cap: smana (lvl 6) rejected on Challenge 5, accepted on Challenge 7
+    const smanaOn5 = await app.request('/api/challenges/loadout/5', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ chipsetId: 'smana', content: ['dmgs', 'dmgm'] }),
+    });
+    expect(smanaOn5.status).toBe(400);
+
+    // 5. Save valid distinct loadouts for tiers 5, 7, and 9 (with 4 slots on tier 5)
+    const save5 = await app.request('/api/challenges/loadout/5', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ chipsetId: 'regen', content: ['dmgs', 'dmgm', 'copy', 'scan1'] }),
+    });
+    expect(save5.status).toBe(200);
+
+    const reboo2On7 = await app.request('/api/challenges/loadout/7', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ chipsetId: 'brute', content: ['dmgl', 'reboo2'] }),
+    });
+    expect(reboo2On7.status).toBe(400);
+
+    const save7 = await app.request('/api/challenges/loadout/7', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ chipsetId: 'brute', content: ['dmgl', 'copy'] }),
+    });
+    expect(save7.status).toBe(200);
+
+    const save9 = await app.request('/api/challenges/loadout/9', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ chipsetId: 'smana', content: ['dmgxl', 'reboo2', 'scan1'] }),
+    });
+    expect(save9.status).toBe(200);
+    const save9Json = await save9.json();
+
+    // Normal deck and activeChipset remain untouched while all 3 tier loadouts persist independently
+    expect(save9Json.player.activeChipset).toBeNull();
+    expect(save9Json.player.decks[0].content).toEqual(['dmgs', 'copy', 'scan1']);
+    expect(save9Json.player.challengeLoadouts['5']).toEqual({
+      chipsetId: 'regen',
+      content: ['dmgs', 'dmgm', 'copy', 'scan1'],
+    });
+    expect(save9Json.player.challengeLoadouts['7']).toEqual({
+      chipsetId: 'brute',
+      content: ['dmgl', 'copy'],
+    });
+    expect(save9Json.player.challengeLoadouts['9']).toEqual({
+      chipsetId: 'smana',
+      content: ['dmgxl', 'reboo2', 'scan1'],
+    });
+
+    // Starting each Challenge tier injects its own saved Challenge deck & chipset
+    const start5 = await (
+      await app.request('/api/challenges/today/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({ level: 5 }),
+      })
+    ).json();
+    expect(start5.init.chipset).toBe('regen');
+    expect(start5.init.decks[0].content).toEqual(['dmgs', 'dmgm', 'copy', 'scan1']);
+
+    const start9 = await (
+      await app.request('/api/challenges/today/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({ level: 9 }),
+      })
+    ).json();
+    expect(start9.init.chipset).toBe('smana');
+    expect(start9.init.decks[0].content).toEqual(['dmgxl', 'reboo2', 'scan1']);
   });
 });

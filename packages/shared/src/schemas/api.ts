@@ -17,6 +17,11 @@ export const SaveDeckSchema = z.object({
   isFavorite: z.boolean().optional(),
 });
 
+export const SaveChallengeLoadoutSchema = z.object({
+  chipsetId: z.string().nullable(),
+  content: z.array(z.string()).max(9),
+});
+
 export const SetChipsetSchema = z.object({
   chipsetId: z.string().nullable(),
 });
@@ -106,6 +111,13 @@ export interface PlayerDto {
     isFavorite: boolean;
     content: string[];
   }>;
+  challengeLoadouts: Record<
+    '5' | '7' | '9',
+    {
+      chipsetId: string | null;
+      content: string[];
+    }
+  >;
   valuables: Record<string, number>;
   goals: Record<string, number>;
   settings: {

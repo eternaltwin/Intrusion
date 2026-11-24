@@ -1,7 +1,7 @@
 import { Rand, shuffleWithSeed, spreadValues } from '../rng/Rand.js';
 import { PatternLoader } from '../data/PatternLoader.js';
 import { formatLang, type GameDataBundle } from '../data/xmlLoaders.js';
-import { isTutorialMission } from './MissionGen.js';
+import { buildMissionCards, isTutorialMission } from './MissionGen.js';
 import type {
   AntivirusDef,
   FileEffectType,
@@ -645,12 +645,18 @@ export function generateNetwork(
         );
       }
 
-      // Fill .route files
+      // Fill .route files (lists all downstream non-Empty nodes behind n, matching GNetwork.getNeighbours)
       for (const n of nodeList) {
         if (!n.system) continue;
         const routeFiles = Object.values(n.system.files).filter((f) => f.key === 'file.route');
         if (routeFiles.length === 0) continue;
-        const neigs = getNonEmptyNeighbours(n);
+        const neigs = nodeList.filter(
+          (peer) =>
+            peer.type !== 'Empty' &&
+            peer.type !== 'Entrance' &&
+            peer.id !== n.id &&
+            peer.path.includes(n.id)
+        );
         const sysEngines = bundle.createTextEngines(workSeed + n.id, adult);
         if (neigs.length === 0) {
           const noRoute = sysEngines.texts.get('noRoute');
@@ -658,12 +664,7 @@ export function generateNetwork(
         } else {
           const entries = neigs.map((peer) => {
             sysEngines.texts.set('ip', peer.ip);
-            sysEngines.texts.set(
-              'sysName',
-              peer.type === 'Entrance'
-                ? formatLang(bundle.uiStrings, 'EntranceName')
-                : peer.system?.name ?? peer.ip
-            );
+            sysEngines.texts.set('sysName', peer.system?.name ?? peer.ip);
             return sysEngines.texts.get('routeEntry');
           });
           sysEngines.texts.set('route', entries.join('||'));
@@ -738,24 +739,22 @@ export function generateNetwork(
         if (cardNumbers.length === 0) {
           effectiveCards = [];
         } else {
-          const cardRng = Rand.fromSeed(mdata.seed ^ 0x5a3c19);
+          const canonical = buildMissionCards(mdata.seed, mdata.gl, mdata.corp);
           effectiveCards = cardNumbers.map((num, idx) => {
-            const existing = mdata.cards[idx];
-            if (existing) {
-              return { ...existing, number: num };
+            const base = canonical[idx] ?? mdata.cards[idx];
+            if (base) {
+              return { ...base, number: num };
             }
-            const holder = names.get('musername', cardRng).replace(/_/g, ' ');
-            const amount = (cardRng.random(12) + 3) * 25 * Math.max(1, mdata.gl - 2);
             return {
               id: `cc_${mdata.seed}_${idx}`,
-              holder,
+              holder: mdata.corp,
               number: num,
-              amount,
+              amount: 500,
             };
           });
         }
       }
-      dispatchStolenCards(bundle, effectiveCards, nodeList, workSeed, adult);
+      dispatchStolenCards(bundle, mdata.corp, hackerName, effectiveCards, nodeList, workSeed, adult);
 
       // Compute initial visibility
       const nodesOut: Record<number, NetNodeState> = {};
@@ -944,10 +943,6 @@ function generateSystemForNode(
     slot.avKey = picked.key;
     slot.name = `${picked.key}${fsNames.get('ver')}.${fsNames.get('antivirExt')}`;
     slot.ext = extractExt(slot.name);
-    if (picked.key === 'bomb') {
-      slot.life = 1;
-      slot.lifeTotal = 1;
-    }
     diffBudget -= picked.diff;
   }
 
@@ -957,7 +952,7 @@ function generateSystemForNode(
   if (mdata.gl < 3) filtered = filtered.filter((f) => !f.key.includes('.log'));
   if (mdata.gl < 4) filtered = filtered.filter((f) => !f.key.includes('.route'));
 
-  // Folder passwords (gl >= 5)
+  // Folder passwords (gl >= 5, matching legacy GFileSystem.hidePasswords)
   if (mdata.gl >= 5 && !isTutorialMission(mdata)) {
     const folders = filtered.filter((f) => f.isFolder && f.parentId !== null && f.key !== '/program');
     const lockCount = rseed.random(10);
@@ -966,32 +961,35 @@ function generateSystemForNode(
         folders[rseed.random(folders.length)].password = mpass;
       }
     }
-    const byIdTmp = new Map(filtered.map((f) => [f.id, f]));
-    const folderHasPasswdAv = (fid: number): boolean =>
-      filtered.some((x) => x.parentId === fid && x.avKey === 'passwd');
-    const isUnlocked = (f: InternalFile): boolean => {
-      let cur = f.parentId !== null ? byIdTmp.get(f.parentId) : undefined;
-      while (cur) {
-        if (cur.password !== null || folderHasPasswdAv(cur.id)) return false;
-        cur = cur.parentId !== null ? byIdTmp.get(cur.parentId) : undefined;
-      }
-      return true;
-    };
-    if (filtered.some((f) => f.password !== null || f.avKey === 'passwd')) {
-      const hostPool = filtered.filter(
-        (f) =>
-          !f.isFolder &&
-          !f.avKey &&
-          isUnlocked(f) &&
-          ['file.doc', 'file.mail', 'file.pass', 'file.data'].includes(f.key)
-      );
-      if (hostPool.length > 0) {
-        const host = hostPool[rseed.random(hostPool.length)];
+
+    const lockedList = filtered.filter((f) => f.password !== null || f.avKey === 'passwd');
+    if (lockedList.length > 0) {
+      const rebuildLookup = () => {
+        const byIdTmp = new Map(filtered.map((f) => [f.id, f]));
+        const folderHasPasswdAv = (fid: number): boolean =>
+          filtered.some((x) => x.parentId === fid && x.avKey === 'passwd');
+        return (f: InternalFile): boolean => {
+          if (f.isMissionTarget) return false;
+          let cur = f.parentId !== null ? byIdTmp.get(f.parentId) : undefined;
+          while (cur) {
+            if (cur.password !== null || folderHasPasswdAv(cur.id)) return false;
+            cur = cur.parentId !== null ? byIdTmp.get(cur.parentId) : undefined;
+          }
+          return true;
+        };
+      };
+
+      const hidePasswordInHost = (host: InternalFile) => {
         texts.set('pass', mpass);
         texts.set('user', textOwner);
         if (host.ext === 'mail') {
+          const adminSender = texts.get('SysAdmin');
+          host.owner = adminSender;
+          fsNames.set('owner', adminSender);
+          host.name = fsNames.get('file.mail');
+          host.ext = extractExt(host.name);
           host.key = 'pass.mail';
-          texts.set('from', texts.get('SysAdmin'));
+          texts.set('from', adminSender);
           texts.set('mcontent', texts.get('passwordMail'));
           host.content = texts.get('forcedMail');
         } else {
@@ -1000,14 +998,41 @@ function generateSystemForNode(
           host.ext = extractExt(host.name);
           host.content = texts.get('passwordDoc');
         }
-      } else {
-        // Spawn unlocked password file in root
+      };
+
+      let isUnlocked = rebuildLookup();
+      const possibleKeys =
+        node.type === 'TerminalMul' || mdata.gl <= 4
+          ? ['file.pass', 'file.data']
+          : ['file.doc', 'file.mail', 'file.pass', 'file.data'];
+      let done = false;
+      while (!done && possibleKeys.length > 0) {
+        const pickedKey = possibleKeys.splice(rseed.random(possibleKeys.length), 1)[0];
+        const pool = filtered.filter(
+          (f) => !f.isFolder && !f.avKey && f.key === pickedKey && isUnlocked(f)
+        );
+        if (pool.length > 0) {
+          hidePasswordInHost(pool[rseed.random(pool.length)]);
+          done = true;
+        }
+      }
+
+      if (!done) {
+        // Fallback: generate a full /pass folder in root and hide password in its file.pass
         const root = filtered.find((f) => f.parentId === null)!;
-        const passFile = createFile(root.id, 'file.pass', false);
-        texts.set('pass', mpass);
-        texts.set('user', textOwner);
-        passFile.content = texts.get('passwordDoc');
-        filtered.push(passFile);
+        const prevRawLen = rawTree.length;
+        genFolder(root.id, '/pass');
+        for (let idx = prevRawLen; idx < rawTree.length; idx++) {
+          const nf = rawTree[idx];
+          if (nf.avKey !== 'avslot') filtered.push(nf);
+        }
+        isUnlocked = rebuildLookup();
+        const passPool = filtered.filter(
+          (f) => !f.isFolder && !f.avKey && f.key === 'file.pass' && isUnlocked(f)
+        );
+        if (passPool.length > 0) {
+          hidePasswordInHost(passPool[rseed.random(passPool.length)]);
+        }
       }
     }
   }
@@ -1068,23 +1093,45 @@ function generateSystemForNode(
     }
   }
 
-  // Ensure sibling name uniqueness
+  // Ensure sibling name uniqueness (regenerate fresh DSL name like legacy GFileSystem.applyNameUnicity)
+  const regenerateFreshName = (child: InternalFile): string | null => {
+    if (child.avKey) {
+      return `${child.avKey}${fsNames.get('ver')}.${fsNames.get('antivirExt')}`;
+    }
+    if (child.key === 'crime.data') {
+      const newOwner = names.get('username', rseed);
+      child.owner = newOwner;
+      return `${newOwner}.data`;
+    }
+    fsNames.set('owner', child.owner || textOwner);
+    const gen = fsNames.get(child.key);
+    return gen && gen !== child.key ? gen : null;
+  };
+
   for (const folder of filtered.filter((x) => x.isFolder)) {
     const seen = new Set<string>();
     for (const cid of folder.childrenIds) {
-      const child = filesRecord[cid];
-      let baseName = child.name;
-      let attempt = 1;
-      while (seen.has(baseName.toLowerCase())) {
-        attempt++;
-        const dot = child.isFolder ? -1 : child.name.lastIndexOf('.');
-        baseName =
-          dot > 0
-            ? `${child.name.slice(0, dot)}_${attempt}${child.name.slice(dot)}`
-            : `${child.name}_${attempt}`;
+      const child = filesRecord[cid] as InternalFile;
+      let candidate = child.name;
+      let regenTries = 0;
+      while (seen.has(candidate.toLowerCase()) && regenTries < 25) {
+        regenTries++;
+        const fresh = regenerateFreshName(child);
+        if (!fresh) break;
+        candidate = fresh;
       }
-      child.name = baseName;
-      seen.add(baseName.toLowerCase());
+      let suffixAttempt = 1;
+      while (seen.has(candidate.toLowerCase())) {
+        suffixAttempt++;
+        const dot = child.isFolder ? -1 : child.name.lastIndexOf('.');
+        candidate =
+          dot > 0
+            ? `${child.name.slice(0, dot)}_${suffixAttempt}${child.name.slice(dot)}`
+            : `${child.name}_${suffixAttempt}`;
+      }
+      child.name = candidate;
+      if (!child.isFolder) child.ext = extractExt(child.name);
+      seen.add(candidate.toLowerCase());
     }
   }
 
@@ -1440,7 +1487,8 @@ function applyMissionSystemCustomizations(
       break;
     }
     case 'DeliverFile': {
-      const dir = allFiles().find((f) => f.isFolder && f.key === mp.parentKey);
+      const dirs = allFiles().filter((f) => f.isFolder && f.key === mp.parentKey);
+      const dir = dirs.length > 0 ? dirs[rseed.random(dirs.length)] : undefined;
       if (dir) dir.name = ensureUniqueNameInFolder(sys.files, dir.parentId, mp.parentName, true, dir.id);
       break;
     }
@@ -1460,7 +1508,8 @@ function applyMissionSystemCustomizations(
     }
     case 'GameHack': {
       setRootName(sys, mp.serv);
-      const dir = allFiles().find((f) => f.isFolder && f.key === '/char');
+      const charDirs = allFiles().filter((f) => f.isFolder && f.key === '/char');
+      const dir = charDirs.length > 0 ? charDirs[rseed.random(charDirs.length)] : undefined;
       if (dir) {
         dir.name = ensureUniqueNameInFolder(sys.files, dir.parentId, mp.char, true, dir.id);
         for (const cid of dir.childrenIds) {
@@ -1499,9 +1548,9 @@ function applyMissionSystemCustomizations(
       }
       break;
     case 'TutorialBypass': {
-      const doc =
-        allFiles().find((f) => !isProtectedFile(f) && f.key === 'file.doc') ??
-        allFiles().find((f) => !isProtectedFile(f));
+      const docs = allFiles().filter((f) => !isProtectedFile(f) && f.key === 'file.doc');
+      const fallback = docs.length > 0 ? docs : allFiles().filter((f) => !isProtectedFile(f));
+      const doc = fallback.length > 0 ? fallback[rseed.random(fallback.length)] : undefined;
       if (doc) {
         doc.name = ensureUniqueNameInFolder(sys.files, doc.parentId, mp.f, false, doc.id);
         doc.ext = extractExt(doc.name);
@@ -1516,13 +1565,16 @@ function applyMissionSystemCustomizations(
       const src = otherTvs[rseed.random(otherTvs.length)];
       setRootName(src.system!, mp.tvFrom);
       for (const f of Object.values(src.system!.files).filter((x) => x.key === 'tvprog.data')) {
+        const rawProg = names.get('hotProg');
+        const progWithExt = rawProg.toLowerCase().endsWith('.data') ? rawProg : `${rawProg}.data`;
         f.name = ensureUniqueNameInFolder(
           src.system!.files,
           f.parentId,
-          names.get('hotProg'),
+          progWithExt,
           false,
           f.id
         );
+        f.ext = extractExt(f.name);
         f.isMissionTarget = true;
       }
       break;
@@ -1531,9 +1583,12 @@ function applyMissionSystemCustomizations(
       for (const ntv of allNodes.filter((n) => n.type === 'Tv' && n.system !== null)) {
         setRootName(ntv.system!, `${mp.tv} ${texts.get('roman')}-${rseed.random(9) + 1}`);
       }
-      const prog = allFiles().find((f) => f.key === 'tvprog.data');
+      const progs = allFiles().filter((f) => f.key === 'tvprog.data');
+      const prog = progs.length > 0 ? progs[rseed.random(progs.length)] : undefined;
       if (prog) {
-        prog.name = ensureUniqueNameInFolder(sys.files, prog.parentId, mp.program, false, prog.id);
+        const progWithExt = mp.program.toLowerCase().endsWith('.data') ? mp.program : `${mp.program}.data`;
+        prog.name = ensureUniqueNameInFolder(sys.files, prog.parentId, progWithExt, false, prog.id);
+        prog.ext = extractExt(prog.name);
         prog.isMissionTarget = true;
         const enc = rseed.random(4);
         if (enc > 0 && mdata.gl > 4) prog.effects.E_Encoded = enc;
@@ -1551,6 +1606,8 @@ function applyMissionSystemCustomizations(
 
 function dispatchStolenCards(
   bundle: GameDataBundle,
+  corp: string,
+  hackerName: string,
   cards: StolenCard[],
   nodes: InternalNode[],
   seed: number,
@@ -1559,9 +1616,9 @@ function dispatchStolenCards(
   if (cards.length === 0) return;
   const rng = Rand.fromSeed(seed ^ 0x19a4f1);
   const { texts, fsNames, names } = bundle.createTextEngines(seed ^ 0x19a4f1, adult);
-  names.set('corp', 'Intrusion');
-  texts.set('corp', 'Intrusion');
-  texts.set('hacker', 'Haxxor');
+  names.set('corp', corp);
+  texts.set('corp', corp);
+  texts.set('hacker', hackerName);
 
   const getEligibleFiles = (sys: SystemState): FileNodeState[] =>
     Object.values(sys.files).filter(

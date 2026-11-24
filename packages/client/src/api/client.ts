@@ -150,6 +150,14 @@ export const api = {
     ),
 
   challengeToday: () => requestJson<ChallengeTodayResponse>('/api/challenges/today'),
+  saveChallengeLoadout: (
+    level: 5 | 7 | 9,
+    payload: { chipsetId: string | null; content: string[] }
+  ) =>
+    requestJson<{ player: PlayerDto }>(`/api/challenges/loadout/${level}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
   startChallenge: (level: number = 7) =>
     requestJson<{ init: MissionInitParams }>('/api/challenges/today/start', {
       method: 'POST',

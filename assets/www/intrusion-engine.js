@@ -409,14 +409,15 @@ AntivirMan.prototype = {
 		this.attackAll(data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"oxy"));
 		this.attackAll(data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"bigoxy"));
 	}
-	,onVirusRun: function(v) {
-		if(this.term.fs == null) {
+	,onVirusRun: function(v,targetFs) {
+		var sys = targetFs != null ? targetFs : this.term.fs;
+		if(sys == null) {
 			return;
 		}
 		if(v == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"cd") || v == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"connec") || v == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"extrac") || v == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"target")) {
 			return;
 		}
-		if(this.folderContains(this.term.fs.curFolder,data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"fantassin"))) {
+		if(this.term.fs != null && this.term.fs.curFolder != null && this.folderContains(this.term.fs.curFolder,data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"fantassin"))) {
 			this.queueAttackAll(data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"fantassin"),true);
 		}
 		var bomb = data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"bomb");
@@ -425,6 +426,9 @@ AntivirMan.prototype = {
 			var val = _g_head.item;
 			_g_head = _g_head.next;
 			var f = val;
+			if(f.fl_deleted || f.life <= 0 || f.av == null) {
+				continue;
+			}
 			if(this.term.hasEffect(UserEffectType.UE_Furtivity)) {
 				this.term.log((_$Lang_AllTextsFormat.getText(Lang.fmt,"AntivirusDodged"))({ _name : f.name, _av : f.av.key.toUpperCase()}));
 				continue;
@@ -450,7 +454,7 @@ AntivirMan.prototype = {
 		if(this.term.fs == null) {
 			return;
 		}
-		if(f != null && f.parent == this.term.fs.curFolder && this.folderContains(this.term.fs.curFolder,data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"eject"))) {
+		if(this.term.fs.curFolder != null && this.folderContains(this.term.fs.curFolder,data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"eject"))) {
 			var _g_head = this.getAllByFolder(this.term.fs.curFolder,data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"eject")).h;
 			while(_g_head != null) {
 				var val = _g_head.item;
@@ -1837,10 +1841,7 @@ FSNode.prototype = {
 		MCFile.get_icon(this.mc).stop();
 		MCFile.get_icon2(this.mc).gotoAndStop(MCFile.get_icon(this.mc)._currentframe);
 	}
-	,damage: function(base,fl_canBeBoosted,fl_ignoreShield,fl_canSpread,fl_applyBrute) {
-		if(fl_applyBrute == null) {
-			fl_applyBrute = true;
-		}
+	,damage: function(base,fl_canBeBoosted,fl_ignoreShield,fl_canSpread) {
 		if(fl_canSpread == null) {
 			fl_canSpread = true;
 		}
@@ -1854,7 +1855,7 @@ FSNode.prototype = {
 			return 0;
 		}
 		var dmg = base;
-		if(fl_applyBrute && FSNode.term.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"brute"))) {
+		if(FSNode.term.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"brute"))) {
 			dmg = Math.round(VirusMan.BRUTE_DMG * dmg);
 		}
 		var extra = "";
@@ -1865,13 +1866,10 @@ FSNode.prototype = {
 		if(fl_canBeBoosted) {
 			if(FSNode.term.hasEffect(UserEffectType.UE_DamageBurst)) {
 				dmg += FSNode.term.getEffectSource(UserEffectType.UE_DamageBurst).power;
-				if(!FSNode.term.vman.burstUsed) {
-					FSNode.term.vman.burstUsed = true;
-					FSNode.term.vman.addEndEvent(function() {
-						FSNode.term.removeEffect(UserEffectType.UE_DamageBurst);
-						return 0;
-					});
-				}
+				FSNode.term.vman.addEndEvent(function() {
+					FSNode.term.removeEffect(UserEffectType.UE_DamageBurst);
+					return 0;
+				});
 			}
 			if(FSNode.term.hasEffect(UserEffectType.UE_Charge)) {
 				dmg *= FSNode.term.countEffect(UserEffectType.UE_Charge);
@@ -1912,20 +1910,18 @@ FSNode.prototype = {
 		var final_dmg = Math.floor(dmg);
 		this.life = Math.max(0,this.life - final_dmg) | 0;
 		if(fl_canSpread && final_dmg > 0 && this.hasEffect(EffectType.E_Tag)) {
-			var sdamage = Math.floor(final_dmg * this.countEffect(EffectType.E_Tag) / 100);
-			if(sdamage > 0) {
-				var _g = 0;
-				var _g1 = FSNode.term.fs.getFilesByEffect(EffectType.E_Tag);
-				while(_g < _g1.length) {
-					var neig = _g1[_g];
-					++_g;
-					if(neig != this) {
-						FSNode.term.vman.addEndEvent((function(_g,base) {
-							return function() {
-								return _g[0].damage(base[0],false,false,false,false);
-							};
-						})([neig],[sdamage]));
-					}
+			var sdamage = Math.floor(base * this.countEffect(EffectType.E_Tag) / 100);
+			var _g = 0;
+			var _g1 = FSNode.term.fs.getFilesByEffect(EffectType.E_Tag);
+			while(_g < _g1.length) {
+				var neig = _g1[_g];
+				++_g;
+				if(neig != this) {
+					FSNode.term.vman.addEndEvent((function(_g,base) {
+						return function() {
+							return _g[0].damage(base[0],true,false,false);
+						};
+					})([neig],[sdamage]));
 				}
 			}
 		}
@@ -1957,20 +1953,18 @@ FSNode.prototype = {
 			}
 			if(this.hasEffect(EffectType.E_Splash) && !this.fl_deleted) {
 				var sdamage = Math.floor(dmg * this.countEffect(EffectType.E_Splash) / 100);
-				if(sdamage > 0) {
-					var _g = 0;
-					var _g1 = FSNode.term.fs.getFolderFiles(this.parent);
-					while(_g < _g1.length) {
-						var neig = _g1[_g];
-						++_g;
-						if(neig.key == "file.core" || neig.key == "file.guardian" || neig.av != null) {
-							if(neig != this && !neig.fl_folder && !neig.fl_deleted) {
-								FSNode.term.vman.addEndEvent((function(_g,base) {
-									return function() {
-										return _g[0].damage(base[0],false,false,true,false);
-									};
-								})([neig],[sdamage]));
-							}
+				var _g = 0;
+				var _g1 = FSNode.term.fs.getFolderFiles(this.parent);
+				while(_g < _g1.length) {
+					var neig = _g1[_g];
+					++_g;
+					if(neig.key == "file.core" || neig.key == "file.guardian" || neig.av != null) {
+						if(neig != this && !neig.fl_folder && !neig.fl_deleted) {
+							FSNode.term.vman.addEndEvent((function(_g,base) {
+								return function() {
+									return _g[0].damage(base[0],true,false,true);
+								};
+							})([neig],[sdamage]));
 						}
 					}
 				}
@@ -14605,13 +14599,49 @@ VirusMan.prototype = {
 			if(f == null || v.target != "_folder") {
 				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"InvalidTarget"));
 			}
+		} else if(this.term.fl_leet && v == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"cd") && fname.indexOf("/") >= 0) {
+			// Intentional secret Uber-Eleet perk: allow multi-hop path navigation in Leet mode (do not document in site/UI descriptions).
+			if(fname == "/") {
+				f = this.term.fs.getRoot();
+			} else {
+				var isAbs = fname.charAt(0) == "/";
+				var parts = fname.split("/");
+				var nav = isAbs ? this.term.fs.getRoot() : this.term.fs.curFolder;
+				var _pi = 0;
+				while(_pi < parts.length) {
+					var seg = parts[_pi++];
+					if(seg.length == 0 || seg == ".") continue;
+					if(seg == "..") {
+						if(nav.parent == null) {
+							throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"InvalidTarget"));
+						}
+						nav = nav.parent;
+					} else {
+						var nextDir = null;
+						var dirFiles = this.term.fs.getFolderFiles(nav);
+						var _di = 0;
+						while(_di < dirFiles.length) {
+							var ch = dirFiles[_di++];
+							if(!ch.fl_deleted && ch.fl_folder && ch.name.toLowerCase() == seg.toLowerCase()) {
+								nextDir = ch;
+								break;
+							}
+						}
+						if(nextDir == null) {
+							throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"FileNotFound"));
+						}
+						nav = nextDir;
+					}
+				}
+				f = nav;
+			}
 		} else {
 			f = this.term.fs.getFile(fname);
 			if(f == null) {
 				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"FileNotFound"));
 			}
 		}
-		if(f != null) {
+		if(f != null && f.mcIndex != null) {
 			this.term.fs.focus(f.mcIndex);
 		}
 		this.exec(v,f);
@@ -14672,6 +14702,7 @@ VirusMan.prototype = {
 			me.term.playSound("bleep_01");
 		}
 		Progress.start(ct,function() {
+			var prevFs = me.term.fs;
 			if(me.virus.uses != null) {
 				var fh = me.virus;
 				fh.uses--;
@@ -14682,11 +14713,13 @@ VirusMan.prototype = {
 			cb(me.term,me.virus);
 			me.term.checkMission();
 			me.term.spam(me.virus.id + " OK");
-			me.term.avman.onVirusRun(me.virus);
+			me.term.avman.onVirusRun(me.virus,prevFs);
 			me.term.decayLog();
 			me.term.hideCompletion();
 			me.term.dock.updateBubbles();
-			if(me.term.hasEffect(UserEffectType.UE_Furtivity)) {
+			// Intentional secret Uber-Eleet perk: cd, extrac & target do NOT consume UE_Furtivity in Leet mode (do not document in site/UI descriptions).
+			var skipFurtivityConsume = me.term.fl_leet && (me.virus == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"cd") || me.virus == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"extrac") || me.virus == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"target"));
+			if(me.term.hasEffect(UserEffectType.UE_Furtivity) && !skipFurtivityConsume) {
 				me.term.avman.endTurn.add(function() {
 					me.term.removeEffect(UserEffectType.UE_Furtivity);
 					me.term.log((_$Lang_AllTextsFormat.getText(Lang.fmt,"RemainingFurtivity"))({ _n : me.term.countEffect(UserEffectType.UE_Furtivity)}));
@@ -14735,7 +14768,7 @@ VirusMan.prototype = {
 				++_g;
 				if(f.hasEffect(EffectType.E_Dot)) {
 					hit = true;
-					f.damage(f.countEffect(EffectType.E_Dot),false);
+					f.damage(f.countEffect(EffectType.E_Dot),true);
 					f.removeEffect(EffectType.E_DotLength);
 					if(!f.hasEffect(EffectType.E_DotLength)) {
 						f.clearEffect(EffectType.E_Dot);
@@ -15147,6 +15180,18 @@ VirusMan.prototype = {
 		if(!f.fl_folder) {
 			throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"NeedFolder"));
 		}
+		var isAdjacent = this.term.fs.curFolder != null && (f == this.term.fs.curFolder.parent || f.parent == this.term.fs.curFolder);
+		// Intentional secret Uber-Eleet perk: non-adjacent folder jumps are allowed ONLY in Uber-Eleet mode (do not document in site/UI descriptions).
+		if(!this.term.fl_leet && !isAdjacent) {
+			throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"InvalidTarget"));
+		}
+		var anc = f.parent;
+		while(anc != null) {
+			if(anc.password != null || this.term.avman.folderContains(anc,data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"passwd"))) {
+				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"MapLocked"));
+			}
+			anc = anc.parent;
+		}
 		if(f.password != null || this.term.avman.folderContains(f,data__$AntivirusXml_AllData.getAntivirus(data_AntivirusXml.get,"passwd"))) {
 			this.term.askPass(f);
 			throw haxe_Exception.thrown("");
@@ -15171,7 +15216,9 @@ VirusMan.prototype = {
 				throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"CantGetOut"));
 			}
 		}
-		this.term.startAnim(AnimType.A_StrongBlink,MCFile.get_icon(f.mc));
+		if(f.mc != null) {
+			this.term.startAnim(AnimType.A_StrongBlink,MCFile.get_icon(f.mc));
+		}
 		var t = this.getCT() * 0.6;
 		if(f == this.term.fs.curFolder.parent || MissionGen.isTutorial(this.term.mdata)) {
 			t *= 0.5;
@@ -15195,32 +15242,19 @@ VirusMan.prototype = {
 			throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"RebootBlocked"));
 		}
 		this.start(this.getCT(f),function(t,v) {
-			var sys = t.fs;
-			var avFiles = [];
-			if(sys != null) {
-				var _ri = 0;
-				var _rtree = sys.rawTree;
-				while(_ri < _rtree.length) {
-					var rf = _rtree[_ri++];
-					if(!rf.fl_deleted && rf.av != null && !rf.hasEffect(EffectType.E_Disabled)) {
-						avFiles.push(rf);
-					}
+			var h = t.avman.fast.h;
+			var lk_keys = Object.keys(h);
+			var _li = 0;
+			while(_li < lk_keys.length) {
+				var list = h[lk_keys[_li++]];
+				var _g_head = list.h;
+				while(_g_head != null) {
+					var file = _g_head.item;
+					_g_head = _g_head.next;
+					file.addEffect(EffectType.E_SkipAction,3,3);
 				}
 			}
-			t.avman.onVirusRun(v);
-			if(sys != null) {
-				sys.reboot();
-			}
-			var _ai = 0;
-			while(_ai < avFiles.length) {
-				var file = avFiles[_ai++];
-				if(!file.fl_deleted && file.av != null && !file.hasEffect(EffectType.E_Disabled)) {
-					var cur = file.countEffect(EffectType.E_SkipAction);
-					if(cur < 3) {
-						file.addEffect(EffectType.E_SkipAction,3 - cur,3);
-					}
-				}
-			}
+			t.fs.reboot();
 		});
 	}
 	,_reboo2: function(f) {
@@ -15228,33 +15262,20 @@ VirusMan.prototype = {
 			throw haxe_Exception.thrown(_$Lang_AllTexts.getText(Lang.get,"RebootBlocked"));
 		}
 		this.start(this.getCT(f),function(t,v) {
-			var sys = t.fs;
-			var avFiles = [];
-			if(sys != null) {
-				var _ri = 0;
-				var _rtree = sys.rawTree;
-				while(_ri < _rtree.length) {
-					var rf = _rtree[_ri++];
-					if(!rf.fl_deleted && rf.av != null && !rf.hasEffect(EffectType.E_Disabled)) {
-						avFiles.push(rf);
-					}
-				}
-			}
-			t.avman.onVirusRun(v);
-			if(sys != null) {
-				sys.reboot();
-			}
-			var _ai = 0;
-			while(_ai < avFiles.length) {
-				var file = avFiles[_ai++];
-				if(!file.fl_deleted && file.av != null && !file.hasEffect(EffectType.E_Disabled)) {
-					var cur = file.countEffect(EffectType.E_SkipAction);
-					if(cur < 3) {
-						file.addEffect(EffectType.E_SkipAction,3 - cur,3);
-					}
+			var h = t.avman.fast.h;
+			var lk_keys = Object.keys(h);
+			var _li = 0;
+			while(_li < lk_keys.length) {
+				var list = h[lk_keys[_li++]];
+				var _g_head = list.h;
+				while(_g_head != null) {
+					var file = _g_head.item;
+					_g_head = _g_head.next;
+					file.addEffect(EffectType.E_SkipAction,3,3);
 					file.addEffect(EffectType.E_Exploit,1,1);
 				}
 			}
+			t.fs.reboot();
 		});
 	}
 	,_dmgs: function(f) {
@@ -15552,6 +15573,10 @@ VirusMan.prototype = {
 	}
 	,_panic1: function(f) {
 		this.start(this.getCT(f) * 0.5,function(t,v) {
+			if(t.hasEffect(UserEffectType.UE_MoveFurtivity)) {
+				t.removeEffect(UserEffectType.UE_MoveFurtivity);
+				t.log((_$Lang_AllTextsFormat.getText(Lang.fmt,"RemainingMoveFurtivity"))({ _n : t.countEffect(UserEffectType.UE_MoveFurtivity)}));
+			}
 			t.disconnectFS();
 		});
 	}
@@ -15609,6 +15634,10 @@ VirusMan.prototype = {
 		}
 		this.start(this.getCT(f) * 0.5,function(t,v) {
 			t.fs.openFolder(t.fs.curFolder.parent,true);
+			if(t.hasEffect(UserEffectType.UE_MoveFurtivity)) {
+				t.removeEffect(UserEffectType.UE_MoveFurtivity);
+				t.log((_$Lang_AllTextsFormat.getText(Lang.fmt,"RemainingMoveFurtivity"))({ _n : t.countEffect(UserEffectType.UE_MoveFurtivity)}));
+			}
 		});
 	}
 	,_heal1: function(f) {
@@ -16536,6 +16565,18 @@ WinAppMap.prototype = $extend(WinApp.prototype,{
 				if(f.password != null) {
 					mc.get_smc().gotoAndStop(6);
 					this.tip(mc,_$Lang_AllTexts.getText(Lang.get,"MapLocked"));
+				}
+				// Intentional secret Uber-Eleet perk: allow clicking folders in Scanner map to jump directly in Leet mode (do not document in site/UI descriptions).
+				if(this.term.fl_leet && !fl_scrambled) {
+					(function(targetDir) {
+						mc.useHandCursor = true;
+						mc.onRelease = function() {
+							me.stop();
+							if(me.term.fs != null && me.term.fs.curFolder != targetDir) {
+								me.term.vman.exec(data__$VirusXml_AllData.getVirus(data_VirusXml.get,"cd"),targetDir);
+							}
+						};
+					})(f);
 				}
 				y = this.attachNode(f,level + 1,y + WinAppMap.LINE_HEIGHT);
 			} else {

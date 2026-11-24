@@ -218,7 +218,9 @@ export function App() {
           scoutRun: res.scoutRun,
           previousLevel: prevLevel,
           newLevel: res.player.level,
-          nextRetryPrime: getAdjustedPrime(basePrime, prevTries + 1),
+          nextRetryPrime: res.scoutRun
+            ? getAdjustedPrime(basePrime, prevTries)
+            : getAdjustedPrime(basePrime, prevTries + 1),
         });
       }
     } catch (err: any) {
@@ -301,9 +303,9 @@ export function App() {
         ) : route === 'challenge' ? (
           <ChallengeView
             player={player}
+            viruses={catalog.viruses}
             chipsets={catalog.chipsets}
             onPlayerUpdate={handlePlayerUpdate}
-            onOpenDecks={() => navigate('decks')}
             onStartChallenge={handleStartChallenge}
             onNotify={notify}
           />

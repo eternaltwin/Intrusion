@@ -512,23 +512,24 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
     expect(res.ok).toBe(true);
     advanceMs(session, 3000);
 
-    // Disconnected, took fantassin (2) + mine (15) + oxy (6) = 23 damage, and all 3 AVs keep 3 intact E_SkipAction charges + E_Exploit!
+    // Legacy VirusMan._reboo1/_reboo2: stuns AVs BEFORE reboot/disconnect!
+    // Player takes 0 damage on reboot; mine & oxy consume 1 stun stack on disconnect (leaving 2), fantassin keeps 3!
     expect(session.connectedNodeId).toBeNull();
-    expect(hpBefore - session.life).toBe(23);
-    expect(mineAv.effects.E_SkipAction).toBe(3);
+    expect(hpBefore - session.life).toBe(0);
+    expect(mineAv.effects.E_SkipAction).toBe(2);
     expect(fantassinAv.effects.E_SkipAction).toBe(3);
-    expect(oxyAv.effects.E_SkipAction).toBe(3);
+    expect(oxyAv.effects.E_SkipAction).toBe(2);
     expect(mineAv.effects.E_Exploit).toBe(1);
     expect(fantassinAv.effects.E_Exploit).toBe(1);
     expect(oxyAv.effects.E_Exploit).toBe(1);
 
-    // Reconnect and verify all 3 E_SkipAction charges remain intact upon reconnection
+    // Reconnect and verify remaining E_SkipAction charges stay intact upon reconnection
     session.connectToNode(node.id);
     advanceMs(session, 3000);
     expect(session.connectedNodeId).toBe(node.id);
-    expect(mineAv.effects.E_SkipAction).toBe(3);
+    expect(mineAv.effects.E_SkipAction).toBe(2);
     expect(fantassinAv.effects.E_SkipAction).toBe(3);
-    expect(oxyAv.effects.E_SkipAction).toBe(3);
+    expect(oxyAv.effects.E_SkipAction).toBe(2);
   });
 
   it('blocks unequipped CLI viruses and enforces folder passwords & glue on CLI cd', () => {
@@ -604,9 +605,11 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
     expect(session.currentFolderId).toBe(sys.rootFolderId);
     expect(session.pendingPasswordFolderId).toBe(subFolder.id);
 
-    // Submitting password unlocks and opens subfolder
+    // Submitting password unlocks subfolder and stays in root until `cd <subFolder>` is run (matching legacy validatePass)
     expect(session.submitFolderPassword('wrong')).toBe(false);
     expect(session.submitFolderPassword('secret123')).toBe(true);
+    expect(session.currentFolderId).toBe(sys.rootFolderId);
+    expect(session.executeCliCommand(`cd ${subFolder.name}`).ok).toBe(true);
     advanceMs(session, 1000);
     expect(session.currentFolderId).toBe(subFolder.id);
 
@@ -835,5 +838,266 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
     advanceMs(session, 2000);
 
     expect(session.connectedNodeId).toBeNull();
+  });
+
+  it('aligns combat, stealth, Uber-Eleet perks, reboot, bomb, route files & control deletion with legacy', () => {
+    const fr = loadBundleFromDisk('fr');
+    const mission = generateMission(fr, 8, 9191, true);
+
+    const makeSession = (leet: boolean, chipset: string | null = null, deckContent: string[] = []) =>
+      new MissionSession(fr, {
+        missionKey: 'align_test',
+        seed: 9191,
+        gl: 8,
+        mission,
+        decks: [
+          {
+            id: 'd1',
+            name: 'Main',
+            capacity: 9,
+            isFavorite: true,
+            content: deckContent,
+          },
+        ],
+        chipset,
+        isChallenge: false,
+        biosLevel: 3,
+        tries: 0,
+        profile: {
+          username: 'LegacyAligned',
+          level: 9,
+          leet,
+          adult: true,
+          cfg: '',
+          sfx: false,
+          ambiant: false,
+          beat: false,
+          lang: 'fr',
+        },
+      });
+
+    // 1. A1.1 (masked blind damage), A1.3 (fmove1=2, fmove2=6), A1.4 & A1.5 (Normal vs Uber-Eleet perks), A1.8 (cd .. at root)
+    const norm = makeSession(false, null, ['dmgs', 'avdmg1', 'fmove1', 'fmove2', 'invis', 'reboo2']);
+    const firstNode = Object.values(norm.nodes).find(
+      (n) => n.system !== null && norm.canReachNode(n) && !norm.isNodeShielded(n)
+    )!;
+    norm.connectToNode(firstNode.id);
+    advanceMs(norm, 2000);
+    const sys = norm.currentSystem!;
+
+    // Clear all AVs/passwords first
+    for (const f of Object.values(sys.files)) {
+      f.avKey = null;
+      f.password = null;
+      delete f.effects.E_Masked;
+      delete f.effects.E_Encoded;
+      delete f.effects.E_Immune;
+      delete f.effects.E_Shield;
+    }
+
+    // A1.8: cd .. at root returns InvalidTarget and stays connected
+    expect(norm.executeCliCommand('cd ..').ok).toBe(false);
+    expect(norm.connectedNodeId).toBe(firstNode.id);
+
+    // A1.1: Blind-attacking an E_Masked AV with dmgs works, while avdmg1 is blocked with UnknownType; CLI finds masked file by real name
+    const rootChildren = sys.files[sys.rootFolderId].childrenIds.map((id) => sys.files[id]);
+    const subFolders = rootChildren.filter((f) => f.isFolder);
+    const childFolder = subFolders[0];
+    const grandChildFolder = Object.values(sys.files).find(
+      (f) => f.isFolder && f.parentId !== null && f.parentId !== sys.rootFolderId
+    );
+
+    const anyFileInChild = childFolder.childrenIds
+      .map((id) => sys.files[id])
+      .find((f) => !f.isFolder)!;
+    anyFileInChild.avKey = 'mask';
+    anyFileInChild.life = 15;
+    anyFileInChild.lifeTotal = 15;
+    anyFileInChild.effects.E_Masked = 1;
+
+    norm.currentFolderId = childFolder.id;
+    expect(norm.useVirusById('avdmg1', anyFileInChild.id).ok).toBe(false);
+    expect(norm.executeCliCommand(`dmgs ${anyFileInChild.name}`).ok).toBe(true);
+    advanceMs(norm, 1000);
+    expect(anyFileInChild.life).toBeLessThan(15);
+    anyFileInChild.avKey = null;
+    delete anyFileInChild.effects.E_Masked;
+
+    // A1.3: fmove1 dodges 2 moves against oxy, 3rd move takes damage
+    const oxyHost = childFolder.childrenIds
+      .map((id) => sys.files[id])
+      .find((f) => !f.isFolder)!;
+    oxyHost.avKey = 'oxy';
+    oxyHost.life = 15;
+    oxyHost.lifeTotal = 15;
+
+    norm.currentFolderId = sys.rootFolderId;
+    expect(norm.useVirusById('fmove1').ok).toBe(true);
+    advanceMs(norm, 1000);
+    const hpBeforeMoves = norm.life;
+
+    // Move 1 (root -> child): dodged, 1 stack left
+    expect(norm.openFolder(childFolder.id).ok).toBe(true);
+    advanceMs(norm, 1000);
+    expect(norm.life).toBe(hpBeforeMoves);
+    expect(norm.userEffects.UE_MoveFurtivity).toBe(1);
+
+    // Move 2 (child -> root): dodged, 0 stacks left!
+    expect(norm.openFolder(sys.rootFolderId).ok).toBe(true);
+    advanceMs(norm, 1000);
+    expect(norm.life).toBe(hpBeforeMoves);
+    expect(norm.userEffects.UE_MoveFurtivity).toBeUndefined();
+
+    // Move 3 (root -> child): takes oxy damage!
+    expect(norm.openFolder(childFolder.id).ok).toBe(true);
+    advanceMs(norm, 1000);
+    expect(norm.life).toBeLessThan(hpBeforeMoves);
+
+    // A1.4 & A1.5 in Normal mode: invis IS consumed on cd, and non-adjacent folder jump is rejected
+    expect(norm.useVirusById('invis').ok).toBe(true);
+    advanceMs(norm, 1000);
+    expect(norm.userEffects.UE_Furtivity).toBe(2);
+    expect(norm.openFolder(sys.rootFolderId).ok).toBe(true);
+    advanceMs(norm, 1000);
+    expect(norm.userEffects.UE_Furtivity).toBe(1);
+
+    if (grandChildFolder) {
+      expect(norm.openFolder(grandChildFolder.id).ok).toBe(false);
+    }
+
+    // A1.2: reboo2 stuns oxy BEFORE disconnect (0 damage on reboot, leaving 2 stun stacks on oxy + E_Exploit=1)
+    const hpBeforeReboot = norm.life;
+    norm.mana = norm.manaTotal;
+    delete norm.userEffects.UE_Furtivity;
+    expect(norm.useVirusById('reboo2').ok).toBe(true);
+    advanceMs(norm, 1000);
+    expect(norm.connectedNodeId).toBeNull();
+    expect(norm.life).toBe(hpBeforeReboot);
+    expect(oxyHost.effects.E_SkipAction).toBe(2);
+    expect(oxyHost.effects.E_Exploit).toBe(1);
+
+    // 2. A1.4 & A1.5 in Uber-Eleet mode: invis NOT consumed on cd, and non-adjacent folder jump IS allowed!
+    const leet = makeSession(true, null, ['invis']);
+    leet.connectToNode(firstNode.id);
+    advanceMs(leet, 2000);
+    const leetSys = leet.currentSystem!;
+    for (const f of Object.values(leetSys.files)) {
+      f.avKey = null;
+      f.password = null;
+    }
+    expect(leet.useVirusById('invis').ok).toBe(true);
+    advanceMs(leet, 500);
+    expect(leet.userEffects.UE_Furtivity).toBe(2);
+
+    const leetDeepFolder = Object.values(leetSys.files).find(
+      (f) => f.isFolder && f.parentId !== null && f.parentId !== leetSys.rootFolderId
+    );
+    if (leetDeepFolder) {
+      expect(leet.openFolder(leetDeepFolder.id).ok).toBe(true);
+      advanceMs(leet, 500);
+      expect(leet.currentFolderId).toBe(leetDeepFolder.id);
+      // Still 2 stacks of UE_Furtivity in Uber-Eleet mode!
+      expect(leet.userEffects.UE_Furtivity).toBe(2);
+      // Multi-hop CLI cd / back to root in Uber-Eleet mode!
+      expect(leet.executeCliCommand('cd /').ok).toBe(true);
+      advanceMs(leet, 500);
+      expect(leet.currentFolderId).toBe(leetSys.rootFolderId);
+      expect(leet.userEffects.UE_Furtivity).toBe(2);
+    }
+
+    // 3. A1.6 (libxpl kills eject before eject triggers), A1.7 (bomb stun resets counter), B.4 (bomb 15 HP), C.4 (deleted control blocks corrup)
+    const comb = makeSession(false, 'brute', ['libxpl', 'dmgxl', 'stun1', 'corrup', 'corru2', 'reveng']);
+    comb.connectToNode(firstNode.id);
+    advanceMs(comb, 2000);
+    const cSys = comb.currentSystem!;
+    for (const f of Object.values(cSys.files)) {
+      f.avKey = null;
+      f.password = null;
+      delete f.effects.E_Masked;
+      delete f.effects.E_Encoded;
+      delete f.effects.E_Immune;
+      delete f.effects.E_Shield;
+    }
+
+    // Find folder with >= 2 non-folder files
+    const multiFileFolder = Object.values(cSys.files).find(
+      (f) => f.isFolder && f.childrenIds.filter((id) => !cSys.files[id].isFolder).length >= 2
+    )!;
+    const mFiles = multiFileFolder.childrenIds
+      .map((id) => cSys.files[id])
+      .filter((x) => !x.isFolder);
+    const libFile = mFiles[0];
+    libFile.ext = 'lib';
+    libFile.life = 1;
+    libFile.lifeTotal = 1;
+
+    const ejFile = mFiles[1];
+    ejFile.avKey = 'eject';
+    ejFile.life = 15;
+    ejFile.lifeTotal = 15;
+
+    comb.currentFolderId = multiFileFolder.id;
+    expect(comb.useVirusById('libxpl', libFile.id).ok).toBe(true);
+    advanceMs(comb, 1000);
+    // dmgxl (30) * brute (1.5) = 45 -> splash 50% = 22 -> * brute (1.5) = 33 >= 15 -> kills eject BEFORE eject runs!
+    expect(comb.useVirusById('dmgxl', libFile.id).ok).toBe(true);
+    advanceMs(comb, 1000);
+    expect(ejFile.deleted).toBe(true);
+    expect(comb.connectedNodeId).toBe(firstNode.id);
+
+    // A1.7 & B.8: stunned bomb at 10/10 blocks explosion & resets counter to 0; E_Revenge with brute deals 23 even on lethal hit
+    const bombFile = Object.values(cSys.files).find(
+      (f) => !f.isFolder && !f.deleted && f.key !== 'file.core'
+    )!;
+    bombFile.avKey = 'bomb';
+    bombFile.life = 25;
+    bombFile.lifeTotal = 25;
+    bombFile.effects.E_Counter = 10;
+    expect(comb.useVirusById('stun1', bombFile.id).ok).toBe(true);
+    advanceMs(comb, 1000);
+    // Casting stun1 incremented counter to 11 -> blocked by stun1 -> counter reset to 0!
+    expect(bombFile.effects.E_Counter).toBeUndefined();
+
+    // Lethal bomb hit triggers E_Revenge with brute (round(15 * 1.5) = 23 dmg)!
+    expect(comb.useVirusById('reveng', bombFile.id).ok).toBe(true);
+    advanceMs(comb, 1000);
+    delete bombFile.effects.E_SkipAction;
+    bombFile.effects.E_Counter = 10;
+    comb.life = 5;
+    comb.mana = comb.manaTotal;
+    // Cast a harmless virus to trigger bomb explosion (10 -> 11)
+    expect(comb.useVirusById('corru2', bombFile.id).ok).toBe(false); // precondition fails, doesn't cast
+    const controlFiles = Object.values(cSys.files).filter((f) => f.key === 'file.control');
+    if (controlFiles.length >= 1) {
+      // Delete one control file (or create a second deleted control file) to test C.4 too!
+      const ctrl = controlFiles[0];
+      const extraDeletedCtrl = Object.values(cSys.files).find(
+        (f) => !f.isFolder && f.id !== ctrl.id && f.id !== bombFile.id && f.key !== 'file.core'
+      )!;
+      extraDeletedCtrl.key = 'file.control';
+      extraDeletedCtrl.deleted = true;
+
+      expect(comb.useVirusById('corrup', ctrl.id).ok).toBe(true);
+      advanceMs(comb, 1000);
+      // C.4: deleted file.control prevents corruptSystem!
+      expect(cSys.corrupted).toBe(false);
+      // B.8 & B.3: player died to bomb, AND E_Revenge STILL hit bombFile for 23 damage (25 -> 2)!
+      expect(comb.life).toBe(0);
+      expect(bombFile.life).toBe(2);
+    }
+
+    // 4. A2.12 (CorruptDisplay place varies across seeds) & A2.14 (TVTheft .data suffix)
+    const places = new Set<string>();
+    let checkedTvTheft = false;
+    for (let s = 100; s < 250; s++) {
+      const m = generateMission(fr, 7, s, true);
+      if (m.type.kind === 'CorruptDisplay') places.add(m.type.place);
+      if (m.type.kind === 'TVTheft') {
+        expect(m.type.program.toLowerCase().endsWith('.data')).toBe(true);
+        checkedTvTheft = true;
+      }
+    }
+    expect(places.size).toBeGreaterThan(1);
+    expect(checkedTvTheft).toBe(true);
   });
 });

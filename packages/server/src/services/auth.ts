@@ -1,8 +1,13 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import {
+  CHALLENGE_LEVELS,
+  FORBIDDEN_CHALLENGE_VIRUSES,
+  getChallengeMaxSlots,
   getGameLevel,
   getXpForLevel,
+  isChipsetAllowedInChallenge,
+  isVirusAllowedInChallenge,
   type GameDataBundle,
   type PlayerDto,
 } from '@intrusion/shared';
@@ -143,7 +148,11 @@ export function syncUserChallengeGoals(
   ).run(todayStr, userId);
 }
 
-export function buildPlayerDto(db: DatabaseSync, userId: number): PlayerDto | null {
+export function buildPlayerDto(
+  db: DatabaseSync,
+  userId: number,
+  bundle?: GameDataBundle
+): PlayerDto | null {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as
     | {
         id: number;
@@ -164,9 +173,11 @@ export function buildPlayerDto(db: DatabaseSync, userId: number): PlayerDto | nu
     .all(userId) as Array<{ item_type: string; item_id: string; quantity: number }>;
 
   const viruses: string[] = [];
+  const ownedCounts = new Map<string, number>();
   for (const i of items) {
     if (i.item_type === 'virus') {
       const qty = Math.max(1, i.quantity ?? 1);
+      ownedCounts.set(i.item_id, (ownedCounts.get(i.item_id) ?? 0) + qty);
       for (let k = 0; k < qty; k++) viruses.push(i.item_id);
     }
   }
@@ -182,6 +193,80 @@ export function buildPlayerDto(db: DatabaseSync, userId: number): PlayerDto | nu
     is_favorite: number;
     content_json: string;
   }>;
+
+  const decks = deckRows.map((d) => ({
+    id: d.id,
+    slotIndex: d.slot_index,
+    name: d.name,
+    capacity: d.capacity,
+    isFavorite: d.is_favorite === 1,
+    content: JSON.parse(d.content_json || '[]') as string[],
+  }));
+
+  const maxChallengeSlots = getChallengeMaxSlots(decks);
+
+  const sanitizeTierContent = (rawList: string[], tierLvl: number): string[] => {
+    const used = new Map<string, number>();
+    const out: string[] = [];
+    for (const vid of rawList) {
+      if (out.length >= maxChallengeSlots) break;
+      if (FORBIDDEN_CHALLENGE_VIRUSES.has(vid)) continue;
+      if (bundle && !isVirusAllowedInChallenge(bundle.viruses.get(vid), tierLvl)) continue;
+      const owned = ownedCounts.get(vid) ?? 0;
+      const cur = used.get(vid) ?? 0;
+      if (cur >= owned) continue;
+      used.set(vid, cur + 1);
+      out.push(vid);
+    }
+    return out;
+  };
+
+  const sanitizeTierChipset = (rawChip: string | null, tierLvl: number): string | null => {
+    if (!rawChip || !chipsets.includes(rawChip)) return null;
+    if (bundle && !isChipsetAllowedInChallenge(bundle.chipsets.get(rawChip), tierLvl)) {
+      return null;
+    }
+    return rawChip;
+  };
+
+  const loadoutRows = db
+    .prepare(
+      'SELECT challenge_level, chipset_id, content_json FROM challenge_loadouts WHERE user_id = ?'
+    )
+    .all(userId) as Array<{
+    challenge_level: number;
+    chipset_id: string | null;
+    content_json: string;
+  }>;
+  const savedByTier = new Map<number, { chipsetId: string | null; content: string[] }>();
+  for (const row of loadoutRows) {
+    savedByTier.set(row.challenge_level, {
+      chipsetId: row.chipset_id,
+      content: JSON.parse(row.content_json || '[]') as string[],
+    });
+  }
+
+  const favDeck = decks.find((d) => d.isFavorite) ?? decks[0];
+  const challengeLoadouts = {} as PlayerDto['challengeLoadouts'];
+  for (const tierLvl of CHALLENGE_LEVELS) {
+    const key = String(tierLvl) as '5' | '7' | '9';
+    const saved = savedByTier.get(tierLvl);
+    if (saved) {
+      challengeLoadouts[key] = {
+        chipsetId: sanitizeTierChipset(saved.chipsetId, tierLvl),
+        content: sanitizeTierContent(saved.content, tierLvl),
+      };
+    } else {
+      let defaultContent = sanitizeTierContent(favDeck?.content ?? [], tierLvl);
+      if (defaultContent.length === 0) {
+        defaultContent = sanitizeTierContent(viruses, tierLvl).slice(0, 3);
+      }
+      challengeLoadouts[key] = {
+        chipsetId: sanitizeTierChipset(user.active_chipset, tierLvl),
+        content: defaultContent,
+      };
+    }
+  }
 
   const valRows = db
     .prepare('SELECT valuable_id, quantity FROM user_valuables WHERE user_id = ? AND quantity > 0')
@@ -215,14 +300,8 @@ export function buildPlayerDto(db: DatabaseSync, userId: number): PlayerDto | nu
     activeChipset: user.active_chipset,
     viruses,
     chipsets,
-    decks: deckRows.map((d) => ({
-      id: d.id,
-      slotIndex: d.slot_index,
-      name: d.name,
-      capacity: d.capacity,
-      isFavorite: d.is_favorite === 1,
-      content: JSON.parse(d.content_json || '[]'),
-    })),
+    decks,
+    challengeLoadouts,
     valuables,
     goals,
     settings,

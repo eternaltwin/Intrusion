@@ -89,7 +89,7 @@ export class MissionSession {
   public readonly hasTimer: boolean;
   public timeLimitMs: number;
   public elapsedMs = 0;
-  public tickSeconds = 0;
+  public tickSeconds = -1;
   private secondAccumMs = 0;
   public alarmRemainingSec: number | null = null;
   public alarmOriginNodeId: number | null = null;
@@ -99,6 +99,7 @@ export class MissionSession {
 
   // Mission tracking
   public busted = false;
+  public dead = false;
   public ended = false;
   public missionObjectiveCompleted = false;
   public kills = 0;
@@ -106,6 +107,7 @@ export class MissionSession {
   public tvCopiedProgram = false;
   public unlockedPasswords = new Set<string>();
   public extractedValuables: string[] = [];
+  public inMissionCopiedCount = 0;
   public copiedFiles: SimpleFile[] = [];
   public collectedCards: StolenCard[] = [];
   public goals: Partial<Record<GoalId, number>> = {};
@@ -132,10 +134,11 @@ export class MissionSession {
   public readonly tutorialSteps: TutorialStepDef[];
   public tutorialIndex = 0;
 
-  private endTurnQueue: Array<() => void> = [];
+  private vmanEndTurnQueue: Array<() => void> = [];
+  private avEndTurnQueue: Array<() => void> = [];
   private isDisconnecting = false;
   private pendingFurtivityConsume = 0;
-  private burstConsumedThisTurn = false;
+  private pendingMoveFurtivityConsume = 0;
   private slotChargeGroups = new WeakMap<
     DockSlotState,
     { remainingUses: number; slots: DockSlotState[] }
@@ -533,7 +536,7 @@ export class MissionSession {
   private onSecondTick(): void {
     this.tickSeconds++;
 
-    // Periodic DoT (every 5s)
+    // Periodic DoT (every 5s, boosts/consumes UE_Charge & UE_DamageBurst like legacy VirusMan.onTick)
     const sys = this.currentSystem;
     if (sys && this.tickSeconds % 5 === 0) {
       for (const f of Object.values(sys.files)) {
@@ -544,7 +547,7 @@ export class MissionSession {
             delete f.effects.E_Dot;
             delete f.effects.E_DotLength;
           }
-          this.damageFile(sys, f, dmg, false, false, true);
+          this.damageFile(sys, f, dmg, true, false, true);
         }
       }
     }
@@ -637,6 +640,8 @@ export class MissionSession {
     );
     node.system.speed = hasActiveSlower ? 0.4 : 1.0;
 
+    const connecDef = this.bundle.viruses.get('connec');
+    this.appendSystemLog(node.system, 'TraceVirus', connecDef?.name ?? 'CONNEC', 'connec');
     return this.startCast('connec', nodeId, null, 2.0);
   }
 
@@ -684,8 +689,10 @@ export class MissionSession {
     this.selectedFileId = fileId;
     this.emitSound({ kind: 'sfx', id: 'bleep_01' });
 
-    if (!f.isFolder) {
-      this.appendSystemLog(sys, 'TraceAccess', f.name);
+    if (!f.isFolder && !(f.effects.E_Masked ?? 0)) {
+      if (f.content !== '' && f.ext !== 'pack') {
+        this.appendSystemLog(sys, 'TraceAccess', f.name);
+      }
       this.tryCollectCard(f);
     }
     this.advanceTutorialIfAt('selectFile');
@@ -701,12 +708,19 @@ export class MissionSession {
       return this.failAction(formatLang(ui, 'NeedFolder'));
     }
 
-    // Check glue in current folder
-    if (this.currentFolder && this.folderHasAv(sys, this.currentFolder.id, 'glue') && !this.isMoveFurtive()) {
-      return this.failAction(formatLang(ui, 'CantGetOut'));
+    const cur = this.currentFolder;
+    if (cur && cur.id === folderId) {
+      return { ok: true };
+    }
+    const isAdjacent = cur !== null && (cur.parentId === folderId || folder.parentId === cur.id);
+    // Intentional secret Uber-Eleet perk: non-adjacent folder jumps (via breadcrumbs, scanner tree, or CLI paths)
+    // are allowed ONLY in Uber-Eleet mode; Normal mode restricts navigation to direct parent or child.
+    // Do NOT mention or advertise this behavior in any player-facing site or UI description.
+    if (!this.isLeetMode && !isAdjacent) {
+      return this.failAction(formatLang(ui, 'InvalidTarget'));
     }
 
-    // Verify no strict ancestor of target folder is still locked
+    // Verify no strict ancestor of target folder is still locked (checked BEFORE glue, matching legacy VirusMan._cd)
     let ancId = folder.parentId;
     while (ancId !== null) {
       const anc = sys.files[ancId];
@@ -722,7 +736,13 @@ export class MissionSession {
       return { ok: true };
     }
 
-    const isParent = this.currentFolder?.parentId === folderId;
+    // Check glue in current folder
+    if (cur && this.folderHasAv(sys, cur.id, 'glue') && !this.isMoveFurtive()) {
+      return this.failAction(formatLang(ui, 'CantGetOut'));
+    }
+
+    this.appendSystemLog(sys, 'TraceCD', folder.name);
+    const isParent = cur?.parentId === folderId;
     const mult = isParent || isTutorialMission(this.init.mission) ? 0.3 : 0.6;
     return this.startCast('cd', null, folderId, mult);
   }
@@ -755,7 +775,7 @@ export class MissionSession {
       }
       this.pushLog('success', formatLang(this.bundle.uiStrings, 'LoginSuccess'));
       this.emitSound({ kind: 'sfx', id: 'bonus_02' });
-      this.openFolder(folder.id);
+      // Stay in current folder after unlocking (matching legacy UserTerminal.validatePass)
       return true;
     }
     this.pushLog('warn', formatLang(this.bundle.uiStrings, 'LoginFailed'));
@@ -847,6 +867,11 @@ export class MissionSession {
 
     if (virus.id === 'cd') {
       return targetFile ? this.openFolder(targetFile.id) : this.failAction(formatLang(ui, 'NeedFolder'));
+    }
+
+    // Log TraceVirus at cast start (before preconditions, matching legacy VirusMan.exec)
+    if (sys && virus.target !== '_net') {
+      this.appendSystemLog(sys, 'TraceVirus', virus.name, virus.id);
     }
 
     // Pre-cast validation
@@ -978,7 +1003,28 @@ export class MissionSession {
 
     if (v.target === '_file') {
       if (!f || f.deleted || f.isFolder) return formatLang(ui, 'NeedFile');
-      if ((f.effects.E_Masked ?? 0) > 0 && v.id !== 'unmask') {
+      // Only type-restricted viruses reject E_Masked (matching legacy VirusMan);
+      // dmgs..dmgxl, dshld, dsilen, dsile2, exploi, unshld, tag1..3, dec1..3, unmask, extrac, target work on masked files.
+      const MASK_BLOCKED_VIRUSES = new Set<string>([
+        'avdmg1',
+        'avdmg2',
+        'clone',
+        'dot1',
+        'dot2',
+        'stun1',
+        'stun2',
+        'reveng',
+        'weak1',
+        'weak2',
+        'disabl',
+        'disab2',
+        'cstun',
+        'fdmg',
+        'libxpl',
+        'corrup',
+        'corru2',
+      ]);
+      if ((f.effects.E_Masked ?? 0) > 0 && MASK_BLOCKED_VIRUSES.has(v.id)) {
         return formatLang(ui, 'UnknownType');
       }
     } else if (v.target === '_folder') {
@@ -993,7 +1039,11 @@ export class MissionSession {
       if (['corrup', 'corru2', 'pbomb', 'cbomb'].includes(v.id)) {
         return formatLang(ui, 'NotInScoutMode');
       }
-      if (v.cat === 'damage' && f && (f.key === 'file.core' || f.key === 'file.guardian')) {
+      if (
+        (v.cat === 'damage' || v.id === 'copy' || v.id === 'exploi') &&
+        f &&
+        (f.key === 'file.core' || f.key === 'file.guardian')
+      ) {
         return formatLang(ui, 'NotInScoutMode');
       }
     }
@@ -1019,8 +1069,8 @@ export class MissionSession {
         if (f.ext === 'log') return formatLang(ui, 'CantCopyLog');
         if ((f.effects.E_Encoded ?? 0) > 0 || (f.effects.E_Masked ?? 0) > 0) return formatLang(ui, 'CantCopyCrypted');
         if ((f.effects.E_Copy ?? 0) > 0) return formatLang(ui, 'AlreadyDone');
-        if (f.avKey !== null || (f.effects.E_Disabled ?? 0) > 0) return formatLang(ui, 'InvalidTarget');
-        if (!f.isMissionTarget && this.copiedFiles.length >= this.maxStorage) {
+        if (f.avKey !== null) return formatLang(ui, 'InvalidTarget');
+        if (this.inMissionCopiedCount >= this.maxStorage) {
           return formatLang(ui, 'DiskFull', { max: this.maxStorage });
         }
         break;
@@ -1044,7 +1094,7 @@ export class MissionSession {
         }
         break;
       case 'fdmg':
-        if (!f || f.avKey !== null || (f.effects.E_Disabled ?? 0) > 0) return formatLang(ui, 'InvalidTarget');
+        if (!f || f.avKey !== null) return formatLang(ui, 'NoAV');
         break;
       case 'zone':
         if (!this.currentFolder || !this.folderHasAnyAv(sys, this.currentFolder.id)) {
@@ -1102,7 +1152,7 @@ export class MissionSession {
         break;
       case 'reboo1':
       case 'reboo2':
-        if (this.systemHasAv(sys, 'sysdef') || this.systemHasAv(sys, 'syslock')) {
+        if (this.systemHasAv(sys, 'sysdef')) {
           return formatLang(ui, 'RebootBlocked');
         }
         break;
@@ -1339,11 +1389,20 @@ export class MissionSession {
         break;
       case 'exit':
         this.disconnectFromSystem(false);
-        return;
+        break;
       case 'rolbck':
         if (this.currentFolder && this.currentFolder.parentId !== null) {
           this.currentFolderId = this.currentFolder.parentId;
           this.selectedFileId = null;
+          if ((this.userEffects.UE_MoveFurtivity ?? 0) > 0) {
+            this.consumeMoveFurtivity();
+            this.pushLog(
+              'info',
+              formatLang(ui, 'RemainingMoveFurtivity', {
+                n: this.userEffects.UE_MoveFurtivity ?? 0,
+              })
+            );
+          }
         }
         break;
       case 'target':
@@ -1407,8 +1466,8 @@ export class MissionSession {
       case 'dot1':
       case 'dot2':
         if (f) {
-          f.effects.E_Dot = virus.power;
-          f.effects.E_DotLength = virus.info || 3;
+          f.effects.E_Dot = Math.min(100, (f.effects.E_Dot ?? 0) + virus.power);
+          f.effects.E_DotLength = Math.min(100, (f.effects.E_DotLength ?? 0) + (virus.info || 3));
         }
         break;
       case 'dsilen':
@@ -1429,14 +1488,14 @@ export class MissionSession {
         break;
       case 'stun1':
       case 'stun2':
-        if (f) f.effects.E_SkipAction = (f.effects.E_SkipAction ?? 0) + virus.power;
+        if (f) f.effects.E_SkipAction = Math.min(100, (f.effects.E_SkipAction ?? 0) + virus.power);
         break;
       case 'pbomb':
         for (const cf of Object.values(sys.files)) {
           if (cf.key === 'file.core') cf.deleted = true;
         }
         this.crashSystem(sys);
-        return;
+        break;
       case 'cbomb':
         this.corruptSystem(sys);
         break;
@@ -1472,7 +1531,8 @@ export class MissionSession {
       case 'copy':
         if (f) {
           f.effects.E_Copy = 1;
-          if (!f.isMissionTarget) {
+          this.inMissionCopiedCount++;
+          if (!f.isMissionTarget && f.content !== '') {
             this.copiedFiles.push({
               name: f.name,
               content: f.content,
@@ -1486,7 +1546,7 @@ export class MissionSession {
             'success',
             formatLang(ui, 'Log_Copied', {
               name: f.name,
-              n: this.copiedFiles.length,
+              n: this.inMissionCopiedCount,
               max: this.maxStorage,
             })
           );
@@ -1499,12 +1559,18 @@ export class MissionSession {
         if (f) {
           delete f.effects.E_Encoded;
           this.emitSound({ kind: 'sfx', id: 'bleep_05' });
+          if (!(f.effects.E_Masked ?? 0) && f.content !== '' && f.ext !== 'pack') {
+            this.appendSystemLog(sys, 'TraceAccess', f.name);
+          }
           this.tryCollectCard(f);
         }
         break;
       case 'unmask':
         if (f) {
           delete f.effects.E_Masked;
+          if (f.content !== '' && f.ext !== 'pack') {
+            this.appendSystemLog(sys, 'TraceAccess', f.name);
+          }
           this.tryCollectCard(f);
         }
         break;
@@ -1524,11 +1590,20 @@ export class MissionSession {
         this.emitSound({ kind: 'sfx', id: 'single_01' });
         break;
       case 'panic1':
+        if ((this.userEffects.UE_MoveFurtivity ?? 0) > 0) {
+          this.consumeMoveFurtivity();
+          this.pushLog(
+            'info',
+            formatLang(ui, 'RemainingMoveFurtivity', {
+              n: this.userEffects.UE_MoveFurtivity ?? 0,
+            })
+          );
+        }
         this.disconnectFromSystem(false);
-        return;
+        break;
       case 'panic2':
         this.disconnectFromSystem(true);
-        return;
+        break;
       case 'heal1':
       case 'heal2':
         this.life = Math.min(this.lifeTotal, this.life + virus.power);
@@ -1571,13 +1646,19 @@ export class MissionSession {
         if (f) {
           f.effects.E_Corrupt = 1;
           this.emitSound({ kind: 'sfx', id: 'corrupt_01' });
-          const remain = Object.values(sys.files).filter(
+          // Legacy GFileSystem.onCorruptControl checks ALL file.control in rawTree (including deleted ones!):
+          // deleting any file.control permanently prevents corrupting the system via corrup/corru2.
+          const allControlCorrupted = Object.values(sys.files).every(
+            (x) => x.key !== 'file.control' || (x.effects.E_Corrupt ?? 0) > 0
+          );
+          const liveRemain = Object.values(sys.files).filter(
             (x) => !x.deleted && x.key === 'file.control' && !(x.effects.E_Corrupt ?? 0)
           ).length;
-          if (remain === 0) {
+          if (virus.id === 'corru2' && !allControlCorrupted) {
+            this.pushLog('info', formatLang(ui, 'Log_CorruptRemain', { n: liveRemain }));
+          }
+          if (allControlCorrupted) {
             this.corruptSystem(sys);
-          } else if (virus.id === 'corru2') {
-            this.pushLog('info', formatLang(ui, 'Log_CorruptRemain', { n: remain }));
           }
         }
         break;
@@ -1587,17 +1668,17 @@ export class MissionSession {
         break;
       case 'reboo1':
       case 'reboo2': {
-        const capturedAvs = Object.values(sys.files).filter(
-          (af) => !af.deleted && af.avKey !== null && !(af.effects.E_Disabled ?? 0)
-        );
-        this.onVirusExecuted(sys, virus);
-        this.disconnectFromSystem(false);
-        for (const af of capturedAvs) {
+        // Legacy VirusMan._reboo1/_reboo2: stun AVs (capped at 3) + exploit FIRST, then reboot/disconnect
+        // so mine/oxy/bigoxy on disconnect are blocked by the newly applied stun (consuming 1 stack -> leaving 2).
+        for (const af of Object.values(sys.files)) {
           if (!af.deleted && af.avKey !== null && !(af.effects.E_Disabled ?? 0)) {
-            af.effects.E_SkipAction = Math.max(af.effects.E_SkipAction ?? 0, 3);
+            af.effects.E_SkipAction = 3;
             if (virus.id === 'reboo2') af.effects.E_Exploit = 1;
           }
         }
+        this.disconnectFromSystem(false);
+        this.onVirusExecuted(sys, virus);
+        this.drainEndTurn();
         if (this.mana <= 0 && this.life > 0) {
           this.pushLog('danger', formatLang(ui, 'Log_OOM'));
         }
@@ -1605,11 +1686,19 @@ export class MissionSession {
         return;
       }
       case 'cevi':
-        this.userEffects.UE_DamageBurst = comboCount;
+        this.userEffects.UE_DamageBurst = Math.min(
+          100,
+          (this.userEffects.UE_DamageBurst ?? 0) + comboCount
+        );
         break;
       case 'cstun':
         // Fixed Haxe bug: applies v.power * comboCount stacks as promised in XML!
-        if (f) f.effects.E_SkipAction = (f.effects.E_SkipAction ?? 0) + virus.power * comboCount;
+        if (f) {
+          f.effects.E_SkipAction = Math.min(
+            100,
+            (f.effects.E_SkipAction ?? 0) + virus.power * comboCount
+          );
+        }
         break;
       case 'cshld':
       case 'cshld2':
@@ -1629,20 +1718,31 @@ export class MissionSession {
         break;
     }
 
-    // Trigger onVirusRun AV hooks (ignores cd, connec, extrac, target)
-    if (!['cd', 'connec', 'extrac', 'target'].includes(virus.id) && this.connectedNodeId !== null) {
+    // Trigger onVirusRun AV hooks (ignores cd, connec, extrac, target; runs even if exit/panic/pbomb disconnected)
+    if (!['cd', 'connec', 'extrac', 'target'].includes(virus.id)) {
       this.onVirusExecuted(sys, virus);
+    } else if (
+      ['cd', 'extrac', 'target'].includes(virus.id) &&
+      (this.userEffects.UE_Furtivity ?? 0) > 0 &&
+      !this.isLeetMode
+    ) {
+      // Intentional secret Uber-Eleet perk: in Uber-Eleet mode (isLeetMode === true), cd, extrac & target
+      // do NOT consume UE_Furtivity; in Normal mode they consume 1 stack like legacy VirusMan.start.
+      // Do NOT mention or advertise this behavior in any player-facing site or UI description.
+      this.avEndTurnQueue.push(() => {
+        this.pendingFurtivityConsume++;
+      });
     }
 
-    this.drainEndTurn();
-
-    // Check OOM disconnect
+    // Check OOM disconnect BEFORE draining endTurn queues (matches legacy VirusMan.start -> loseMana -> disconnectFS,
+    // clearing currentFolderId so local fantassin misses on OOM turn)
     if (this.mana <= 0 && this.connectedNodeId !== null) {
       this.pushLog('danger', formatLang(ui, 'Log_OOM'));
       this.disconnectFromSystem(false);
       return;
     }
 
+    this.drainEndTurn();
     this.evaluateMissionObjective();
   }
 
@@ -1801,28 +1901,36 @@ export class MissionSession {
 
   private onVirusExecuted(sys: SystemState, virus: VirusDef): void {
     const furtive = (this.userEffects.UE_Furtivity ?? 0) > 0;
-    if (!furtive) {
-      this.appendSystemLog(sys, 'TraceVirus', virus.id.toUpperCase());
-      // Fantassin in current folder
-      if (this.currentFolder) {
-        this.queueAvAttacks(sys, 'fantassin', this.currentFolder.id);
-      }
-      // Logic Bomb system-wide
-      for (const bf of Object.values(sys.files)) {
-        if (!bf.deleted && bf.avKey === 'bomb') {
-          const cnt = (bf.effects.E_Counter ?? 0) + 1;
-          bf.effects.E_Counter = cnt;
-          if (cnt > BOMB_LIMIT) {
-            this.queueSingleAvAttack(sys, bf, 'bomb');
-          } else if (cnt === BOMB_LIMIT) {
-            this.pushLog('danger', formatLang(this.bundle.uiStrings, 'Log_BombLast'));
-          } else {
-            this.pushLog('warn', formatLang(this.bundle.uiStrings, 'Log_Bomb', { n: cnt, max: BOMB_LIMIT }));
-          }
+    // Fantassin in current folder (queued even when furtive so stun E_SkipAction is consumed before dodge,
+    // and checked against live currentFolderId at execution time like legacy AntivirMan.attackAll)
+    if (this.currentFolder && this.connectedNodeId === sys.nodeId) {
+      this.queueAvAttacks(sys, 'fantassin', this.currentFolder.id, true);
+    }
+
+    // Logic Bomb system-wide
+    for (const bf of Object.values(sys.files)) {
+      if (!bf.deleted && bf.avKey === 'bomb') {
+        if (furtive) {
+          this.pushLog(
+            'info',
+            formatLang(this.bundle.uiStrings, 'AntivirusDodged', { av: 'BOMB' })
+          );
+          continue;
+        }
+        const cnt = (bf.effects.E_Counter ?? 0) + 1;
+        bf.effects.E_Counter = cnt;
+        if (cnt > BOMB_LIMIT) {
+          this.queueSingleAvAttack(sys, bf, 'bomb', false);
+        } else if (cnt === BOMB_LIMIT) {
+          this.pushLog('danger', formatLang(this.bundle.uiStrings, 'Log_BombLast'));
+        } else {
+          this.pushLog('warn', formatLang(this.bundle.uiStrings, 'Log_Bomb', { n: cnt, max: BOMB_LIMIT }));
         }
       }
-    } else {
-      this.endTurnQueue.push(() => {
+    }
+
+    if (furtive) {
+      this.avEndTurnQueue.push(() => {
         this.pendingFurtivityConsume++;
       });
       this.pushLog('info', formatLang(this.bundle.uiStrings, 'Log_Stealth'));
@@ -1832,15 +1940,16 @@ export class MissionSession {
   private onOpenDirectory(sys: SystemState, targetFolder: FileNodeState): void {
     const prevFolderId = this.currentFolderId;
     if (prevFolderId !== null) {
-      this.queueAvAttacks(sys, 'mine', prevFolderId);
+      this.queueAvAttacks(sys, 'mine', prevFolderId, false);
     }
-    this.queueAvAttacks(sys, 'oxy', null);
-    this.queueAvAttacks(sys, 'bigoxy', null);
+    this.queueAvAttacks(sys, 'oxy', null, false);
+    this.queueAvAttacks(sys, 'bigoxy', null, false);
 
     this.currentFolderId = targetFolder.id;
     this.selectedFileId = null;
-    this.appendSystemLog(sys, 'TraceCD', targetFolder.name);
-    this.consumeMoveFurtivity();
+    if ((this.userEffects.UE_MoveFurtivity ?? 0) > 0) {
+      this.pendingMoveFurtivityConsume++;
+    }
     this.emitSound({ kind: 'sfx', id: 'bleep_02' });
   }
 
@@ -1849,15 +1958,18 @@ export class MissionSession {
     this.isDisconnecting = true;
     try {
       const sys = this.currentSystem;
+      const prevFolderId = this.currentFolderId;
+      // Clear currentFolderId before draining AV queues so local fantassin misses on OOM / eject
+      this.currentFolderId = null;
       if (sys) {
-        this.drainEndTurn();
+        this.drainEndTurn(true);
         if (!stealth) {
-          if (this.currentFolderId !== null) {
-            this.queueAvAttacks(sys, 'mine', this.currentFolderId);
+          if (prevFolderId !== null) {
+            this.queueAvAttacks(sys, 'mine', prevFolderId, false);
           }
-          this.queueAvAttacks(sys, 'oxy', null);
-          this.queueAvAttacks(sys, 'bigoxy', null);
-          this.drainEndTurn();
+          this.queueAvAttacks(sys, 'oxy', null, false);
+          this.queueAvAttacks(sys, 'bigoxy', null, false);
+          this.drainEndTurn(true);
         }
         for (const f of Object.values(sys.files)) {
           delete f.effects.E_Dot;
@@ -1867,6 +1979,7 @@ export class MissionSession {
 
       // Clear per-connection effects
       this.pendingFurtivityConsume = 0;
+      this.pendingMoveFurtivityConsume = 0;
       delete this.userEffects.UE_Furtivity;
       delete this.userEffects.UE_MoveFurtivity;
       this.connectedNodeId = null;
@@ -1886,6 +1999,7 @@ export class MissionSession {
     } finally {
       this.isDisconnecting = false;
     }
+    this.checkPlayerDeath();
   }
 
   // --- Damage & Combat Math ---
@@ -1895,30 +2009,25 @@ export class MissionSession {
     base: number,
     canBeBoosted: boolean,
     ignoreShield: boolean,
-    canSpread: boolean,
-    applyBrute = true
+    canSpread: boolean
   ): void {
     if (f.deleted || f.life <= 0) return;
     let dmg = base;
-    if (applyBrute && this.hasChipset('brute')) dmg = Math.round(1.5 * dmg);
+    if (this.hasChipset('brute')) dmg = Math.round(1.5 * dmg);
 
     if (canBeBoosted) {
       if ((this.userEffects.UE_DamageBurst ?? 0) > 0) {
         dmg += 10;
-        if (!this.burstConsumedThisTurn) {
-          this.burstConsumedThisTurn = true;
-          this.endTurnQueue.push(() => {
-            this.burstConsumedThisTurn = false;
-            if ((this.userEffects.UE_DamageBurst ?? 0) > 0) {
-              this.userEffects.UE_DamageBurst!--;
-              if (this.userEffects.UE_DamageBurst! <= 0) delete this.userEffects.UE_DamageBurst;
-            }
-          });
-        }
+        this.vmanEndTurnQueue.push(() => {
+          if ((this.userEffects.UE_DamageBurst ?? 0) > 0) {
+            this.userEffects.UE_DamageBurst!--;
+            if (this.userEffects.UE_DamageBurst! <= 0) delete this.userEffects.UE_DamageBurst;
+          }
+        });
       }
       if ((this.userEffects.UE_Charge ?? 0) > 0) {
         dmg *= this.userEffects.UE_Charge!;
-        this.endTurnQueue.push(() => {
+        this.vmanEndTurnQueue.push(() => {
           delete this.userEffects.UE_Charge;
         });
       }
@@ -1950,29 +2059,27 @@ export class MissionSession {
     this.emitSound({ kind: 'sfx', id: finalDmg > 0 ? 'hit_01' : 'shield' });
 
     if (finalDmg > 0) {
-      // E_Tag link spread (computed from finalDmg; does not re-apply brute or boosts)
+      // E_Tag link spread (matches legacy FSNode.damage: computed from raw base, applies brute & remaining boosts)
       if (canSpread && (f.effects.E_Tag ?? 0) > 0) {
-        const sdamage = Math.floor((finalDmg * f.effects.E_Tag!) / 100);
-        if (sdamage > 0) {
-          for (const neig of Object.values(sys.files)) {
-            if (neig.id !== f.id && !neig.deleted && (neig.effects.E_Tag ?? 0) > 0) {
-              this.endTurnQueue.push(() =>
-                this.damageFile(sys, neig, sdamage, false, false, false, false)
-              );
-            }
+        const sdamage = Math.floor((base * f.effects.E_Tag!) / 100);
+        for (const neig of Object.values(sys.files)) {
+          if (neig.id !== f.id && !neig.deleted && (neig.effects.E_Tag ?? 0) > 0) {
+            this.vmanEndTurnQueue.push(() =>
+              this.damageFile(sys, neig, sdamage, true, false, false)
+            );
           }
         }
       }
 
       // Eject in player's current folder (matches legacy AntivirMan.onDamageFile -> curFolder;
-      // remote damage via E_Tag does not trigger eject in another folder; queued BEFORE deleteFile/crashSystem)
+      // queued in avEndTurnQueue so vmanEndTurnQueue E_Splash resolves first!)
       const curFolder = this.connectedNodeId === sys.nodeId ? this.currentFolder : null;
       if (curFolder) {
         for (const cid of curFolder.childrenIds) {
           const ej = sys.files[cid];
           if (ej && !ej.deleted && ej.avKey === 'eject') {
-            this.endTurnQueue.push(() => {
-              if (ej.deleted || sys.crashed || this.connectedNodeId !== sys.nodeId) return;
+            this.avEndTurnQueue.push(() => {
+              if (ej.deleted || ej.life <= 0 || sys.crashed || this.connectedNodeId !== sys.nodeId) return;
               const ui = this.bundle.uiStrings;
               if ((ej.effects.E_SkipAction ?? 0) > 0) {
                 ej.effects.E_SkipAction!--;
@@ -1992,15 +2099,15 @@ export class MissionSession {
       }
 
       // Tique system-wide (queued BEFORE deleteFile/crashSystem so core kills trigger tique)
-      this.queueAvAttacks(sys, 'tique', null);
+      this.queueAvAttacks(sys, 'tique', null, false);
     }
 
     if (f.life <= 0) {
-      // E_Splash on death (does not re-apply brute or boosts)
+      // E_Splash on death (matches legacy FSNode.damage: computed from dmg, applies brute & remaining boosts in vmanEndTurnQueue)
       if ((f.effects.E_Splash ?? 0) > 0 && f.parentId !== null) {
-        const sdamage = Math.floor((finalDmg * f.effects.E_Splash!) / 100);
+        const sdamage = Math.floor((dmg * f.effects.E_Splash!) / 100);
         const parent = sys.files[f.parentId];
-        if (parent && sdamage > 0) {
+        if (parent) {
           for (const cid of parent.childrenIds) {
             const sib = sys.files[cid];
             if (
@@ -2009,8 +2116,8 @@ export class MissionSession {
               !sib.deleted &&
               (sib.key === 'file.core' || sib.key === 'file.guardian' || sib.avKey !== null)
             ) {
-              this.endTurnQueue.push(() =>
-                this.damageFile(sys, sib, sdamage, false, false, true, false)
+              this.vmanEndTurnQueue.push(() =>
+                this.damageFile(sys, sib, sdamage, true, false, true)
               );
             }
           }
@@ -2039,10 +2146,13 @@ export class MissionSession {
       }
     }
 
-    if (f.avKey !== null) {
+    if (f.avKey !== null || f.key.includes('.antivir') || f.ext.toLowerCase() === 'antivir') {
       this.incGoal('av', 1);
+    }
+
+    if (f.avKey !== null) {
       this.unregisterAv(sys, f);
-      this.endTurnQueue.push(() => {
+      this.vmanEndTurnQueue.push(() => {
         this.userEffects.UE_Combo = Math.min(this.maxCombo, (this.userEffects.UE_Combo ?? 0) + 1);
       });
     }
@@ -2056,11 +2166,13 @@ export class MissionSession {
       }
     }
 
+    // Legacy GFileSystem.delete logs TraceDelete unconditionally (even on stealth extrac, unless UE_Furtivity > 0)
+    this.appendSystemLog(sys, 'TraceDelete', f.name);
+
     if (!stealth) {
-      this.appendSystemLog(sys, 'TraceDelete', f.name);
-      this.queueAvAttacks(sys, 'repurgator', null);
+      this.queueAvAttacks(sys, 'repurgator', null, false);
       if (f.key === 'file.core' || f.key === 'file.guardian' || f.key === 'file.control') {
-        this.queueAvAttacks(sys, 'sysdef', null);
+        this.queueAvAttacks(sys, 'sysdef', null, false);
       }
     }
 
@@ -2117,10 +2229,9 @@ export class MissionSession {
     this.incGoal('crash', 1);
     this.emitSound({ kind: 'sfx', id: 'explode_02' });
     this.pushLog('success', formatLang(this.bundle.uiStrings, 'Crashed'));
-    if (!wasAlreadyCorrupted) {
-      this.onNodeStatusChanged(sys.nodeId);
-    }
-    this.disconnectFromSystem(true);
+    this.onNodeStatusChanged(sys.nodeId);
+    // Legacy GFileSystem.crash() calls disconnectFS(false) -> triggers mine/oxy/bigoxy on crash exit!
+    this.disconnectFromSystem(false);
   }
 
   private corruptSystem(sys: SystemState): void {
@@ -2161,19 +2272,33 @@ export class MissionSession {
     }
   }
 
-  private queueAvAttacks(sys: SystemState, avKey: string, folderId: number | null): void {
+  private queueAvAttacks(
+    sys: SystemState,
+    avKey: string,
+    folderId: number | null,
+    localOnly = false
+  ): void {
     const avFiles = Object.values(sys.files).filter(
       (f) => !f.deleted && f.avKey === avKey && (folderId === null || f.parentId === folderId)
     );
     for (const af of avFiles) {
-      this.queueSingleAvAttack(sys, af, avKey);
+      this.queueSingleAvAttack(sys, af, avKey, localOnly);
     }
   }
 
-  private queueSingleAvAttack(sys: SystemState, af: FileNodeState, avKey: string): void {
-    this.endTurnQueue.push(() => {
-      if (af.deleted) return;
+  private queueSingleAvAttack(
+    sys: SystemState,
+    af: FileNodeState,
+    avKey: string,
+    localOnly = false
+  ): void {
+    this.avEndTurnQueue.push(() => {
+      if (af.deleted || af.life <= 0 || af.avKey === null) return;
+      if (localOnly && (this.connectedNodeId !== sys.nodeId || this.currentFolderId !== af.parentId)) {
+        return;
+      }
       if (avKey === 'bomb') {
+        // Intentional design: stunning a Logic Bomb blocks its explosion AND resets E_Counter to 0
         delete af.effects.E_Counter;
       }
       const ui = this.bundle.uiStrings;
@@ -2225,17 +2350,21 @@ export class MissionSession {
           'warn',
           `[${avKey.toUpperCase()}] ${formatLang(ui, `AV_${avKey}`)} : ${formatLang(ui, 'AntivirusDamage', { n: dmg })}`
         );
+        // Queue E_Revenge into the next wave of avEndTurnQueue (matches legacy AntivirMan.onAttackSuccessful,
+        // firing even if the player's life reached 0 on this hit, and applies brute via damageFile!)
+        this.avEndTurnQueue.push(() => {
+          if (af.deleted || af.life <= 0 || af.avKey === null) return;
+          if ((af.effects.E_Revenge ?? 0) > 0) {
+            const rev = af.effects.E_Revenge!;
+            delete af.effects.E_Revenge;
+            this.pushLog(
+              'success',
+              formatLang(ui, 'RevengeEffect', { av: avKey.toUpperCase(), v: 'REVENG', p: rev })
+            );
+            this.damageFile(sys, af, rev, false, false, true);
+          }
+        });
         this.damagePlayer(dmg, true);
-        if (
-          this.life > 0 &&
-          (this.connectedNodeId === sys.nodeId || this.isDisconnecting) &&
-          (af.effects.E_Revenge ?? 0) > 0
-        ) {
-          const rev = af.effects.E_Revenge!;
-          delete af.effects.E_Revenge;
-          this.pushLog('success', formatLang(ui, 'RevengeEffect', { av: avKey.toUpperCase(), v: 'REVENG', p: rev }));
-          this.damageFile(sys, af, rev, false, false, true, false);
-        }
       }
     });
   }
@@ -2255,28 +2384,43 @@ export class MissionSession {
     if (dmg > 0) {
       this.life = Math.max(0, this.life - dmg);
       this.emitSound({ kind: 'sfx', id: 'hit_03' });
-      if (this.life <= 0) {
-        this.cancelCast();
-        if (this.connectedNodeId !== null) {
-          this.disconnectFromSystem(true);
-        }
-        this.lastPopup = {
-          title: 'TERMINAL OFFLINE',
-          message: formatLang(this.bundle.uiStrings, 'YouAreDead'),
-          fatal: true,
-        };
-      }
     }
     return dmg;
   }
 
-  private drainEndTurn(): void {
-    let safety = 0;
-    while (this.endTurnQueue.length > 0 && safety++ < 200) {
-      const fn = this.endTurnQueue.shift()!;
-      fn();
+  private checkPlayerDeath(): void {
+    if (this.life <= 0 && !this.dead) {
+      this.dead = true;
+      this.cancelCast();
+      if (this.connectedNodeId !== null) {
+        this.disconnectFromSystem(true);
+      }
+      this.lastPopup = {
+        title: 'TERMINAL OFFLINE',
+        message: formatLang(this.bundle.uiStrings, 'YouAreDead'),
+        fatal: true,
+      };
     }
-    this.burstConsumedThisTurn = false;
+  }
+
+  private drainEndTurn(skipPostEffects = false): void {
+    let safety = 0;
+    while (
+      (this.vmanEndTurnQueue.length > 0 || this.avEndTurnQueue.length > 0) &&
+      safety < 200
+    ) {
+      while (this.vmanEndTurnQueue.length > 0 && safety++ < 200) {
+        const batch = this.vmanEndTurnQueue.splice(0);
+        for (const fn of batch) fn();
+      }
+      while (this.avEndTurnQueue.length > 0 && safety++ < 200) {
+        const batch = this.avEndTurnQueue.splice(0);
+        for (const fn of batch) fn();
+      }
+    }
+
+    if (skipPostEffects) return;
+
     delete this.userEffects.UE_SilentDeath;
     if (this.pendingFurtivityConsume > 0) {
       const next = (this.userEffects.UE_Furtivity ?? 0) - this.pendingFurtivityConsume;
@@ -2287,6 +2431,16 @@ export class MissionSession {
         delete this.userEffects.UE_Furtivity;
       }
     }
+    if (this.pendingMoveFurtivityConsume > 0) {
+      const next = (this.userEffects.UE_MoveFurtivity ?? 0) - this.pendingMoveFurtivityConsume;
+      this.pendingMoveFurtivityConsume = 0;
+      if (next > 0) {
+        this.userEffects.UE_MoveFurtivity = next;
+      } else {
+        delete this.userEffects.UE_MoveFurtivity;
+      }
+    }
+    this.checkPlayerDeath();
   }
 
   // --- CLI Execution & Autocomplete ---
@@ -2320,18 +2474,53 @@ export class MissionSession {
       arg = rawRest;
     }
 
-    if (cmd === 'cd' && arg === '..') {
-      return this.goParentOrDisconnect();
-    }
-
     const sys = this.currentSystem;
     const cur = this.currentFolder;
+
+    if (cmd === 'cd' && arg === '..') {
+      if (!sys || !cur || cur.parentId === null) {
+        return this.failAction(formatLang(this.bundle.uiStrings, 'InvalidTarget'));
+      }
+      return this.openFolder(cur.parentId);
+    }
+
+    // Intentional secret Uber-Eleet perk: allow multi-hop path navigation (`cd /`, `cd /a/b`, `cd a/b`) in Leet mode.
+    // Do NOT mention or advertise this behavior in any player-facing site or UI description.
+    if (cmd === 'cd' && this.isLeetMode && sys && cur && arg.includes('/')) {
+      if (arg === '/') {
+        return this.openFolder(sys.rootFolderId);
+      }
+      const isAbs = arg.startsWith('/');
+      const parts = arg.split('/').filter((p) => p.length > 0);
+      let navId = isAbs ? sys.rootFolderId : cur.id;
+      for (const seg of parts) {
+        const navFolder = sys.files[navId];
+        if (!navFolder) return this.failAction(formatLang(this.bundle.uiStrings, 'FileNotFound'));
+        if (seg === '..') {
+          if (navFolder.parentId === null) {
+            return this.failAction(formatLang(this.bundle.uiStrings, 'InvalidTarget'));
+          }
+          navId = navFolder.parentId;
+        } else if (seg !== '.') {
+          const nextFolder = navFolder.childrenIds
+            .map((id) => sys.files[id])
+            .find((f) => f && !f.deleted && f.isFolder && f.name.toLowerCase() === seg.toLowerCase());
+          if (!nextFolder) {
+            return this.failAction(formatLang(this.bundle.uiStrings, 'FileNotFound'));
+          }
+          navId = nextFolder.id;
+        }
+      }
+      return this.openFolder(navId);
+    }
+
     let targetFileId: number | undefined;
 
     if (arg && sys && cur) {
+      // Allow targeting E_Masked files by their real filename in CLI (matches legacy GFileSystem.getFile)
       const candidates = cur.childrenIds
         .map((id) => sys.files[id])
-        .filter((f) => f && !f.deleted && !(f.effects.E_Masked ?? 0));
+        .filter((f) => f && !f.deleted);
       const exact = candidates.find((f) => f.name.toLowerCase() === arg.toLowerCase());
       if (!exact) {
         return this.failAction(formatLang(this.bundle.uiStrings, 'FileNotFound'));
@@ -2658,19 +2847,24 @@ export class MissionSession {
     return Object.values(sys.files).some((f) => !f.deleted && f.avKey === avKey);
   }
 
-  private appendSystemLog(sys: SystemState, langKey: string, targetName: string): void {
+  private appendSystemLog(
+    sys: SystemState,
+    langKey: string,
+    targetName: string,
+    virusId?: string
+  ): void {
     if ((this.userEffects.UE_Furtivity ?? 0) > 0) return;
     const entry = formatLang(this.bundle.uiStrings, langKey, {
       name: targetName,
-      id: targetName,
+      id: virusId ?? targetName,
     });
     const mins = Math.floor(this.elapsedMs / 60000);
     const secs = Math.floor((this.elapsedMs % 60000) / 1000);
     const ts = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-    const line = `\n[${ts}] ${entry}`;
+    const line = `<p><span class="time">[${ts}]</span> ${entry}</p>`;
     for (const f of Object.values(sys.files)) {
       if (!f.deleted && f.ext === 'log') {
-        f.content += line;
+        f.content = line + f.content;
       }
     }
   }

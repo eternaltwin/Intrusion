@@ -14,6 +14,7 @@ export function HardDriveApp({ player, catalog, onPlayerUpdate }: HardDriveAppPr
   const [data, setData] = useState<StorageResponse | null>(null);
   const [tab, setTab] = useState<'packs' | 'files' | 'cards'>('packs');
   const [selectedFile, setSelectedFile] = useState<Required<SimpleFile> | null>(null);
+  const [cardNumberInput, setCardNumberInput] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,6 +60,23 @@ export function HardDriveApp({ player, catalog, onPlayerUpdate }: HardDriveAppPr
       await refresh();
     } catch (err: any) {
       setError(err.message || 'Erreur lors de l’encaissement de la carte.');
+    }
+  }
+
+  async function handleRedeemCardNumber(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = cardNumberInput.trim();
+    if (!trimmed) return;
+    setMessage(null);
+    setError(null);
+    try {
+      const res = await api.redeemCardByNumber(trimmed);
+      onPlayerUpdate(res.player);
+      setCardNumberInput('');
+      setMessage(`Carte ${res.cardNumber} encaissée : +${res.earned} CR.`);
+      await refresh();
+    } catch (err: any) {
+      setError(err.message || 'Numéro de carte invalide ou déjà encaissé.');
     }
   }
 
@@ -286,40 +304,65 @@ export function HardDriveApp({ player, catalog, onPlayerUpdate }: HardDriveAppPr
         )}
 
         {tab === 'cards' && (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            {!data || data.cards.length === 0 ? (
-              <div className="col-span-full py-12 text-center font-mono text-sm text-[#7f8c5e]">
-                Aucune carte bancaire interceptée. Inspectez les fichiers <code>.mail</code> et <code>.doc</code> sur les réseaux infiltrés !
-              </div>
-            ) : (
-              data.cards.map((card) => (
-                <div
-                  key={card.id}
-                  className="flex items-center justify-between rounded border border-[#3e4b2b] bg-[#141a0f] p-4 font-mono"
-                >
-                  <div>
-                    <div className="text-xs text-[#8f9d6d]">{card.holder}</div>
-                    <div className="mt-0.5 text-sm font-bold tracking-wider text-[#e8efd0]">
-                      {card.number}
-                    </div>
-                    <div className="mt-1 text-xs text-[#7be082]">Solde : {card.amount} CR</div>
-                  </div>
-                  {card.redeemed ? (
-                    <span className="rounded bg-[#222b18] px-2.5 py-1 text-xs text-[#7d8a5c]">
-                      Encaissée
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleRedeemCard(card.id)}
-                      className="cyber-btn-amber rounded px-3 py-1.5 text-xs cursor-pointer"
-                    >
-                      Siphonner (+{card.amount} CR)
-                    </button>
-                  )}
+          <div className="space-y-4">
+            <form
+              onSubmit={handleRedeemCardNumber}
+              className="flex flex-wrap items-center gap-2 rounded border border-[#3e4b2b] bg-[#141a0f] p-3 font-mono text-xs"
+            >
+              <label htmlFor="os-card-number" className="text-[#a7b483]">
+                Numéro intercepté :
+              </label>
+              <input
+                id="os-card-number"
+                type="text"
+                placeholder="4971-XXXX-XXXX-XXXX"
+                value={cardNumberInput}
+                onChange={(e) => setCardNumberInput(e.target.value)}
+                className="min-w-[210px] flex-1 rounded border border-[#43512e] bg-[#0c1009] px-2.5 py-1.5 text-[#e8efd0] focus:border-[#fed82a] focus:outline-none"
+              />
+              <button
+                type="submit"
+                className="cyber-btn-amber rounded px-3 py-1.5 font-bold cursor-pointer"
+              >
+                Utiliser
+              </button>
+            </form>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {!data || data.cards.length === 0 ? (
+                <div className="col-span-full py-12 text-center font-mono text-sm text-[#7f8c5e]">
+                  Aucune carte bancaire interceptée. Inspectez les fichiers <code>.mail</code> et <code>.doc</code> sur les réseaux infiltrés !
                 </div>
-              ))
-            )}
+              ) : (
+                data.cards.map((card) => (
+                  <div
+                    key={card.id}
+                    className="flex items-center justify-between rounded border border-[#3e4b2b] bg-[#141a0f] p-4 font-mono"
+                  >
+                    <div>
+                      <div className="text-xs text-[#8f9d6d]">{card.holder}</div>
+                      <div className="mt-0.5 text-sm font-bold tracking-wider text-[#e8efd0]">
+                        {card.number}
+                      </div>
+                      <div className="mt-1 text-xs text-[#7be082]">Solde : {card.amount} CR</div>
+                    </div>
+                    {card.redeemed ? (
+                      <span className="rounded bg-[#222b18] px-2.5 py-1 text-xs text-[#7d8a5c]">
+                        Encaissée
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleRedeemCard(card.id)}
+                        className="cyber-btn-amber rounded px-3 py-1.5 text-xs cursor-pointer"
+                      >
+                        Siphonner (+{card.amount} CR)
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
       </div>

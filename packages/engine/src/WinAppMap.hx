@@ -140,6 +140,17 @@ class WinAppMap extends WinApp {
 					mc.smc.gotoAndStop(6);
 					tip(mc, Lang.get.MapLocked);
 				}
+				// Intentional secret Uber-Eleet perk: allow clicking folders in Scanner map to jump directly in Leet mode.
+				// Do NOT mention or advertise this behavior in any player-facing site or UI description.
+				if ( term.fl_leet && !fl_scrambled ) {
+					var targetDir = f;
+					mc.useHandCursor = true;
+					mc.onRelease = function() {
+						me.stop();
+						if ( me.term.fs!=null && me.term.fs.curFolder!=targetDir )
+							me.term.vman.exec(data.VirusXml.get.cd, targetDir);
+					};
+				}
 
 				y = attachNode(f, level+1, y+LINE_HEIGHT);
 			}

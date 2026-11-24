@@ -71,22 +71,23 @@ export function MissionEndView({
         </div>
 
         <div className="container">
-          <div className={summary.success ? 'headerSuccess' : 'headerFailure'} />
+          <div className={summary.success || scoutRun ? 'headerSuccess' : 'headerFailure'} />
 
           <div className="result">
-            {summary.success ? (
+            {scoutRun ? (
               <div className="left">
-                {scoutRun ? (
-                  <p>
-                    <strong>Reconnaissance Scout terminée :</strong> ce run d&apos;exploration ne
-                    clôture pas le contrat afin que vous puissiez l&apos;exécuter pour de vrai.
-                  </p>
-                ) : (
-                  <p>
-                    Votre client vous a transféré la somme de <strong>{earnedMoney}</strong>{' '}
-                    <img src="/img/icons/money.png" alt="" /> !
-                  </p>
-                )}
+                <p>
+                  <strong>Reconnaissance Scout terminée :</strong> ce run d&apos;exploration ne
+                  clôture pas le contrat et ne réduit pas la prime afin que vous puissiez
+                  l&apos;exécuter pour de vrai.
+                </p>
+              </div>
+            ) : summary.success ? (
+              <div className="left">
+                <p>
+                  Votre client vous a transféré la somme de <strong>{earnedMoney}</strong>{' '}
+                  <img src="/img/icons/money.png" alt="" /> !
+                </p>
 
                 {summary.isChallenge && (
                   <p style={{ marginTop: 8 }}>

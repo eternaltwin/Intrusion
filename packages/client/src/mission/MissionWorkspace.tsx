@@ -575,23 +575,30 @@ export function MissionWorkspace({
 
                   <div className="flex items-center gap-1 text-[#98a675]">
                     <span className="font-bold text-[#fed82a]">[{sys.ip}]</span>
-                    {breadcrumbs.map((b, i) => (
-                      <span key={b.id} className="flex items-center gap-1">
-                        <span>/</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (b.id !== curFolder?.id) {
-                              session.openFolder(b.id);
-                              setRenderTick((t) => t + 1);
-                            }
-                          }}
-                          className="hover:text-[#fed82a] cursor-pointer"
-                        >
-                          {i === 0 ? sys.name : b.name}
-                        </button>
-                      </span>
-                    ))}
+                    {breadcrumbs.map((b, i) => {
+                      const canJump =
+                        b.id !== curFolder?.id &&
+                        (session.isLeetMode || curFolder?.parentId === b.id);
+                      return (
+                        <span key={b.id} className="flex items-center gap-1">
+                          <span>/</span>
+                          {canJump ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                session.openFolder(b.id);
+                                setRenderTick((t) => t + 1);
+                              }}
+                              className="hover:text-[#fed82a] cursor-pointer"
+                            >
+                              {i === 0 ? sys.name : b.name}
+                            </button>
+                          ) : (
+                            <span>{i === 0 ? sys.name : b.name}</span>
+                          )}
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -713,11 +720,11 @@ export function MissionWorkspace({
                         {displayName}
                       </div>
 
-                      {/* Sub-type / HP Bar */}
-                      {!f.isFolder && !masked && (
+                      {/* Sub-type / HP Bar (damaged masked files show HP bar like legacy FSNode.hx:731) */}
+                      {!f.isFolder && (!masked || (f.lifeTotal > 1 && f.life < f.lifeTotal)) && (
                         <div className="mt-1.5 w-full">
                           <div className="flex justify-between font-mono text-[10px] text-[#95a370]">
-                            <span>{f.avKey ? f.avKey.toUpperCase() : f.ext.toUpperCase()}</span>
+                            <span>{masked ? '???' : f.avKey ? f.avKey.toUpperCase() : f.ext.toUpperCase()}</span>
                             <span>
                               {f.life}/{f.lifeTotal} PV
                             </span>
@@ -995,17 +1002,26 @@ export function MissionWorkspace({
                 : folder.name;
 
             const lockedHide = folder.password !== null && !session.hasChipset('sscan');
+            const isAdjScanner =
+              curFolder !== null &&
+              (curFolder.parentId === folder.id || folder.parentId === curFolder.id);
+            const canClickScannerFolder =
+              folder.id !== session.currentFolderId && (session.isLeetMode || isAdjScanner);
 
             return (
               <div key={folder.id} style={{ paddingLeft: `${depth * 16}px` }} className="my-1 font-mono text-xs">
                 <button
                   type="button"
+                  disabled={!canClickScannerFolder}
                   onClick={() => {
+                    if (!canClickScannerFolder) return;
                     if (session.scannerState) session.scannerState.open = false;
                     session.openFolder(folder.id);
                     setRenderTick((t) => t + 1);
                   }}
-                  className={`flex items-center gap-1.5 rounded px-2 py-0.5 hover:bg-[#242e1a] cursor-pointer ${
+                  className={`flex items-center gap-1.5 rounded px-2 py-0.5 ${
+                    canClickScannerFolder ? 'hover:bg-[#242e1a] cursor-pointer' : 'cursor-default'
+                  } ${
                     session.currentFolderId === folder.id ? 'bg-[#2a361e] font-bold text-[#fed82a]' : ''
                   }`}
                 >

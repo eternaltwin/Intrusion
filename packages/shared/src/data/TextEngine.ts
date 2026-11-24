@@ -188,7 +188,7 @@ export class TextEngine {
 
     // 6. Top-level linguistic post-processing
     if (firstRecurs) {
-      str = this.applyLang('fr', str);
+      str = this.applyLang(this.lang, str);
       str = str.split(GROUP_SEP).join('');
       if (this.autoCaps) {
         str = this.capitalize(str);
