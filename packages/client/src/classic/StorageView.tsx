@@ -182,12 +182,16 @@ export function StorageView({
                       </td>
                       <td className="act">
                         {maxSell > 0 ? (
-                          <form onSubmit={(e) => handleSellPack(e, val.id, maxSell)}>
+                          <form
+                            className="packSellAction"
+                            onSubmit={(e) => handleSellPack(e, val.id, maxSell)}
+                          >
                             <input
                               type="number"
                               className="field"
                               min={1}
                               max={maxSell}
+                              aria-label={`Quantité à vendre (${val.name})`}
                               value={currentInput}
                               onChange={(e) =>
                                 setSellCounts((prev) => ({
@@ -199,9 +203,9 @@ export function StorageView({
                             <input type="submit" className="button" value="Vendre" />
                           </form>
                         ) : (
-                          <div className="offButton" style={{ width: 60 }}>
-                            Vendre
-                          </div>
+                          <span className="packSellAction">
+                            <span className="offButton">Vendre</span>
+                          </span>
                         )}
                       </td>
                     </tr>

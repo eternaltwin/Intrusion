@@ -142,6 +142,51 @@ ul.tabs li a,
   outline: 1px dashed #fed82a;
 }
 
+/* Align Pack market "Vendre" buttons across in-stock and 0-stock rows */
+.storage table.market td.act {
+  inline-size: 98px;
+  padding-block: 2px 7px;
+  padding-inline: 5px 0;
+  vertical-align: middle;
+}
+
+.storage table.market td.act .packSellAction {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: safe center;
+  justify-content: flex-end;
+  gap: 4px;
+  inline-size: 100%;
+  block-size: auto;
+  margin: 0;
+  padding: 0;
+}
+
+.storage table.market td.act .packSellAction .field {
+  float: none;
+  box-sizing: border-box;
+  flex: 0 0 30px;
+  min-inline-size: 0;
+  margin: 0;
+}
+
+.storage table.market td.act .packSellAction .button,
+.storage table.market td.act .packSellAction .offButton {
+  appearance: none;
+  float: none;
+  box-sizing: border-box;
+  flex: 0 0 60px;
+  min-inline-size: 0;
+  block-size: 18px;
+  margin: 0;
+  padding: 0;
+  font-family: Arial, Trebuchet MS, sans-serif;
+  font-size: 8pt;
+  line-height: 16px;
+  text-align: center;
+}
+
 /* Storage viewer face & mail styling matching .client .sidePanel */
 .storage .viewer .sidePanel {
   width: 248px;
