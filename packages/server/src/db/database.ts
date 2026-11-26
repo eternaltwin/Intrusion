@@ -7,14 +7,69 @@ export function openDatabase(dbPath: string): DatabaseSync {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   }
   const db = new DatabaseSync(dbPath);
+  db.exec('PRAGMA journal_mode = WAL;');
+
+  // Migrate legacy local-password `users` table if present so zero password hashes remain stored (Charte ET Art. 4)
+  const existingUsersCols = db.prepare("PRAGMA table_info('users')").all() as Array<{ name: string }>;
+  const hasLegacyPasswordCol = existingUsersCols.some((c) => c.name === 'password_hash');
+  const hasEtwinCol = existingUsersCols.some((c) => c.name === 'etwin_user_id');
+
+  if (existingUsersCols.length > 0 && (hasLegacyPasswordCol || !hasEtwinCol)) {
+    db.exec('PRAGMA foreign_keys = OFF;');
+    db.exec('BEGIN IMMEDIATE;');
+    try {
+      db.exec(`
+        CREATE TABLE users_etwin_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          etwin_user_id TEXT NOT NULL UNIQUE,
+          username TEXT NOT NULL COLLATE NOCASE,
+          money INTEGER NOT NULL DEFAULT 10000,
+          xp INTEGER NOT NULL DEFAULT 3,
+          bios_level INTEGER NOT NULL DEFAULT 1,
+          active_chipset TEXT DEFAULT NULL,
+          settings_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+      if (hasEtwinCol) {
+        db.exec(`
+          INSERT INTO users_etwin_new (id, etwin_user_id, username, money, xp, bios_level, active_chipset, settings_json, created_at)
+          SELECT id, COALESCE(etwin_user_id, 'legacy:' || id), username, money, xp, bios_level, active_chipset, settings_json, created_at
+          FROM users;
+        `);
+      } else {
+        db.exec(`
+          INSERT INTO users_etwin_new (id, etwin_user_id, username, money, xp, bios_level, active_chipset, settings_json, created_at)
+          SELECT id, 'dev:' || lower(username), username, money, xp, bios_level, active_chipset, settings_json, created_at
+          FROM users;
+        `);
+      }
+      db.exec('DROP TABLE users;');
+      db.exec('ALTER TABLE users_etwin_new RENAME TO users;');
+      db.exec('COMMIT;');
+    } catch (err) {
+      try {
+        db.exec('ROLLBACK;');
+      } catch {
+        // ignore rollback error
+      }
+      throw err;
+    }
+  }
+
+  // Migrate legacy plaintext `sessions(token)` table to `sessions(token_hash)` (SHA-256 only, zero cleartext tokens)
+  const existingSessionCols = db.prepare("PRAGMA table_info('sessions')").all() as Array<{ name: string }>;
+  if (existingSessionCols.length > 0 && !existingSessionCols.some((c) => c.name === 'token_hash')) {
+    db.exec('DROP TABLE sessions;');
+  }
+
   db.exec(`
-    PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
 
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-      password_hash TEXT NOT NULL,
+      etwin_user_id TEXT NOT NULL UNIQUE,
+      username TEXT NOT NULL COLLATE NOCASE,
       money INTEGER NOT NULL DEFAULT 10000,
       xp INTEGER NOT NULL DEFAULT 3,
       bios_level INTEGER NOT NULL DEFAULT 1,
@@ -24,7 +79,7 @@ export function openDatabase(dbPath: string): DatabaseSync {
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
-      token TEXT PRIMARY KEY,
+      token_hash TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       expires_at INTEGER NOT NULL
     );

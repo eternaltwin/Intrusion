@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getAdjustedPrime, type GoalId, type MissionEndSummary, type MissionInitParams, type PlayerDto } from '@intrusion/shared';
+import {
+  getAdjustedPrime,
+  type AuthConfigDto,
+  type GoalId,
+  type MissionEndSummary,
+  type MissionInitParams,
+  type PlayerDto,
+} from '@intrusion/shared';
 import { api, type CatalogResponse } from './api/client';
 import { VirusTooltipProvider } from './classic/TooltipContext';
 import { ClassicLayout, type ClassicRoute } from './classic/ClassicLayout';
@@ -14,6 +21,23 @@ import { ChallengeView } from './classic/ChallengeView';
 import { ProfileView } from './classic/ProfileView';
 import { GuideView } from './classic/GuideView';
 import { OptionsView } from './classic/OptionsView';
+
+const DEFAULT_AUTH_CONFIG: AuthConfigDto = {
+  etwinEnabled: true,
+  etwinAuthorizePath: '/api/auth/etwin/login',
+  devAuthEnabled: false,
+  sourceRepoUrl: 'https://github.com/eternaltwin/intrusion',
+};
+
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  etwin_not_configured:
+    "Le client OAuth Eternaltwin n'est pas encore configuré sur cette instance.",
+  oauth_denied: "L'autorisation Eternaltwin a été annulée.",
+  invalid_state:
+    'La vérification de sécurité OAuth (state) a expiré ou échoué. Veuillez réessayer.',
+  oauth_exchange_failed:
+    "Impossible de finaliser l'authentification auprès d'Eternaltwin. Veuillez réessayer.",
+};
 
 function runTransition(update: () => void) {
   const doc = document as Document & {
@@ -31,6 +55,7 @@ function runTransition(update: () => void) {
 
 export function App() {
   const [player, setPlayer] = useState<PlayerDto | null>(null);
+  const [authConfig, setAuthConfig] = useState<AuthConfigDto>(DEFAULT_AUTH_CONFIG);
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [booting, setBooting] = useState(true);
   const [route, setRoute] = useState<ClassicRoute>('missions');
@@ -51,10 +76,24 @@ export function App() {
   }, [notice]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const authErr = params.get('auth_error');
+    if (authErr) {
+      params.delete('auth_error');
+      const nextSearch = params.toString();
+      const cleanUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
+      window.history.replaceState({}, '', cleanUrl);
+      notify(
+        OAUTH_ERROR_MESSAGES[authErr] ?? "Erreur lors de l'authentification Eternaltwin.",
+        true
+      );
+    }
+
     (async () => {
       try {
-        const [{ player: me }, cat] = await Promise.all([api.me(), api.catalog('fr')]);
+        const [{ player: me, auth }, cat] = await Promise.all([api.me(), api.catalog('fr')]);
         setPlayer(me);
+        if (auth) setAuthConfig(auth);
         setCatalog(cat);
         if (me && me.settings.lang === 'en') {
           const enCat = await api.catalog('en');
@@ -235,6 +274,7 @@ export function App() {
         player={null}
         route="missions"
         notice={null}
+        sourceRepoUrl={authConfig.sourceRepoUrl}
         onNavigate={navigate}
         onLogout={handleLogout}
       >
@@ -258,11 +298,12 @@ export function App() {
         player={player}
         route={route}
         notice={notice}
+        sourceRepoUrl={authConfig.sourceRepoUrl}
         onNavigate={navigate}
         onLogout={handleLogout}
       >
         {!player ? (
-          <AuthView onAuthenticated={handlePlayerUpdate} />
+          <AuthView authConfig={authConfig} onAuthenticated={handlePlayerUpdate} />
         ) : activeMission ? (
           <MissionPlayView
             init={activeMission}

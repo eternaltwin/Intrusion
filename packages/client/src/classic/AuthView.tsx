@@ -1,24 +1,25 @@
 import { useState, type FormEvent } from 'react';
-import type { PlayerDto } from '@intrusion/shared';
+import type { AuthConfigDto, PlayerDto } from '@intrusion/shared';
 import { api } from '../api/client';
 
-export function AuthView({ onAuthenticated }: { onAuthenticated: (p: PlayerDto) => void }) {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+export function AuthView({
+  authConfig,
+  onAuthenticated,
+}: {
+  authConfig: AuthConfigDto;
+  onAuthenticated: (p: PlayerDto) => void;
+}) {
+  const [devUsername, setDevUsername] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: FormEvent) => {
+  const handleDevSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !password) return;
+    if (!devUsername.trim()) return;
     setBusy(true);
     setError(null);
     try {
-      const res =
-        mode === 'login'
-          ? await api.login(username.trim(), password)
-          : await api.register(username.trim(), password);
+      const res = await api.devLogin(devUsername.trim());
       onAuthenticated(res.player);
     } catch (err: any) {
       setError(err.message || 'Erreur de connexion.');
@@ -66,18 +67,15 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: (p: PlayerDto) 
 
       <div className="authBox">
         <ul className="tabs">
-          <li className={mode === 'login' ? 'active' : ''}>
-            <a onClick={() => { setMode('login'); setError(null); }}>Connexion</a>
-          </li>
-          <li className={mode === 'register' ? 'active' : ''}>
-            <a onClick={() => { setMode('register'); setError(null); }}>Nouveau Compte</a>
+          <li className="active">
+            <a>Connexion Eternaltwin</a>
           </li>
         </ul>
 
         <div className="window screens">
           <div className="wtitle">
             <img className="wbutton" src="/img/design/pixel.gif" alt="" />
-            <span>{mode === 'login' ? 'Login.prg' : 'Register.prg'}</span>
+            <span>Eternaltwin_OAuth.prg</span>
           </div>
           <div className="container">
             <div className="register">
@@ -86,43 +84,64 @@ export function AuthView({ onAuthenticated }: { onAuthenticated: (p: PlayerDto) 
                   <strong>{error}</strong>
                 </p>
               )}
-              <form onSubmit={handleSubmit}>
-                <label htmlFor="username">Pseudonyme Hacker :</label>
-                <input
-                  id="username"
-                  type="text"
-                  className="field"
-                  name="username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  autoComplete="username"
-                  required
-                />
-                <label htmlFor="password">Code Secret (4+ caractères) :</label>
-                <input
-                  id="password"
-                  type="password"
-                  className="field"
-                  name="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                  required
-                />
-                <br />
-                <input
-                  type="submit"
-                  className="button"
-                  disabled={busy}
-                  value={
-                    busy
-                      ? 'Chargement...'
-                      : mode === 'login'
-                      ? 'Se connecter'
-                      : 'Créer mon accès'
-                  }
-                />
-              </form>
+
+              <p style={{ marginBottom: 10, fontSize: '8.5pt', lineHeight: 1.4 }}>
+                L&apos;authentification est assurée exclusivement par{' '}
+                <strong>Eternaltwin (OAuth 2.0)</strong>. Seuls votre identifiant et votre
+                pseudonyme public Eternaltwin sont utilisés après votre accord.
+              </p>
+
+              {authConfig.etwinEnabled ? (
+                <p style={{ marginBottom: 12 }}>
+                  <a
+                    className="button"
+                    href={authConfig.etwinAuthorizePath}
+                    style={{ display: 'inline-block', textDecoration: 'none' }}
+                  >
+                    Se connecter avec Eternaltwin
+                  </a>
+                </p>
+              ) : (
+                <p style={{ marginBottom: 10, fontSize: '8.5pt', color: '#fed82a' }}>
+                  <em>Client OAuth Eternaltwin non configuré sur cet environnement local.</em>
+                </p>
+              )}
+
+              {authConfig.devAuthEnabled && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    paddingTop: 10,
+                    borderTop: '1px dashed #71754c',
+                  }}
+                >
+                  <p style={{ marginBottom: 6, fontSize: '8pt', color: '#d0d194' }}>
+                    <strong>Simulateur OAuth (Développement local hors-ligne uniquement) :</strong>
+                  </p>
+                  <form onSubmit={handleDevSubmit}>
+                    <label htmlFor="dev-username">Pseudonyme Eternaltwin simulé :</label>
+                    <input
+                      id="dev-username"
+                      type="text"
+                      className="field"
+                      name="username"
+                      value={devUsername}
+                      onChange={(e) => setDevUsername(e.target.value)}
+                      placeholder="ex: ZeroCool"
+                      minLength={2}
+                      maxLength={32}
+                      required
+                    />
+                    <br />
+                    <input
+                      type="submit"
+                      className="button"
+                      disabled={busy}
+                      value={busy ? 'Connexion...' : 'Accès Dev Local'}
+                    />
+                  </form>
+                </div>
+              )}
             </div>
           </div>
         </div>

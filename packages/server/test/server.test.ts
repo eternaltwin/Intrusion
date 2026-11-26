@@ -13,13 +13,13 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
       assetsDir,
     });
 
-    // 1. Register secure account
-    const regRes = await app.request('/api/auth/register', {
+    // 1. Authenticate operator via dev-mode Eternaltwin mock (no password stored)
+    const regRes = await app.request('/api/auth/dev-login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'CipherZero', password: 'secretPassword42' }),
+      body: JSON.stringify({ username: 'CipherZero' }),
     });
-    expect(regRes.status).toBe(201);
+    expect(regRes.status).toBe(200);
     const cookie = regRes.headers.get('set-cookie')?.split(';')[0] ?? '';
     expect(cookie).toContain('intrusion_sid=');
     const regData = await regRes.json();
@@ -313,12 +313,12 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
       assetsDir,
     });
 
-    const regRes = await app.request('/api/auth/register', {
+    const regRes = await app.request('/api/auth/dev-login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'ScoutRunner', password: 'secretPassword42' }),
+      body: JSON.stringify({ username: 'ScoutRunner' }),
     });
-    expect(regRes.status).toBe(201);
+    expect(regRes.status).toBe(200);
     const cookie = regRes.headers.get('set-cookie')?.split(';')[0] ?? '';
     const regJson = await regRes.json();
     const userId = regJson.player.id as number;
@@ -585,12 +585,12 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     });
 
     const registerAndCookie = async (username: string) => {
-      const res = await app.request('/api/auth/register', {
+      const res = await app.request('/api/auth/dev-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password: 'Password123!' }),
+        body: JSON.stringify({ username }),
       });
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(200);
       const json = await res.json();
       const setCookie = res.headers.get('set-cookie')!;
       return { cookie: setCookie.split(';')[0], userId: json.player.id as number };
@@ -743,12 +743,12 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
       assetsDir,
     });
 
-    const regRes = await app.request('/api/auth/register', {
+    const regRes = await app.request('/api/auth/dev-login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'LoadoutMaster', password: 'Password123!' }),
+      body: JSON.stringify({ username: 'LoadoutMaster' }),
     });
-    expect(regRes.status).toBe(201);
+    expect(regRes.status).toBe(200);
     const cookie = regRes.headers.get('set-cookie')!.split(';')[0];
     const regJson = await regRes.json();
     const userId = regJson.player.id as number;
@@ -885,5 +885,195 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     ).json();
     expect(start9.init.chipset).toBe('smana');
     expect(start9.init.decks[0].content).toEqual(['dmgxl', 'reboo2', 'scan1']);
+  });
+
+  it('enforces Eternaltwin Charter compliance: OAuth 2.0 flow, state CSRF check, SHA-256 session hashing, zero stored OAuth/password secrets, prod lockdown & HTTP security headers', async () => {
+    let mockDisplayName = 'DorianET';
+    const secretOauthAccessToken = 'etwin_live_secret_access_token_xyz987';
+
+    const mockFetch: typeof globalThis.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === 'https://eternaltwin.org/oauth/token') {
+        expect(init?.method).toBe('POST');
+        const authHeader = (init?.headers as Record<string, string>)?.Authorization ?? '';
+        const expectedBasic = Buffer.from('intrusion@clients:super_client_secret', 'utf8').toString('base64');
+        expect(authHeader).toBe(`Basic ${expectedBasic}`);
+        const bodyParams = new URLSearchParams(String(init?.body ?? ''));
+        if (bodyParams.get('code') !== 'valid_etwin_auth_code') {
+          return new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 });
+        }
+        return new Response(
+          JSON.stringify({
+            access_token: secretOauthAccessToken,
+            token_type: 'Bearer',
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (url === 'https://eternaltwin.org/api/v1/auth/self') {
+        const authHeader = (init?.headers as Record<string, string>)?.Authorization ?? '';
+        expect(authHeader).toBe(`Bearer ${secretOauthAccessToken}`);
+        return new Response(
+          JSON.stringify({
+            type: 'User',
+            scope: 'Default',
+            user: {
+              type: 'User',
+              id: '9f310484-663b-44c3-aa64-7c0d2362a684',
+              display_name: {
+                current: { value: mockDisplayName },
+              },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      return new Response('Not Found', { status: 404 });
+    };
+
+    const { app, db } = createApp({
+      dbPath: ':memory:',
+      assetsDir,
+      isProduction: true,
+      publicUrl: 'https://intrusion.eternaltwin.org',
+      sourceRepoUrl: 'https://github.com/eternaltwin/intrusion',
+      etwinOauth: {
+        internalUrl: 'https://eternaltwin.org',
+        externalUrl: 'https://eternaltwin.org',
+        clientId: 'intrusion@clients',
+        clientSecret: 'super_client_secret',
+        callbackUrl: 'https://intrusion.eternaltwin.org/api/auth/etwin/callback',
+        scope: 'base',
+      },
+      allowDevAuth: true, // Even if passed true, isProduction: true MUST strictly disable dev-login!
+      fetchImpl: mockFetch,
+    });
+
+    // 1. Production strictly disables dev-login & legacy password endpoints do not exist
+    const devLoginProd = await app.request('https://intrusion.eternaltwin.org/api/auth/dev-login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://intrusion.eternaltwin.org',
+      },
+      body: JSON.stringify({ username: 'BypassAttempt' }),
+    });
+    expect(devLoginProd.status).toBe(403);
+
+    const legacyLogin = await app.request('https://intrusion.eternaltwin.org/api/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://intrusion.eternaltwin.org',
+      },
+      body: JSON.stringify({ username: 'a', password: 'b' }),
+    });
+    expect(legacyLogin.status).toBe(404);
+
+    // 2. Security headers & HSTS are present in production
+    expect(devLoginProd.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(devLoginProd.headers.get('x-frame-options')).toBe('DENY');
+    expect(devLoginProd.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+    expect(devLoginProd.headers.get('strict-transport-security')).toContain('max-age=31536000');
+
+    // 3. Cross-origin CSRF POST is blocked with 403
+    const csrfBlocked = await app.request('https://intrusion.eternaltwin.org/api/auth/logout', {
+      method: 'POST',
+      headers: { Origin: 'https://evil-attacker.example' },
+    });
+    expect(csrfBlocked.status).toBe(403);
+
+    // 4. OAuth login initiates redirect to Eternaltwin with cryptographic state cookie
+    const loginInitRes = await app.request('https://intrusion.eternaltwin.org/api/auth/etwin/login');
+    expect(loginInitRes.status).toBe(302);
+    const redirectLoc = new URL(loginInitRes.headers.get('location')!);
+    expect(redirectLoc.origin + redirectLoc.pathname).toBe('https://eternaltwin.org/oauth/authorize');
+    expect(redirectLoc.searchParams.get('client_id')).toBe('intrusion@clients');
+    expect(redirectLoc.searchParams.get('redirect_uri')).toBe(
+      'https://intrusion.eternaltwin.org/api/auth/etwin/callback'
+    );
+    const stateParam = redirectLoc.searchParams.get('state')!;
+    expect(stateParam.length).toBe(64);
+    const stateSetCookie = loginInitRes.headers.get('set-cookie')!;
+    expect(stateSetCookie).toContain('HttpOnly');
+    expect(stateSetCookie).toContain('Secure');
+    const stateCookiePair = stateSetCookie.split(';')[0];
+
+    // 5. Forged / mismatched OAuth state is rejected
+    const badStateRes = await app.request(
+      'https://intrusion.eternaltwin.org/api/auth/etwin/callback?code=valid_etwin_auth_code&state=forged_state',
+      { headers: { Cookie: stateCookiePair } }
+    );
+    expect(badStateRes.status).toBe(302);
+    expect(badStateRes.headers.get('location')).toBe('/?auth_error=invalid_state');
+
+    // 6. Complete valid OAuth flow -> exchanges code, fetches /api/v1/auth/self, creates session
+    const loginInit2 = await app.request('https://intrusion.eternaltwin.org/api/auth/etwin/login');
+    const state2 = new URL(loginInit2.headers.get('location')!).searchParams.get('state')!;
+    const stateCookie2 = loginInit2.headers.get('set-cookie')!.split(';')[0];
+
+    const callbackRes = await app.request(
+      `https://intrusion.eternaltwin.org/api/auth/etwin/callback?code=valid_etwin_auth_code&state=${state2}`,
+      { headers: { Cookie: stateCookie2 } }
+    );
+    expect(callbackRes.status).toBe(302);
+    expect(callbackRes.headers.get('location')).toBe('/');
+
+    const setCookiesHeader = callbackRes.headers.get('set-cookie') ?? '';
+    expect(setCookiesHeader).toContain('intrusion_sid=');
+    expect(setCookiesHeader).toContain('HttpOnly');
+    expect(setCookiesHeader).toContain('Secure');
+    const sidMatch = /intrusion_sid=([a-f0-9]+)/.exec(setCookiesHeader);
+    expect(sidMatch).not.toBeNull();
+    const rawSid = sidMatch![1];
+
+    // 7. Verify authenticated identity & auth config
+    const meRes = await app.request('https://intrusion.eternaltwin.org/api/auth/me', {
+      headers: { Cookie: `intrusion_sid=${rawSid}` },
+    });
+    const meJson = await meRes.json();
+    expect(meJson.player.username).toBe('DorianET');
+    expect(meJson.auth.etwinEnabled).toBe(true);
+    expect(meJson.auth.devAuthEnabled).toBe(false);
+    expect(meJson.auth.sourceRepoUrl).toBe('https://github.com/eternaltwin/intrusion');
+
+    // 8. Verify DB schema & storage compliance:
+    // - No password_hash column in users
+    // - Raw session token is NOT stored in plaintext in sessions (only SHA-256 token_hash)
+    // - OAuth access_token is NOT stored anywhere in SQLite
+    const userCols = db.prepare("PRAGMA table_info('users')").all() as Array<{ name: string }>;
+    expect(userCols.some((c) => c.name === 'password_hash')).toBe(false);
+    expect(userCols.some((c) => c.name === 'etwin_user_id')).toBe(true);
+
+    const sessionRows = db.prepare('SELECT token_hash FROM sessions').all() as Array<{ token_hash: string }>;
+    expect(sessionRows.length).toBe(1);
+    expect(sessionRows[0].token_hash).not.toBe(rawSid);
+    expect(sessionRows[0].token_hash.length).toBe(64);
+
+    const serializedUsers = JSON.stringify(db.prepare('SELECT * FROM users').all());
+    const serializedSessions = JSON.stringify(sessionRows);
+    expect(serializedUsers).not.toContain(secretOauthAccessToken);
+    expect(serializedSessions).not.toContain(secretOauthAccessToken);
+
+    // 9. Subsequent OAuth login syncs updated Eternaltwin display_name seamlessly
+    mockDisplayName = 'DorianRenamed';
+    const loginInit3 = await app.request('https://intrusion.eternaltwin.org/api/auth/etwin/login');
+    const state3 = new URL(loginInit3.headers.get('location')!).searchParams.get('state')!;
+    const stateCookie3 = loginInit3.headers.get('set-cookie')!.split(';')[0];
+    const callbackRes2 = await app.request(
+      `https://intrusion.eternaltwin.org/api/auth/etwin/callback?code=valid_etwin_auth_code&state=${state3}`,
+      { headers: { Cookie: stateCookie3 } }
+    );
+    const sid2 = /intrusion_sid=([a-f0-9]+)/.exec(callbackRes2.headers.get('set-cookie') ?? '')![1];
+    const meRenamed = await (
+      await app.request('https://intrusion.eternaltwin.org/api/auth/me', {
+        headers: { Cookie: `intrusion_sid=${sid2}` },
+      })
+    ).json();
+    expect(meRenamed.player.id).toBe(meJson.player.id);
+    expect(meRenamed.player.username).toBe('DorianRenamed');
   });
 });

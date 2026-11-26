@@ -1,14 +1,20 @@
 import { z } from 'zod';
 
-export const AuthCredentialsSchema = z.object({
+export const DevAuthLoginSchema = z.object({
   username: z
     .string()
     .trim()
     .min(2, 'Min 2 chars')
-    .max(24, 'Max 24 chars')
-    .regex(/^[a-zA-Z0-9_-]+$/, 'Alphanumeric, _ and - only'),
-  password: z.string().min(4, 'Min 4 chars').max(128),
+    .max(32, 'Max 32 chars')
+    .regex(/^[a-zA-Z0-9_ -]+$/, 'Alphanumeric, spaces, _ and - only'),
 });
+
+export interface AuthConfigDto {
+  etwinEnabled: boolean;
+  etwinAuthorizePath: string;
+  devAuthEnabled: boolean;
+  sourceRepoUrl: string;
+}
 
 export const SaveDeckSchema = z.object({
   deckId: z.string(),

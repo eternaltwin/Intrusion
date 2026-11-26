@@ -1,15 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { zValidator } from '@hono/zod-validator';
 import {
   ADD_DECK_COST,
   ADD_SLOT_COST,
-  AuthCredentialsSchema,
   buildMissionCards,
   BuyItemSchema,
+  DevAuthLoginSchema,
   FORBIDDEN_CHALLENGE_VIRUSES,
   generateMission,
   getAdjustedPrime,
@@ -27,6 +27,7 @@ import {
   SellPackSchema,
   SetChipsetSchema,
   UpdateProfileSchema,
+  type AuthConfigDto,
   type LangCode,
   type MissionInitParams,
   type PlayerDto,
@@ -34,17 +35,39 @@ import {
 import { openDatabase } from './db/database.js';
 import { getCatalog } from './catalog.js';
 import {
+  buildEtwinAuthorizationUrl,
   buildPlayerDto,
+  createOauthState,
   createSession,
   deleteSession,
+  exchangeEtwinCodeForIdentity,
   getUserIdFromSession,
-  registerNewUser,
-  verifyPassword,
+  SESSION_TTL_SECONDS,
+  upsertEtwinUser,
+  verifyOauthState,
+  type EtwinOauthConfig,
 } from './services/auth.js';
 
 export const BIOS_COSTS = [0, 0, 6000, 15000, 35000] as const; // index = target bios level (2, 3, 4)
 const SESSION_COOKIE = 'intrusion_sid';
+const OAUTH_STATE_COOKIE = 'intrusion_oauth_state';
+const OAUTH_STATE_TTL_SECONDS = 60 * 10; // 10 minutes
 const DAILY_PACK_QUOTA = 20;
+const DEFAULT_SOURCE_REPO_URL = 'https://github.com/eternaltwin/intrusion';
+const CSP_HEADER = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-eval'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "media-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "worker-src 'self' blob:",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join('; ');
+const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const ALLOWED_CLIENT_GOALS = new Set([
   'av',
   'crash',
@@ -64,6 +87,12 @@ export interface CreateAppOptions {
   dbPath: string;
   assetsDir: string;
   clientDistDir?: string;
+  isProduction?: boolean;
+  publicUrl?: string;
+  sourceRepoUrl?: string;
+  etwinOauth?: EtwinOauthConfig;
+  allowDevAuth?: boolean;
+  fetchImpl?: typeof globalThis.fetch;
 }
 
 function todayDateStr(nowMs = Date.now()): string {
@@ -130,46 +159,198 @@ export function createApp(opts: CreateAppOptions) {
   const toPlayerDto = (uid: number) => buildPlayerDto(db, uid, defaultBundle);
   const app = new Hono<{ Variables: AppVariables }>();
 
-  // --- Auth Endpoints ---
-  app.post('/api/auth/register', zValidator('json', AuthCredentialsSchema), (c) => {
-    const { username, password } = c.req.valid('json');
-    const existing = db
-      .prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE')
-      .get(username);
-    if (existing) {
-      return c.json({ error: 'Ce pseudonyme est déjà réservé par un autre opérateur.' }, 409);
-    }
+  const isProduction = Boolean(opts.isProduction);
+  const sourceRepoUrl = opts.sourceRepoUrl ?? DEFAULT_SOURCE_REPO_URL;
+  const etwinOauth = opts.etwinOauth;
+  const devAuthEnabled = !isProduction && (opts.allowDevAuth ?? !etwinOauth);
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
 
-    const catalog = getCatalog(opts.assetsDir, 'fr');
-    const userId = registerNewUser(db, catalog, username, password);
-    const token = createSession(db, userId);
-    setCookie(c, SESSION_COOKIE, token, {
+  const authConfigDto: AuthConfigDto = {
+    etwinEnabled: Boolean(etwinOauth),
+    etwinAuthorizePath: '/api/auth/etwin/login',
+    devAuthEnabled,
+    sourceRepoUrl,
+  };
+
+  let configuredPublicHost: string | null = null;
+  if (opts.publicUrl) {
+    try {
+      configuredPublicHost = new URL(opts.publicUrl).host.toLowerCase();
+    } catch {
+      configuredPublicHost = null;
+    }
+  }
+
+  function isHttpsRequest(c: Context): boolean {
+    if (isProduction) return true;
+    const forwardedProto = c.req.header('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase();
+    if (forwardedProto === 'https') return true;
+    return c.req.url.startsWith('https://');
+  }
+
+  function setSessionCookie(c: Context, rawToken: string): void {
+    setCookie(c, SESSION_COOKIE, rawToken, {
       httpOnly: true,
       sameSite: 'Lax',
+      secure: isHttpsRequest(c),
       path: '/',
-      maxAge: 60 * 60 * 24 * 365,
+      maxAge: SESSION_TTL_SECONDS,
     });
-    return c.json({ player: toPlayerDto(userId) }, 201);
+  }
+
+  // --- Sliding-Window Rate Limiter (protects shared Eternaltwin infrastructure — Art. 4 & 6) ---
+  const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+  let lastBucketCleanup = Date.now();
+
+  function checkRateLimit(key: string, maxRequests: number, windowMs: number): boolean {
+    const now = Date.now();
+    if (now - lastBucketCleanup > 60_000) {
+      lastBucketCleanup = now;
+      for (const [k, v] of rateBuckets) {
+        if (v.resetAt <= now) rateBuckets.delete(k);
+      }
+    }
+    const existing = rateBuckets.get(key);
+    if (!existing || existing.resetAt <= now) {
+      rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+      return true;
+    }
+    if (existing.count >= maxRequests) return false;
+    existing.count += 1;
+    return true;
+  }
+
+  // --- Sanitized Error Handler (never logs OAuth codes, tokens, or stack secrets — Art. 4) ---
+  app.onError((err, c) => {
+    const safeMsg = (err?.message ?? 'Internal Error').replace(
+      /(Bearer\s+|access_token=|code=|intrusion_sid=)[^\s&;"]+/gi,
+      '$1[REDACTED]'
+    );
+    console.error(`[Intrusion Server Error] ${c.req.method} ${c.req.path}: ${safeMsg}`);
+    return c.json({ error: 'Erreur interne du serveur.' }, 500);
   });
 
-  app.post('/api/auth/login', zValidator('json', AuthCredentialsSchema), (c) => {
-    const { username, password } = c.req.valid('json');
-    const row = db
-      .prepare('SELECT id, password_hash FROM users WHERE username = ? COLLATE NOCASE')
-      .get(username) as { id: number; password_hash: string } | undefined;
+  // --- Global HTTP Security Headers (Art. 4) ---
+  app.use('*', async (c, next) => {
+    await next();
+    c.header('X-Content-Type-Options', 'nosniff');
+    c.header('X-Frame-Options', 'DENY');
+    c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    c.header('Content-Security-Policy', CSP_HEADER);
+    if (isHttpsRequest(c)) {
+      c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+  });
 
-    if (!row || !verifyPassword(password, row.password_hash)) {
-      return c.json({ error: 'Identifiants invalides.' }, 401);
+  // --- API Rate Limiting & CSRF Origin Protection on State-Changing Requests ---
+  app.use('/api/*', async (c, next) => {
+    const clientIp =
+      c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+      c.req.header('x-real-ip')?.trim() ||
+      'local';
+    const isAuthRoute = c.req.path.startsWith('/api/auth/');
+    const allowed = isAuthRoute
+      ? checkRateLimit(`auth:${clientIp}`, 60, 60_000)
+      : checkRateLimit(`api:${clientIp}`, 600, 60_000);
+    if (!allowed) {
+      return c.json({ error: 'Trop de requêtes. Veuillez patienter un instant.' }, 429);
     }
 
-    const token = createSession(db, row.id);
-    setCookie(c, SESSION_COOKIE, token, {
+    if (STATE_CHANGING_METHODS.has(c.req.method.toUpperCase())) {
+      const secFetchSite = c.req.header('sec-fetch-site')?.toLowerCase();
+      if (secFetchSite === 'cross-site') {
+        return c.json({ error: 'Requête cross-site refusée (protection CSRF).' }, 403);
+      }
+      const origin = c.req.header('origin');
+      if (origin) {
+        let originHost: string;
+        try {
+          originHost = new URL(origin).host.toLowerCase();
+        } catch {
+          return c.json({ error: 'En-tête Origin invalide.' }, 403);
+        }
+        const reqHost = (
+          c.req.header('x-forwarded-host')?.split(',')[0]?.trim() ||
+          c.req.header('host') ||
+          new URL(c.req.url).host
+        ).toLowerCase();
+        if (originHost !== reqHost && originHost !== configuredPublicHost) {
+          return c.json({ error: 'Origine non autorisée (protection CSRF).' }, 403);
+        }
+      }
+    }
+
+    return next();
+  });
+
+  // --- Auth Endpoints (Exclusive Eternaltwin OAuth 2.0 in Production — Charte Art. 4) ---
+  app.get('/api/auth/etwin/login', (c) => {
+    if (!etwinOauth) {
+      return c.redirect('/?auth_error=etwin_not_configured', 302);
+    }
+    const state = createOauthState();
+    setCookie(c, OAUTH_STATE_COOKIE, state, {
       httpOnly: true,
       sameSite: 'Lax',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 365,
+      secure: isHttpsRequest(c),
+      path: '/api/auth/etwin/callback',
+      maxAge: OAUTH_STATE_TTL_SECONDS,
     });
-    return c.json({ player: toPlayerDto(row.id) });
+    return c.redirect(buildEtwinAuthorizationUrl(etwinOauth, state), 302);
+  });
+
+  app.get('/api/auth/etwin/callback', async (c) => {
+    const cookieState = getCookie(c, OAUTH_STATE_COOKIE);
+    deleteCookie(c, OAUTH_STATE_COOKIE, { path: '/api/auth/etwin/callback' });
+
+    if (!etwinOauth) {
+      return c.redirect('/?auth_error=etwin_not_configured', 302);
+    }
+    if (c.req.query('error')) {
+      return c.redirect('/?auth_error=oauth_denied', 302);
+    }
+
+    const queryState = c.req.query('state');
+    const code = c.req.query('code');
+    if (!code || !verifyOauthState(cookieState, queryState)) {
+      return c.redirect('/?auth_error=invalid_state', 302);
+    }
+
+    try {
+      const identity = await exchangeEtwinCodeForIdentity(etwinOauth, code, fetchImpl);
+      const catalog = getCatalog(opts.assetsDir, 'fr');
+      const userId = upsertEtwinUser(db, catalog, identity.etwinUserId, identity.displayName);
+      const rawSessionToken = createSession(db, userId);
+      setSessionCookie(c, rawSessionToken);
+      return c.redirect('/', 302);
+    } catch (err) {
+      const safeMsg = (err instanceof Error ? err.message : 'OAuth failure').replace(
+        /(Bearer\s+|access_token=|code=)[^\s&;"]+/gi,
+        '$1[REDACTED]'
+      );
+      console.error(`[Intrusion OAuth Callback] ${safeMsg}`);
+      return c.redirect('/?auth_error=oauth_exchange_failed', 302);
+    }
+  });
+
+  app.post('/api/auth/dev-login', zValidator('json', DevAuthLoginSchema), (c) => {
+    if (!devAuthEnabled) {
+      return c.json(
+        {
+          error:
+            "L'authentification locale est désactivée : veuillez vous connecter exclusivement via Eternaltwin (OAuth 2.0).",
+        },
+        403
+      );
+    }
+    const { username } = c.req.valid('json');
+    const catalog = getCatalog(opts.assetsDir, 'fr');
+    const etwinUserId = `dev:${username.toLowerCase()}`;
+    const userId = upsertEtwinUser(db, catalog, etwinUserId, username);
+    const rawSessionToken = createSession(db, userId);
+    setSessionCookie(c, rawSessionToken);
+    return c.json({ player: toPlayerDto(userId), auth: authConfigDto }, 200);
   });
 
   app.post('/api/auth/logout', (c) => {
@@ -182,8 +363,8 @@ export function createApp(opts: CreateAppOptions) {
   app.get('/api/auth/me', (c) => {
     const token = getCookie(c, SESSION_COOKIE);
     const userId = getUserIdFromSession(db, token);
-    if (!userId) return c.json({ player: null });
-    return c.json({ player: toPlayerDto(userId) });
+    if (!userId) return c.json({ player: null, auth: authConfigDto });
+    return c.json({ player: toPlayerDto(userId), auth: authConfigDto });
   });
 
   // --- Public Catalog + Raw XML Bundle for Client Simulation ---

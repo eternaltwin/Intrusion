@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import {
   CHALLENGE_LEVELS,
@@ -12,7 +12,22 @@ import {
   type PlayerDto,
 } from '@intrusion/shared';
 
-const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 365; // 1 year
+export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
+const SESSION_TTL_MS = SESSION_TTL_SECONDS * 1000;
+
+export interface EtwinOauthConfig {
+  internalUrl: string;
+  externalUrl: string;
+  clientId: string;
+  clientSecret: string;
+  callbackUrl: string;
+  scope?: string;
+}
+
+export interface EtwinIdentity {
+  etwinUserId: string;
+  displayName: string;
+}
 
 export const DEFAULT_USER_SETTINGS: PlayerDto['settings'] = {
   leet: false,
@@ -26,65 +41,200 @@ export const DEFAULT_USER_SETTINGS: PlayerDto['settings'] = {
   keybinds: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
 };
 
-export function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString('hex');
-  const derived = scryptSync(password, salt, 64).toString('hex');
-  return `${salt}:${derived}`;
+export function hashSessionToken(rawToken: string): string {
+  return createHash('sha256').update(rawToken, 'utf8').digest('hex');
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
-  const [salt, hashHex] = stored.split(':');
-  if (!salt || !hashHex) return false;
-  const derived = scryptSync(password, salt, 64);
-  const expected = Buffer.from(hashHex, 'hex');
-  if (derived.length !== expected.length) return false;
-  return timingSafeEqual(derived, expected);
+export function createOauthState(): string {
+  return randomBytes(32).toString('hex');
+}
+
+export function verifyOauthState(
+  expectedCookieState: string | undefined,
+  receivedQueryState: string | undefined
+): boolean {
+  if (!expectedCookieState || !receivedQueryState) return false;
+  const a = Buffer.from(expectedCookieState, 'utf8');
+  const b = Buffer.from(receivedQueryState, 'utf8');
+  if (a.length === 0 || a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+export function buildEtwinAuthorizationUrl(config: EtwinOauthConfig, state: string): string {
+  const base = config.externalUrl.replace(/\/+$/, '');
+  const authUrl = new URL(`${base}/oauth/authorize`);
+  authUrl.searchParams.set('response_type', 'code');
+  authUrl.searchParams.set('client_id', config.clientId);
+  authUrl.searchParams.set('redirect_uri', config.callbackUrl);
+  authUrl.searchParams.set('scope', config.scope || 'base');
+  authUrl.searchParams.set('state', state);
+  return authUrl.toString();
+}
+
+export function parseEtwinSelfIdentity(payload: unknown): EtwinIdentity {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Profil Eternaltwin invalide.');
+  }
+  const root = payload as Record<string, any>;
+  if (typeof root.type === 'string' && root.type.toLowerCase() !== 'user') {
+    throw new Error('Contexte Eternaltwin non-utilisateur refusé.');
+  }
+  const userObj: Record<string, any> =
+    root.user && typeof root.user === 'object' ? root.user : root;
+
+  const rawId = typeof userObj.id === 'string' ? userObj.id.trim() : '';
+  if (!rawId || rawId.length > 128) {
+    throw new Error('Identifiant utilisateur Eternaltwin manquant.');
+  }
+
+  const rawDisplay =
+    (typeof userObj.display_name?.current?.value === 'string'
+      ? userObj.display_name.current.value
+      : undefined) ??
+    (typeof userObj.displayName?.current?.value === 'string'
+      ? userObj.displayName.current.value
+      : undefined) ??
+    (typeof userObj.display_name === 'string' ? userObj.display_name : undefined) ??
+    (typeof userObj.displayName === 'string' ? userObj.displayName : undefined) ??
+    (typeof userObj.username === 'string' ? userObj.username : undefined) ??
+    '';
+
+  const cleanDisplay = rawDisplay.replace(/[\u0000-\u001F\u007F]+/g, '').trim().slice(0, 32);
+  if (!cleanDisplay) {
+    throw new Error('Pseudonyme Eternaltwin manquant.');
+  }
+
+  return {
+    etwinUserId: rawId,
+    displayName: cleanDisplay,
+  };
+}
+
+/**
+ * Exchanges an Eternaltwin authorization code for an access token over HTTP,
+ * queries `/api/v1/auth/self` in memory, and discards `access_token` immediately
+ * without ever persisting or logging it (Charte Eternaltwin — Article 4).
+ */
+export async function exchangeEtwinCodeForIdentity(
+  config: EtwinOauthConfig,
+  code: string,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch
+): Promise<EtwinIdentity> {
+  const apiBase = config.internalUrl.replace(/\/+$/, '');
+  const basicCredentials = Buffer.from(
+    `${config.clientId}:${config.clientSecret}`,
+    'utf8'
+  ).toString('base64');
+
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: config.callbackUrl,
+    client_id: config.clientId,
+  });
+
+  const tokenRes = await fetchImpl(`${apiBase}/oauth/token`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${basicCredentials}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body: body.toString(),
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (!tokenRes.ok) {
+    throw new Error(`Échec de l'échange OAuth Eternaltwin (HTTP ${tokenRes.status}).`);
+  }
+
+  const tokenJson = (await tokenRes.json()) as { access_token?: unknown };
+  const accessToken =
+    typeof tokenJson?.access_token === 'string' ? tokenJson.access_token.trim() : '';
+  if (!accessToken) {
+    throw new Error('Jeton OAuth Eternaltwin absent de la réponse.');
+  }
+
+  const selfRes = await fetchImpl(`${apiBase}/api/v1/auth/self`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+    },
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (!selfRes.ok) {
+    throw new Error(`Impossible de vérifier l'identité Eternaltwin (HTTP ${selfRes.status}).`);
+  }
+
+  const selfJson = await selfRes.json();
+  return parseEtwinSelfIdentity(selfJson);
 }
 
 export function createSession(db: DatabaseSync, userId: number): string {
-  const token = randomBytes(32).toString('hex');
-  const expiresAt = Date.now() + SESSION_TTL_MS;
-  db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').run(
-    token,
+  const now = Date.now();
+  db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(now);
+  const rawToken = randomBytes(32).toString('hex');
+  const tokenHash = hashSessionToken(rawToken);
+  const expiresAt = now + SESSION_TTL_MS;
+  db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)').run(
+    tokenHash,
     userId,
     expiresAt
   );
-  return token;
+  return rawToken;
 }
 
-export function deleteSession(db: DatabaseSync, token: string): void {
-  db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+export function deleteSession(db: DatabaseSync, rawToken: string): void {
+  const tokenHash = hashSessionToken(rawToken);
+  db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
 }
 
-export function getUserIdFromSession(db: DatabaseSync, token: string | undefined): number | null {
-  if (!token) return null;
+export function getUserIdFromSession(
+  db: DatabaseSync,
+  rawToken: string | undefined
+): number | null {
+  if (!rawToken) return null;
+  const tokenHash = hashSessionToken(rawToken);
   const row = db
-    .prepare('SELECT user_id, expires_at FROM sessions WHERE token = ?')
-    .get(token) as { user_id: number; expires_at: number } | undefined;
+    .prepare('SELECT user_id, expires_at FROM sessions WHERE token_hash = ?')
+    .get(tokenHash) as { user_id: number; expires_at: number } | undefined;
   if (!row) return null;
   if (row.expires_at < Date.now()) {
-    deleteSession(db, token);
+    db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
     return null;
   }
   return row.user_id;
 }
 
-export function registerNewUser(
+export function upsertEtwinUser(
   db: DatabaseSync,
   catalog: GameDataBundle,
-  username: string,
-  password: string
+  etwinUserId: string,
+  displayName: string
 ): number {
+  const cleanName = displayName.trim().slice(0, 32) || 'Operateur';
+  const existing = db
+    .prepare('SELECT id, username FROM users WHERE etwin_user_id = ?')
+    .get(etwinUserId) as { id: number; username: string } | undefined;
+
+  if (existing) {
+    if (existing.username !== cleanName) {
+      db.prepare('UPDATE users SET username = ? WHERE id = ?').run(cleanName, existing.id);
+    }
+    return existing.id;
+  }
+
   const startingViruses = Array.from(catalog.viruses.values())
     .filter((v) => v.start)
     .map((v) => v.id);
 
-  const hash = hashPassword(password);
   const res = db
     .prepare(
-      'INSERT INTO users (username, password_hash, money, xp, bios_level, active_chipset, settings_json) VALUES (?, ?, 10000, 3, 1, NULL, ?)'
+      'INSERT INTO users (etwin_user_id, username, money, xp, bios_level, active_chipset, settings_json) VALUES (?, ?, 10000, 3, 1, NULL, ?)'
     )
-    .run(username, hash, JSON.stringify(DEFAULT_USER_SETTINGS));
+    .run(etwinUserId, cleanName, JSON.stringify(DEFAULT_USER_SETTINGS));
 
   const userId = Number(res.lastInsertRowid);
   const insertItem = db.prepare(

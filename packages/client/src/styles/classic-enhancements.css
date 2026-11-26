@@ -622,3 +622,10 @@ dialog.classicPopupDialog::backdrop {
   border: 0;
   white-space: nowrap;
 }
+
+.mxbottom {
+  min-height: 22px;
+  height: auto;
+  padding: 7px 12px 8px;
+  line-height: 1.4;
+}

@@ -16,6 +16,7 @@ export function ClassicLayout({
   player,
   route,
   notice,
+  sourceRepoUrl = 'https://github.com/eternaltwin/intrusion',
   onNavigate,
   onLogout,
   children,
@@ -23,6 +24,7 @@ export function ClassicLayout({
   player: PlayerDto | null;
   route: ClassicRoute;
   notice: { text: string; error?: boolean } | null;
+  sourceRepoUrl?: string;
   onNavigate: (r: ClassicRoute) => void;
   onLogout: () => void;
   children: ReactNode;
@@ -158,7 +160,35 @@ export function ClassicLayout({
         </div>
 
         <div className="mxbottom">
-          Intrusion &copy; 2011 Motion-Twin &middot; Édition Remasterisée HiDPI (React 19 + Hono + SQLite + PixiJS)
+          Intrusion &copy; 2011{' '}
+          <a href="https://motion-twin.com/" target="_blank" rel="noreferrer">
+            Motion-Twin
+          </a>{' '}
+          (Assets{' '}
+          <a
+            href="https://creativecommons.org/licenses/by-nc-sa/4.0/deed.fr"
+            target="_blank"
+            rel="noreferrer"
+          >
+            CC-BY-NC-SA 4.0
+          </a>
+          ) &middot; Hébergé à titre non commercial par{' '}
+          <a href="https://eternaltwin.org" target="_blank" rel="noreferrer">
+            Eternaltwin
+          </a>{' '}
+          &middot; Code libre{' '}
+          <a
+            href="https://www.gnu.org/licenses/agpl-3.0.html"
+            target="_blank"
+            rel="noreferrer"
+          >
+            AGPL-3.0
+          </a>{' '}
+          (
+          <a href={sourceRepoUrl} target="_blank" rel="noreferrer">
+            Code source
+          </a>
+          )
         </div>
       </div>
     </>
