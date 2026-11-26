@@ -1524,20 +1524,17 @@ FSNode.attach = function(dm,fl_anim,fnode,index) {
 		MCField.get_field(mc).visible = false;
 	}
 	if(fl_anim) {
-		var delay = -0.08 * index - Std.random(35) / 100;
-		var a = FSNode.term.startAnim(AnimType.A_FadeIn,mc,name,delay);
-		a.spd *= 1.8;
-		var at = FSNode.term.startAnim(AnimType.A_Text,mc,name,delay);
-		at.spd *= 1.8;
-		var ap = FSNode.term.startAnim(AnimType.A_PlayFrames,mc,name,delay);
-		ap.spd *= 1.8;
+		var delay = -0.25 - 0.10 * index - Std.random(90) / 100;
+		var a = FSNode.term.startAnim(AnimType.A_FadeIn,mc,name,delay * 1.7);
+		a.spd *= 1.7;
+		FSNode.term.startAnim(AnimType.A_Text,mc,name,delay);
+		FSNode.term.startAnim(AnimType.A_PlayFrames,mc,name,delay);
 		var _g = 0;
 		var _g1 = fnode.emcList;
 		while(_g < _g1.length) {
 			var emc = _g1[_g];
 			++_g;
-			var ae = FSNode.term.startAnim(AnimType.A_FadeIn,emc,null,delay);
-			ae.spd *= 1.8;
+			FSNode.term.startAnim(AnimType.A_FadeIn,emc,null,delay);
 		}
 	} else {
 		var a = FSNode.term.startAnim(AnimType.A_FadeIn,mc,null,-index * 0.06);
@@ -13997,7 +13994,7 @@ UserTerminal.prototype = {
 					break;
 				case 11:
 					var mcc3 = a.mc;
-					if(cpt >= 0.4 && Std.random(7) == 0) {
+					if(cpt >= 0.4 && Math.random() < (1.0 / 7.0) * mt_Timer.tmod) {
 						if(a.data == -1) {
 							MCField.get_field(mcc3).text += TD.texts.get("error") + "\n";
 						} else {
@@ -14013,7 +14010,7 @@ UserTerminal.prototype = {
 					break;
 				case 12:
 					var mcc4 = a.mc;
-					if(Std.random(2) == 0) {
+					if(Math.random() < 0.5 * mt_Timer.tmod) {
 						var fh = MCField.get_field(mcc4);
 						var fh1 = fh.text;
 						var str = "";
@@ -14038,7 +14035,7 @@ UserTerminal.prototype = {
 				case 13:
 					var mcc5 = a.mc;
 					var str1 = MCField.get_field(mcc5).text;
-					if(str1.indexOf("*") >= 0 && Std.random(100) < 65) {
+					if(str1.indexOf("*") >= 0 && Math.random() < 0.65 * mt_Timer.tmod) {
 						var n = -1;
 						do n = Std.random(str1.length); while(str1.charAt(n) != "*");
 						var tmp3 = HxOverrides.substr(str1,0,n) + a.txt.charAt(n);
@@ -17448,16 +17445,17 @@ common_InternalMovieClip.prototype = $extend(PIXI.Container.prototype,{
 		depths.sort(function(a,b) {
 			return a - b;
 		});
+		var isFileRestFrame = this._spriteId == "315" && this._currentframe == 29 && this._totalframes == 29;
+		var activeMasks = [];
 		var _g = 0;
 		while(_g < depths.length) {
 			var d = depths[_g];
 			++_g;
+			while(activeMasks.length > 0 && d > activeMasks[activeMasks.length - 1].clipDepth) {
+				activeMasks.pop();
+			}
 			var sprite = curFrame.sprites.h[d];
 			if(sprite == null) {
-				continue;
-			}
-			if(sprite.isMask == true) {
-				sprite.sprite.visible = false;
 				continue;
 			}
 			if(sprite.transform != null) {
@@ -17472,6 +17470,24 @@ common_InternalMovieClip.prototype = $extend(PIXI.Container.prototype,{
 				var py = sprite.sprite.pivot != null ? sprite.sprite.pivot.y : 0.0;
 				sprite.sprite.setTransform(tx,ty,t.scaleX,t.scaleY,t.rotation,t.skewX,t.skewY,px,py);
 			}
+			if(sprite.isMask == true) {
+				sprite.sprite.visible = !isFileRestFrame;
+				sprite.sprite.renderable = false;
+				curFrame.container.addChild(sprite.sprite);
+				if(!isFileRestFrame && sprite.clipDepth != null && sprite.clipDepth > d) {
+					activeMasks.push({ clipDepth : sprite.clipDepth, maskObj : sprite.sprite });
+				}
+				continue;
+			}
+			if(isFileRestFrame && (d == 3 || d == 8 || d == 12)) {
+				sprite.sprite.mask = null;
+				sprite.sprite.visible = false;
+				curFrame.container.addChild(sprite.sprite);
+				continue;
+			}
+			if(this._spriteId == "315" && (d == 3 || d == 8 || d == 12 || d == 32)) {
+				sprite.sprite.visible = true;
+			}
 			if(sprite.alpha != null) {
 				sprite.sprite.alpha = sprite.alpha;
 			}
@@ -17481,6 +17497,13 @@ common_InternalMovieClip.prototype = $extend(PIXI.Container.prototype,{
 				} else if(((sprite.sprite) instanceof PIXI.Sprite)) {
 					sprite.sprite.tint = sprite.tint;
 				}
+			}
+			var targetMask = !isFileRestFrame && activeMasks.length > 0 ? activeMasks[activeMasks.length - 1].maskObj : null;
+			if(sprite.sprite.mask != targetMask) {
+				sprite.sprite.mask = targetMask;
+			}
+			if(targetMask != null) {
+				targetMask.renderable = false;
 			}
 			curFrame.container.addChild(sprite.sprite);
 		}
@@ -17946,6 +17969,7 @@ common_MovieClipBuilder.prototype = {
 			}
 		}
 		mc._name = name;
+		mc._spriteId = id;
 		mc.setSprites(sprites);
 		mc.showFrame(true);
 		return mc;
@@ -17955,9 +17979,9 @@ common_MovieClipBuilder.prototype = {
 		var name = tmp != null ? tmp : frameId == null ? "null" : "" + frameId;
 		mc.addFrame(name,objects);
 	}
-	,parseColorState: function(tag,prevAlpha,prevTint) {
+	,parseColorState: function(tag,prevAlpha,prevTint,prevColorFilter) {
 		if(!haxe_xml__$Access_HasNodeAccess.resolve(tag,"colorTransform")) {
-			return { alpha : prevAlpha, tint : prevTint};
+			return { alpha : prevAlpha, tint : prevTint, colorFilter : prevColorFilter};
 		}
 		var ct = haxe_xml__$Access_NodeAccess.resolve(tag,"colorTransform");
 		var aMult = haxe_xml__$Access_HasAttribAccess.resolve(ct,"alphaMultTerm") ? Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(ct,"alphaMultTerm")) : 256;
@@ -17971,12 +17995,159 @@ common_MovieClipBuilder.prototype = {
 		var bAdd = haxe_xml__$Access_HasAttribAccess.resolve(ct,"blueAddTerm") ? Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(ct,"blueAddTerm")) : 0;
 		var isIdentityColor = rMult == 256 && gMult == 256 && bMult == 256 && rAdd == 0 && gAdd == 0 && bAdd == 0;
 		if(isIdentityColor) {
-			return { alpha : alpha, tint : 16777215};
+			return { alpha : alpha, tint : 16777215, colorFilter : null};
+		}
+		if(rAdd != 0 || gAdd != 0 || bAdd != 0) {
+			if(common_MovieClipBuilder.COLOR_ADD_CACHE == null) {
+				common_MovieClipBuilder.COLOR_ADD_CACHE = { };
+			}
+			var key = rMult + ":" + gMult + ":" + bMult + ":" + rAdd + ":" + gAdd + ":" + bAdd;
+			var cf = common_MovieClipBuilder.COLOR_ADD_CACHE[key];
+			if(cf == null) {
+				cf = common_ColorMatrixFilter.create([rMult / 256.0,0,0,rAdd / 255.0,0,0,gMult / 256.0,0,gAdd / 255.0,0,0,0,bMult / 256.0,bAdd / 255.0,0,0,0,0,1.0,0]);
+				common_MovieClipBuilder.COLOR_ADD_CACHE[key] = cf;
+			}
+			return { alpha : alpha, tint : 16777215, colorFilter : cf};
 		}
 		var r = Math.max(0,Math.min(255,Math.round(255 * (rMult / 256.0) + rAdd))) | 0;
 		var g = Math.max(0,Math.min(255,Math.round(255 * (gMult / 256.0) + gAdd))) | 0;
 		var b = Math.max(0,Math.min(255,Math.round(255 * (bMult / 256.0) + bAdd))) | 0;
-		return { alpha : alpha, tint : mt_bumdum_Col.objToCol({ r : r, g : g, b : b})};
+		return { alpha : alpha, tint : mt_bumdum_Col.objToCol({ r : r, g : g, b : b}), colorFilter : null};
+	}
+	,buildMaskGraphics: function(tagNode) {
+		var shapeTag = tagNode;
+		if(haxe_xml__$Access_AttribAccess.resolve(shapeTag,"type") == "DefineSpriteTag") {
+			var _g = 0;
+			var _g1 = haxe_xml__$Access_NodeListAccess.resolve(haxe_xml__$Access_NodeAccess.resolve(shapeTag,"subTags"),"item");
+			while(_g < _g1.length) {
+				var sub = _g1[_g];
+				++_g;
+				var st = haxe_xml__$Access_AttribAccess.resolve(sub,"type");
+				if(st == "PlaceObject2Tag" || st == "PlaceObject3Tag") {
+					shapeTag = this.getTag(haxe_xml__$Access_AttribAccess.resolve(sub,"characterId"));
+					break;
+				}
+			}
+		}
+		var gfx = new PIXI.Graphics();
+		var pts = [];
+		var cx = 0.0;
+		var cy = 0.0;
+		if(haxe_xml__$Access_HasNodeAccess.resolve(shapeTag,"shapes")) {
+			var shapesNode = haxe_xml__$Access_NodeAccess.resolve(shapeTag,"shapes");
+			if(haxe_xml__$Access_HasNodeAccess.resolve(shapesNode,"shapeRecords")) {
+				var recs = haxe_xml__$Access_NodeListAccess.resolve(haxe_xml__$Access_NodeAccess.resolve(shapesNode,"shapeRecords"),"item");
+				var _g2 = 0;
+				while(_g2 < recs.length) {
+					var rec = recs[_g2++];
+					switch(haxe_xml__$Access_AttribAccess.resolve(rec,"type")) {
+					case "StyleChangeRecord":
+						if(haxe_xml__$Access_HasAttribAccess.resolve(rec,"stateMoveTo") && haxe_xml__$Access_AttribAccess.resolve(rec,"stateMoveTo") == "true") {
+							cx = parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"moveDeltaX")) / 20.0;
+							cy = parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"moveDeltaY")) / 20.0;
+							pts.push(cx);
+							pts.push(cy);
+						}
+						break;
+					case "StraightEdgeRecord":
+						cx += haxe_xml__$Access_HasAttribAccess.resolve(rec,"deltaX") ? parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"deltaX")) / 20.0 : 0.0;
+						cy += haxe_xml__$Access_HasAttribAccess.resolve(rec,"deltaY") ? parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"deltaY")) / 20.0 : 0.0;
+						pts.push(cx);
+						pts.push(cy);
+						break;
+					case "CurvedEdgeRecord":
+						var ctrlX = cx + parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"controlDeltaX")) / 20.0;
+						var ctrlY = cy + parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"controlDeltaY")) / 20.0;
+						cx = ctrlX + parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"anchorDeltaX")) / 20.0;
+						cy = ctrlY + parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"anchorDeltaY")) / 20.0;
+						pts.push(ctrlX);
+						pts.push(ctrlY);
+						pts.push(cx);
+						pts.push(cy);
+						break;
+					default:
+					}
+				}
+			}
+		}
+		if(pts.length >= 6 && Math.abs(pts[pts.length - 2] - pts[0]) < 0.01 && Math.abs(pts[pts.length - 1] - pts[1]) < 0.01) {
+			pts.pop();
+			pts.pop();
+		}
+		gfx.beginFill(16777215,1.0);
+		if(pts.length >= 6) {
+			gfx.drawPolygon(pts);
+		} else {
+			var b = this.getBounds(haxe_xml__$Access_NodeAccess.resolve(shapeTag,"shapeBounds"));
+			gfx.drawRect(b.x,b.y,b.width,b.height);
+		}
+		gfx.endFill();
+		gfx.renderable = false;
+		return gfx;
+	}
+	,parseLineStyles: function(lsNode) {
+		var list = [];
+		if(lsNode != null && haxe_xml__$Access_HasNodeAccess.resolve(lsNode,"lineStyles")) {
+			var items = haxe_xml__$Access_NodeListAccess.resolve(haxe_xml__$Access_NodeAccess.resolve(lsNode,"lineStyles"),"item");
+			var _g = 0;
+			while(_g < items.length) {
+				var item = items[_g++];
+				var rawW = haxe_xml__$Access_HasAttribAccess.resolve(item,"width") ? parseFloat(haxe_xml__$Access_AttribAccess.resolve(item,"width")) : 20.0;
+				var w = rawW <= 20.0 ? 1.25 : rawW / 20.0;
+				var cTag = haxe_xml__$Access_NodeAccess.resolve(item,"color");
+				var col = this.getIntCol(cTag);
+				var a = haxe_xml__$Access_HasAttribAccess.resolve(cTag,"alpha") ? Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(cTag,"alpha")) / 255.0 : 1.0;
+				list.push({ width : w, color : col, alpha : a});
+			}
+		}
+		return list;
+	}
+	,buildHairlineGraphics: function(shapeTag) {
+		var gfx = new PIXI.Graphics();
+		var shapesNode = haxe_xml__$Access_NodeAccess.resolve(shapeTag,"shapes");
+		var styles = haxe_xml__$Access_HasNodeAccess.resolve(shapesNode,"lineStyles") ? this.parseLineStyles(haxe_xml__$Access_NodeAccess.resolve(shapesNode,"lineStyles")) : [];
+		var cx = 0.0;
+		var cy = 0.0;
+		var recs = haxe_xml__$Access_NodeListAccess.resolve(haxe_xml__$Access_NodeAccess.resolve(shapesNode,"shapeRecords"),"item");
+		var _g = 0;
+		while(_g < recs.length) {
+			var rec = recs[_g++];
+			switch(haxe_xml__$Access_AttribAccess.resolve(rec,"type")) {
+			case "StyleChangeRecord":
+				if(haxe_xml__$Access_HasAttribAccess.resolve(rec,"stateNewStyles") && haxe_xml__$Access_AttribAccess.resolve(rec,"stateNewStyles") == "true" && haxe_xml__$Access_HasNodeAccess.resolve(rec,"lineStyles")) {
+					styles = this.parseLineStyles(haxe_xml__$Access_NodeAccess.resolve(rec,"lineStyles"));
+				}
+				if(haxe_xml__$Access_HasAttribAccess.resolve(rec,"stateLineStyle") && haxe_xml__$Access_AttribAccess.resolve(rec,"stateLineStyle") == "true") {
+					var idx = Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(rec,"lineStyle"));
+					if(idx == null || idx <= 0 || idx > styles.length) {
+						gfx.lineStyle(0);
+					} else {
+						var st = styles[idx - 1];
+						gfx.lineStyle(st.width,st.color,st.alpha);
+					}
+				}
+				if(haxe_xml__$Access_HasAttribAccess.resolve(rec,"stateMoveTo") && haxe_xml__$Access_AttribAccess.resolve(rec,"stateMoveTo") == "true") {
+					cx = parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"moveDeltaX")) / 20.0;
+					cy = parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"moveDeltaY")) / 20.0;
+					gfx.moveTo(cx,cy);
+				}
+				break;
+			case "StraightEdgeRecord":
+				cx += haxe_xml__$Access_HasAttribAccess.resolve(rec,"deltaX") ? parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"deltaX")) / 20.0 : 0.0;
+				cy += haxe_xml__$Access_HasAttribAccess.resolve(rec,"deltaY") ? parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"deltaY")) / 20.0 : 0.0;
+				gfx.lineTo(cx,cy);
+				break;
+			case "CurvedEdgeRecord":
+				var ctrlX = cx + parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"controlDeltaX")) / 20.0;
+				var ctrlY = cy + parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"controlDeltaY")) / 20.0;
+				cx = ctrlX + parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"anchorDeltaX")) / 20.0;
+				cy = ctrlY + parseFloat(haxe_xml__$Access_AttribAccess.resolve(rec,"anchorDeltaY")) / 20.0;
+				gfx.quadraticCurveTo(ctrlX,ctrlY,cx,cy);
+				break;
+			default:
+			}
+		}
+		return gfx;
 	}
 	,placeObject: function(tag,objects,sprites) {
 		var depth = Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(tag,"depth"));
@@ -17987,12 +18158,14 @@ common_MovieClipBuilder.prototype = {
 				throw haxe_Exception.thrown("Moving an object that is not present");
 			}
 			var nextTransform = haxe_xml__$Access_HasNodeAccess.resolve(tag,"matrix") ? this.getTransform(tag) : prev.transform;
-			var nextColor = this.parseColorState(tag,prev.alpha,prev.tint);
-			objects.h[depth] = { name : prev.name, sprite : prev.sprite, transform : nextTransform, alpha : nextColor.alpha, tint : nextColor.tint, isMask : prev.isMask};
+			var nextColor = this.parseColorState(tag,prev.alpha,prev.tint,prev.colorFilter);
+			var nextClipDepth = haxe_xml__$Access_HasAttribAccess.resolve(tag,"placeFlagHasClipDepth") && haxe_xml__$Access_AttribAccess.resolve(tag,"placeFlagHasClipDepth") == "true" ? Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(tag,"clipDepth")) : prev.clipDepth;
+			objects.h[depth] = { name : prev.name, sprite : prev.sprite, transform : nextTransform, alpha : nextColor.alpha, tint : nextColor.tint, isMask : prev.isMask, clipDepth : nextClipDepth, colorFilter : nextColor.colorFilter};
 			return;
 		}
 		var transform = haxe_xml__$Access_HasNodeAccess.resolve(tag,"matrix") ? this.getTransform(tag) : isMove && prev != null ? prev.transform : this.getTransform(tag);
-		var t = this.getTag(haxe_xml__$Access_AttribAccess.resolve(tag,"characterId"));
+		var charId = haxe_xml__$Access_AttribAccess.resolve(tag,"characterId");
+		var t = this.getTag(charId);
 		var objectId = this.getObjectId(t);
 		var name;
 		if(haxe_xml__$Access_HasAttribAccess.resolve(tag,"name")) {
@@ -18001,42 +18174,52 @@ common_MovieClipBuilder.prototype = {
 			var tmp = this.getSpriteName(objectId);
 			name = tmp != null ? tmp : objectId;
 		}
+		var clipDepth = haxe_xml__$Access_HasAttribAccess.resolve(tag,"clipDepth") && haxe_xml__$Access_AttribAccess.resolve(tag,"clipDepth") != "0" ? Std.parseInt(haxe_xml__$Access_AttribAccess.resolve(tag,"clipDepth")) : 0;
+		var isMask = clipDepth != null && clipDepth > 0;
 		var sprite;
-		var _g = haxe_xml__$Access_AttribAccess.resolve(t,"type");
-		switch(_g) {
-		case "DefineShape2Tag":case "DefineShape3Tag":case "DefineShape4Tag":case "DefineShapeTag":
-			var baseTexture = this.textureCache.getTexture(this.assetRoot + ("shapes_svg/" + haxe_xml__$Access_AttribAccess.resolve(t,"shapeId") + ".svg"));
-			var bounds = this.getBounds(haxe_xml__$Access_NodeAccess.resolve(t,"shapeBounds"));
-			var rw = Math.floor(Math.min(Math.ceil(bounds.width),Math.floor(baseTexture.width)));
-			var rh = Math.floor(Math.min(Math.ceil(bounds.height),Math.floor(baseTexture.height)));
-			if(rw < 1) {
-				rw = 1;
-			}
-			if(rh < 1) {
-				rh = 1;
-			}
-			var texture = new PIXI.Texture(baseTexture.baseTexture,new PIXI.Rectangle(0,0,rw,rh));
-			var sprite1 = new PIXI.Sprite(texture);
-			sprite1.pivot.set(-bounds.x,-bounds.y);
-			sprite = sprite1;
-			break;
-		case "DefineSpriteTag":
-			sprite = this.buildMovieClip(haxe_xml__$Access_AttribAccess.resolve(t,"spriteId"),name);
-			break;
-		case "DefineEditTextTag":case "DefineTextTag":
-			var bounds = this.getBounds(haxe_xml__$Access_AttribAccess.resolve(t,"type") == "DefineEditTextTag" ? haxe_xml__$Access_NodeAccess.resolve(t,"bounds") : haxe_xml__$Access_NodeAccess.resolve(t,"textBounds"));
-			var text = this.buildTextField(t,bounds.width,bounds.height);
-			transform = { x : transform.x + bounds.x, y : transform.y + bounds.y, scaleX : transform.scaleX, scaleY : transform.scaleY, rotation : transform.rotation, skewX : transform.skewX, skewY : transform.skewY, pivotX : 0.0, pivotY : 0.0};
-			sprite = text;
-			break;
-		default:
-			var other = _g;
-			throw haxe_Exception.thrown("Unsupported tag definition: " + other);
-		}
-		var isMask = haxe_xml__$Access_HasAttribAccess.resolve(tag,"clipDepth") && haxe_xml__$Access_AttribAccess.resolve(tag,"clipDepth") != "0";
-		var colorState = this.parseColorState(tag,1.0,null);
 		if(isMask) {
-			sprite.visible = false;
+			sprite = this.buildMaskGraphics(t);
+		} else {
+			var _g = haxe_xml__$Access_AttribAccess.resolve(t,"type");
+			switch(_g) {
+			case "DefineShape2Tag":case "DefineShape3Tag":case "DefineShape4Tag":case "DefineShapeTag":
+				var shId = haxe_xml__$Access_AttribAccess.resolve(t,"shapeId");
+				if(shId == "281" || shId == "307") {
+					sprite = this.buildHairlineGraphics(t);
+				} else {
+					var baseTexture = this.textureCache.getTexture(this.assetRoot + ("shapes_svg/" + shId + ".svg"));
+					var bounds = this.getBounds(haxe_xml__$Access_NodeAccess.resolve(t,"shapeBounds"));
+					var rw = Math.floor(Math.min(Math.ceil(bounds.width),Math.floor(baseTexture.width)));
+					var rh = Math.floor(Math.min(Math.ceil(bounds.height),Math.floor(baseTexture.height)));
+					if(rw < 1) {
+						rw = 1;
+					}
+					if(rh < 1) {
+						rh = 1;
+					}
+					var texture = new PIXI.Texture(baseTexture.baseTexture,new PIXI.Rectangle(0,0,rw,rh));
+					var sprite1 = new PIXI.Sprite(texture);
+					sprite1.pivot.set(-bounds.x,-bounds.y);
+					sprite = sprite1;
+				}
+				break;
+			case "DefineSpriteTag":
+				sprite = this.buildMovieClip(haxe_xml__$Access_AttribAccess.resolve(t,"spriteId"),name);
+				break;
+			case "DefineEditTextTag":case "DefineTextTag":
+				var bounds = this.getBounds(haxe_xml__$Access_AttribAccess.resolve(t,"type") == "DefineEditTextTag" ? haxe_xml__$Access_NodeAccess.resolve(t,"bounds") : haxe_xml__$Access_NodeAccess.resolve(t,"textBounds"));
+				var text = this.buildTextField(t,bounds.width,bounds.height);
+				transform = { x : transform.x + bounds.x, y : transform.y + bounds.y, scaleX : transform.scaleX, scaleY : transform.scaleY, rotation : transform.rotation, skewX : transform.skewX, skewY : transform.skewY, pivotX : 0.0, pivotY : 0.0};
+				sprite = text;
+				break;
+			default:
+				var other = _g;
+				throw haxe_Exception.thrown("Unsupported tag definition: " + other);
+			}
+		}
+		var colorState = this.parseColorState(tag,1.0,null,null);
+		if(isMask) {
+			sprite.renderable = false;
 		} else {
 			if(colorState.alpha != null) {
 				sprite.alpha = colorState.alpha;
@@ -18049,11 +18232,11 @@ common_MovieClipBuilder.prototype = {
 				}
 			}
 		}
-		this.applyFilters(tag,sprite);
+		this.applyFilters(tag,sprite,colorState.colorFilter,charId);
 		if(!Object.prototype.hasOwnProperty.call(sprites.h,name)) {
 			sprites.h[name] = sprite;
 		}
-		objects.h[depth] = { name : name, sprite : sprite, transform : transform, alpha : colorState.alpha, tint : colorState.tint, isMask : isMask};
+		objects.h[depth] = { name : name, sprite : sprite, transform : transform, alpha : colorState.alpha, tint : colorState.tint, isMask : isMask, clipDepth : clipDepth, colorFilter : colorState.colorFilter};
 	}
 	,applyColor: function(tag,sprite) {
 		if(haxe_xml__$Access_AttribAccess.resolve(tag,"clipDepth") != "0") {
@@ -18087,19 +18270,26 @@ common_MovieClipBuilder.prototype = {
 			}
 		}
 	}
-	,applyFilters: function(tag,sprite) {
-		if(!haxe_xml__$Access_HasNodeAccess.resolve(tag,"surfaceFilterList")) {
-			return;
-		}
+	,applyFilters: function(tag,sprite,colorFilter,charId) {
 		var filters = [];
-		var _g = 0;
-		var _g1 = haxe_xml__$Access_NodeListAccess.resolve(haxe_xml__$Access_NodeAccess.resolve(tag,"surfaceFilterList"),"item");
-		while(_g < _g1.length) {
-			var item = _g1[_g];
-			++_g;
-			filters = filters.concat(this.buildFilter(item));
+		if(colorFilter != null) {
+			filters.push(colorFilter);
 		}
-		sprite.filters = filters;
+		if(charId == "308" || charId == "282") {
+			filters = filters.concat(common_GlowFilter.create(10875441,0.85,8,8,2.2));
+		}
+		if(haxe_xml__$Access_HasNodeAccess.resolve(tag,"surfaceFilterList")) {
+			var _g = 0;
+			var _g1 = haxe_xml__$Access_NodeListAccess.resolve(haxe_xml__$Access_NodeAccess.resolve(tag,"surfaceFilterList"),"item");
+			while(_g < _g1.length) {
+				var item = _g1[_g];
+				++_g;
+				filters = filters.concat(this.buildFilter(item));
+			}
+		}
+		if(filters.length > 0) {
+			sprite.filters = filters;
+		}
 	}
 	,rgbToHex: function(r,g,b) {
 		var hexCodes = "0123456789ABCDEF";

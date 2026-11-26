@@ -115,6 +115,7 @@ class InternalMovieClip extends Container {
     
 	var _zIndex:Int;
     public var _name:String;
+    public var _spriteId:String = null;
 
     
 	public var _xmouse(get, never):Float;
@@ -287,13 +288,15 @@ class InternalMovieClip extends Container {
 		for (d in curFrame.sprites.keys()) depths.push(d);
 		depths.sort(function(a, b) return a - b);
 
+		var isFileRestFrame = (this._spriteId == "315" && this._currentframe == 29 && this._totalframes == 29);
+		var activeMasks: Array<{clipDepth: Int, maskObj: DisplayObject}> = [];
+
 		for (d in depths) {
+			while (activeMasks.length > 0 && d > activeMasks[activeMasks.length - 1].clipDepth) {
+				activeMasks.pop();
+			}
 			var sprite = curFrame.sprites.get(d);
 			if (sprite == null) continue;
-			if (sprite.isMask == true) {
-				sprite.sprite.visible = false;
-				continue;
-			}
 			if (sprite.transform != null) {
 				var t = sprite.transform;
 				var tx = t.x;
@@ -307,6 +310,24 @@ class InternalMovieClip extends Container {
 				var py = sprite.sprite.pivot != null ? sprite.sprite.pivot.y : 0.0;
 				sprite.sprite.setTransform(tx, ty, t.scaleX, t.scaleY, t.rotation, t.skewX, t.skewY, px, py);
 			}
+			if (sprite.isMask == true) {
+				sprite.sprite.visible = !isFileRestFrame;
+				untyped sprite.sprite.renderable = false;
+				curFrame.container.addChild(sprite.sprite);
+				if (!isFileRestFrame && sprite.clipDepth != null && sprite.clipDepth > d) {
+					activeMasks.push({clipDepth: sprite.clipDepth, maskObj: sprite.sprite});
+				}
+				continue;
+			}
+			if (isFileRestFrame && (d == 3 || d == 8 || d == 12)) {
+				untyped sprite.sprite.mask = null;
+				sprite.sprite.visible = false;
+				curFrame.container.addChild(sprite.sprite);
+				continue;
+			}
+			if (this._spriteId == "315" && (d == 3 || d == 8 || d == 12 || d == 32)) {
+				sprite.sprite.visible = true;
+			}
 			if (sprite.alpha != null) {
 				sprite.sprite.alpha = sprite.alpha;
 			}
@@ -316,6 +337,13 @@ class InternalMovieClip extends Container {
 				} else if (Std.is(sprite.sprite, Sprite)) {
 					(cast sprite.sprite : Sprite).tint = sprite.tint;
 				}
+			}
+			var targetMask: Dynamic = (!isFileRestFrame && activeMasks.length > 0) ? activeMasks[activeMasks.length - 1].maskObj : null;
+			if ((untyped sprite.sprite).mask != targetMask) {
+				(untyped sprite.sprite).mask = targetMask;
+			}
+			if (targetMask != null) {
+				targetMask.renderable = false;
 			}
 			curFrame.container.addChild(sprite.sprite);
 		}

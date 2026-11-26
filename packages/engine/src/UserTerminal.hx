@@ -3164,7 +3164,7 @@ class UserTerminal {
 					case A_Decrypt :
 						var mcc : MCField = cast a.mc;
 						var str = mcc.field.text;
-						if ( str.indexOf("*")>=0 && Std.random(100)<65 ) {
+						if ( str.indexOf("*")>=0 && Math.random()<0.65*Timer.tmod ) {
 							var n = -1;
 							do {
 								n = Std.random(str.length);
@@ -3208,7 +3208,7 @@ class UserTerminal {
 
 					case A_Auth :
 						var mcc : MCField = cast a.mc;
-						if ( Std.random(2)==0 )
+						if ( Math.random()<0.5*Timer.tmod )
 							mcc.field.text+=binary(30)+"\n";
 						if ( cpt>=1 ) {
 							mcc.field.text += "_________________\nACCESS GRANTED :-)\n";
@@ -3222,7 +3222,7 @@ class UserTerminal {
 
 					case A_Connect :
 						var mcc : MCField = cast a.mc;
-						if ( cpt>=0.4 && Std.random(7)==0 )
+						if ( cpt>=0.4 && Math.random()<(1.0/7.0)*Timer.tmod )
 							if ( a.data==-1 )
 								mcc.field.text+=TD.texts.get("error")+"\n";
 							else {

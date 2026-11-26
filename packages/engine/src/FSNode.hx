@@ -332,18 +332,14 @@ class FSNode {
 			mc.field.visible = false;
 
 		if ( fl_anim ) {
-			var delay = -0.08*index-Std.random(35)/100;
-			var a = term.startAnim(A_FadeIn, mc, name, delay);
-			a.spd *= 1.8;
+			var delay = -0.25-0.10*index-Std.random(90)/100;
+			var a = term.startAnim(A_FadeIn, mc, name, delay * 1.7);
+			a.spd *= 1.7;
 //			a.cb =  term.playSound.bind("single_03", 0.0 );
-			var at = term.startAnim(A_Text, mc, name, delay);
-			at.spd *= 1.8;
-			var ap = term.startAnim(A_PlayFrames, mc, name, delay);
-			ap.spd *= 1.8;
-			for (emc in fnode.emcList) {
-				var ae = term.startAnim(A_FadeIn, emc, delay);
-				ae.spd *= 1.8;
-			}
+			term.startAnim(A_Text, mc, name, delay);
+			term.startAnim(A_PlayFrames, mc, name, delay);
+			for (emc in fnode.emcList)
+				term.startAnim(A_FadeIn, emc, delay);
 		}
 		else {
 			var a = term.startAnim(A_FadeIn, mc, -index*0.06);

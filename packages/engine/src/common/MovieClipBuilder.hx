@@ -46,6 +46,7 @@ class TextureCache {
 
 
 class MovieClipBuilder {
+    static var COLOR_ADD_CACHE: haxe.ds.StringMap<Filter> = new haxe.ds.StringMap();
 
     var xml: haxe.xml.Access;
     var assetRoot: String;
@@ -114,6 +115,7 @@ class MovieClipBuilder {
           }
         }
         mc._name = name;
+        mc._spriteId = id;
         mc.setSprites(sprites);
         mc.showFrame(true);
         return mc;
@@ -124,9 +126,9 @@ class MovieClipBuilder {
       mc.addFrame(name, objects);
     }
 
-    private function parseColorState(tag: haxe.xml.Access, prevAlpha: Null<Float>, prevTint: Null<Int>): {alpha: Null<Float>, tint: Null<Int>} {
+    private function parseColorState(tag: haxe.xml.Access, prevAlpha: Null<Float>, prevTint: Null<Int>, prevColorFilter: Null<Filter>): {alpha: Null<Float>, tint: Null<Int>, colorFilter: Null<Filter>} {
       if (!tag.hasNode.colorTransform) {
-        return {alpha: prevAlpha, tint: prevTint};
+        return {alpha: prevAlpha, tint: prevTint, colorFilter: prevColorFilter};
       }
       var ct = tag.node.colorTransform;
       var aMult = ct.has.alphaMultTerm ? Std.parseInt(ct.att.alphaMultTerm) : 256;
@@ -142,12 +144,140 @@ class MovieClipBuilder {
 
       var isIdentityColor = (rMult == 256 && gMult == 256 && bMult == 256 && rAdd == 0 && gAdd == 0 && bAdd == 0);
       if (isIdentityColor) {
-        return {alpha: alpha, tint: 0xFFFFFF};
+        return {alpha: alpha, tint: 0xFFFFFF, colorFilter: null};
+      }
+      if (rAdd != 0 || gAdd != 0 || bAdd != 0) {
+        var key = rMult + ":" + gMult + ":" + bMult + ":" + rAdd + ":" + gAdd + ":" + bAdd;
+        var cf = COLOR_ADD_CACHE.get(key);
+        if (cf == null) {
+          cf = ColorMatrixFilter.create([
+            rMult / 256.0, 0, 0, rAdd / 255.0, 0,
+            0, gMult / 256.0, 0, gAdd / 255.0, 0,
+            0, 0, bMult / 256.0, bAdd / 255.0, 0,
+            0, 0, 0, 1.0, 0
+          ]);
+          COLOR_ADD_CACHE.set(key, cf);
+        }
+        return {alpha: alpha, tint: 0xFFFFFF, colorFilter: cf};
       }
       var r = Std.int(Math.max(0, Math.min(255, Math.round(255 * (rMult / 256.0) + rAdd))));
       var g = Std.int(Math.max(0, Math.min(255, Math.round(255 * (gMult / 256.0) + gAdd))));
       var b = Std.int(Math.max(0, Math.min(255, Math.round(255 * (bMult / 256.0) + bAdd))));
-      return {alpha: alpha, tint: Col.objToCol({r: r, g: g, b: b})};
+      return {alpha: alpha, tint: Col.objToCol({r: r, g: g, b: b}), colorFilter: null};
+    }
+
+    private function buildMaskGraphics(tagNode: haxe.xml.Access): DisplayObject {
+      var shapeTag = tagNode;
+      if (shapeTag.att.type == "DefineSpriteTag") {
+        for (sub in shapeTag.node.subTags.nodes.item) {
+          if (sub.att.type == "PlaceObject2Tag" || sub.att.type == "PlaceObject3Tag") {
+            shapeTag = getTag(sub.att.characterId);
+            break;
+          }
+        }
+      }
+      var gfx: Dynamic = untyped __js__("new PIXI.Graphics()");
+      var pts: Array<Float> = [];
+      var cx = 0.0;
+      var cy = 0.0;
+      if (shapeTag.hasNode.shapes && shapeTag.node.shapes.hasNode.shapeRecords) {
+        for (rec in shapeTag.node.shapes.node.shapeRecords.nodes.item) {
+          switch (rec.att.type) {
+            case "StyleChangeRecord":
+              if (rec.has.stateMoveTo && rec.att.stateMoveTo == "true") {
+                cx = Std.parseFloat(rec.att.moveDeltaX) / 20.0;
+                cy = Std.parseFloat(rec.att.moveDeltaY) / 20.0;
+                pts.push(cx);
+                pts.push(cy);
+              }
+            case "StraightEdgeRecord":
+              cx += rec.has.deltaX ? Std.parseFloat(rec.att.deltaX) / 20.0 : 0.0;
+              cy += rec.has.deltaY ? Std.parseFloat(rec.att.deltaY) / 20.0 : 0.0;
+              pts.push(cx);
+              pts.push(cy);
+            case "CurvedEdgeRecord":
+              var ctrlX = cx + Std.parseFloat(rec.att.controlDeltaX) / 20.0;
+              var ctrlY = cy + Std.parseFloat(rec.att.controlDeltaY) / 20.0;
+              cx = ctrlX + Std.parseFloat(rec.att.anchorDeltaX) / 20.0;
+              cy = ctrlY + Std.parseFloat(rec.att.anchorDeltaY) / 20.0;
+              pts.push(ctrlX);
+              pts.push(ctrlY);
+              pts.push(cx);
+              pts.push(cy);
+            default:
+          }
+        }
+      }
+      if (pts.length >= 6 && Math.abs(pts[pts.length - 2] - pts[0]) < 0.01 && Math.abs(pts[pts.length - 1] - pts[1]) < 0.01) {
+        pts.pop();
+        pts.pop();
+      }
+      gfx.beginFill(0xffffff, 1.0);
+      if (pts.length >= 6) {
+        gfx.drawPolygon(pts);
+      } else {
+        var b = getBounds(shapeTag.node.shapeBounds);
+        gfx.drawRect(b.x, b.y, b.width, b.height);
+      }
+      gfx.endFill();
+      gfx.renderable = false;
+      return cast gfx;
+    }
+
+    private function parseLineStyles(lsNode: haxe.xml.Access): Array<{width: Float, color: Int, alpha: Float}> {
+      var list: Array<{width: Float, color: Int, alpha: Float}> = [];
+      if (lsNode != null && lsNode.hasNode.lineStyles) {
+        for (item in lsNode.node.lineStyles.nodes.item) {
+          var rawW = item.has.width ? Std.parseFloat(item.att.width) : 20.0;
+          var w = rawW <= 20.0 ? 1.25 : rawW / 20.0;
+          var cTag = item.node.color;
+          var col = getIntCol(cTag);
+          var a = cTag.has.alpha ? Std.parseInt(cTag.att.alpha) / 255.0 : 1.0;
+          list.push({width: w, color: col, alpha: a});
+        }
+      }
+      return list;
+    }
+
+    private function buildHairlineGraphics(shapeTag: haxe.xml.Access): DisplayObject {
+      var gfx: Dynamic = untyped __js__("new PIXI.Graphics()");
+      var styles = shapeTag.node.shapes.hasNode.lineStyles ? parseLineStyles(shapeTag.node.shapes.node.lineStyles) : [];
+      var cx = 0.0;
+      var cy = 0.0;
+      for (rec in shapeTag.node.shapes.node.shapeRecords.nodes.item) {
+        switch (rec.att.type) {
+          case "StyleChangeRecord":
+            if (rec.has.stateNewStyles && rec.att.stateNewStyles == "true" && rec.hasNode.lineStyles) {
+              styles = parseLineStyles(rec.node.lineStyles);
+            }
+            if (rec.has.stateLineStyle && rec.att.stateLineStyle == "true") {
+              var idx = Std.parseInt(rec.att.lineStyle);
+              if (idx == null || idx <= 0 || idx > styles.length) {
+                gfx.lineStyle(0);
+              } else {
+                var st = styles[idx - 1];
+                gfx.lineStyle(st.width, st.color, st.alpha);
+              }
+            }
+            if (rec.has.stateMoveTo && rec.att.stateMoveTo == "true") {
+              cx = Std.parseFloat(rec.att.moveDeltaX) / 20.0;
+              cy = Std.parseFloat(rec.att.moveDeltaY) / 20.0;
+              gfx.moveTo(cx, cy);
+            }
+          case "StraightEdgeRecord":
+            cx += rec.has.deltaX ? Std.parseFloat(rec.att.deltaX) / 20.0 : 0.0;
+            cy += rec.has.deltaY ? Std.parseFloat(rec.att.deltaY) / 20.0 : 0.0;
+            gfx.lineTo(cx, cy);
+          case "CurvedEdgeRecord":
+            var ctrlX = cx + Std.parseFloat(rec.att.controlDeltaX) / 20.0;
+            var ctrlY = cy + Std.parseFloat(rec.att.controlDeltaY) / 20.0;
+            cx = ctrlX + Std.parseFloat(rec.att.anchorDeltaX) / 20.0;
+            cy = ctrlY + Std.parseFloat(rec.att.anchorDeltaY) / 20.0;
+            gfx.quadraticCurveTo(ctrlX, ctrlY, cx, cy);
+          default:
+        }
+      }
+      return cast gfx;
     }
 
     private function placeObject(tag: haxe.xml.Access, objects: IntHash<FrameSpriteEntry>, sprites: Hash<DisplayObject>) {
@@ -159,14 +289,17 @@ class MovieClipBuilder {
             if (prev == null)
               throw "Moving an object that is not present";
             var nextTransform = tag.hasNode.matrix ? getTransform(tag) : prev.transform;
-            var nextColor = parseColorState(tag, prev.alpha, prev.tint);
+            var nextColor = parseColorState(tag, prev.alpha, prev.tint, prev.colorFilter);
+            var nextClipDepth = (tag.has.placeFlagHasClipDepth && tag.att.placeFlagHasClipDepth == "true") ? Std.parseInt(tag.att.clipDepth) : prev.clipDepth;
             objects.set(depth, {
               name: prev.name,
               sprite: prev.sprite,
               transform: nextTransform,
               alpha: nextColor.alpha,
               tint: nextColor.tint,
-              isMask: prev.isMask
+              isMask: prev.isMask,
+              clipDepth: nextClipDepth,
+              colorFilter: nextColor.colorFilter
             });
             return;
           }
@@ -175,8 +308,12 @@ class MovieClipBuilder {
           var t = getTag(tag.att.characterId);
           var objectId = getObjectId(t);
           var name = if (tag.has.name) tag.att.name else getSpriteName(objectId) ?? objectId;
+          var clipDepth = (tag.has.clipDepth && tag.att.clipDepth != "0") ? Std.parseInt(tag.att.clipDepth) : 0;
+          var isMask = clipDepth != null && clipDepth > 0;
 
-          var sprite: DisplayObject = switch (t.att.type) {
+          var sprite: DisplayObject = if (isMask) {
+            buildMaskGraphics(t);
+          } else switch (t.att.type) {
             case "DefineSpriteTag":
               buildMovieClip(t.att.spriteId, name);
             case "DefineEditTextTag" | "DefineTextTag":
@@ -195,24 +332,27 @@ class MovieClipBuilder {
               };
               text;
             case "DefineShapeTag" | "DefineShape2Tag" | "DefineShape3Tag" | "DefineShape4Tag":
-              var baseTexture = textureCache.getTexture(this.assetRoot + 'shapes_svg/${t.att.shapeId}.svg');
-              var bounds = getBounds(t.node.shapeBounds);
-              var rw = Math.floor(Math.min(Math.ceil(bounds.width), Math.floor(baseTexture.width)));
-              var rh = Math.floor(Math.min(Math.ceil(bounds.height), Math.floor(baseTexture.height)));
-              if (rw < 1) rw = 1;
-              if (rh < 1) rh = 1;
-              var texture = new Texture(baseTexture.baseTexture, new Rectangle(0, 0, rw, rh));
-              var sprite = new Sprite(texture);
-              sprite.pivot.set(-bounds.x, -bounds.y);
-              sprite;
+              if (t.att.shapeId == "281" || t.att.shapeId == "307") {
+                buildHairlineGraphics(t);
+              } else {
+                var baseTexture = textureCache.getTexture(this.assetRoot + 'shapes_svg/${t.att.shapeId}.svg');
+                var bounds = getBounds(t.node.shapeBounds);
+                var rw = Math.floor(Math.min(Math.ceil(bounds.width), Math.floor(baseTexture.width)));
+                var rh = Math.floor(Math.min(Math.ceil(bounds.height), Math.floor(baseTexture.height)));
+                if (rw < 1) rw = 1;
+                if (rh < 1) rh = 1;
+                var texture = new Texture(baseTexture.baseTexture, new Rectangle(0, 0, rw, rh));
+                var sprite = new Sprite(texture);
+                sprite.pivot.set(-bounds.x, -bounds.y);
+                sprite;
+              }
             case other:
               throw "Unsupported tag definition: " + other;
           }
 
-          var isMask = tag.has.clipDepth && tag.att.clipDepth != "0";
-          var colorState = parseColorState(tag, 1.0, null);
+          var colorState = parseColorState(tag, 1.0, null, null);
           if (isMask) {
-            sprite.visible = false;
+            untyped sprite.renderable = false;
           } else {
             if (colorState.alpha != null) sprite.alpha = colorState.alpha;
             if (colorState.tint != null) {
@@ -223,7 +363,7 @@ class MovieClipBuilder {
               }
             }
           }
-          applyFilters(tag, sprite);
+          applyFilters(tag, sprite, colorState.colorFilter, tag.att.characterId);
           if (!sprites.exists(name)) {
             sprites.set(name, sprite);
           }
@@ -233,7 +373,9 @@ class MovieClipBuilder {
             transform: transform,
             alpha: colorState.alpha,
             tint: colorState.tint,
-            isMask: isMask
+            isMask: isMask,
+            clipDepth: clipDepth,
+            colorFilter: colorState.colorFilter
           });
     }
 
@@ -273,13 +415,21 @@ class MovieClipBuilder {
       }
     }
 
-    private function applyFilters(tag: haxe.xml.Access, sprite: DisplayObject) {
-      if (!tag.hasNode.surfaceFilterList) return;
-      
-      var filters = new Array();
-      for (item in tag.node.surfaceFilterList.nodes.item)
-        filters = filters.concat(buildFilter(item));
-      sprite.filters = filters;
+    private function applyFilters(tag: haxe.xml.Access, sprite: DisplayObject, ?colorFilter: Null<Filter>, ?characterId: Null<String>) {
+      var filters = new Array<Filter>();
+      if (colorFilter != null) {
+        filters.push(colorFilter);
+      }
+      if (characterId == "308" || characterId == "282") {
+        filters = filters.concat(GlowFilter.create(0xa5f231, 0.85, 8, 8, 2.2));
+      }
+      if (tag.hasNode.surfaceFilterList) {
+        for (item in tag.node.surfaceFilterList.nodes.item)
+          filters = filters.concat(buildFilter(item));
+      }
+      if (filters.length > 0) {
+        sprite.filters = filters;
+      }
     }
 
     private function rgbToHex(r:Int, g:Int, b:Int):String
