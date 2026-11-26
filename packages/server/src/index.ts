@@ -32,7 +32,12 @@ const publicUrl =
   process.env.PUBLIC_URL ?? (isProduction ? `http://localhost:${port}` : 'http://localhost:5173');
 const sourceRepoUrl =
   process.env.SOURCE_REPO_URL ?? 'https://github.com/eternaltwin/intrusion';
-const dbPath = process.env.DB_PATH ?? path.join(repoRoot, 'data', 'intrusion.sqlite');
+const rawDbPath = process.env.DB_PATH?.trim();
+const dbPath = rawDbPath
+  ? rawDbPath === ':memory:'
+    ? ':memory:'
+    : path.resolve(repoRoot, rawDbPath)
+  : path.join(repoRoot, 'data', 'intrusion.sqlite');
 const assetsDir = path.join(repoRoot, 'assets');
 const clientDistDir = path.join(repoRoot, 'packages', 'client', 'dist');
 

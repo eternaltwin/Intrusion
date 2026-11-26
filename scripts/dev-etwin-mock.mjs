@@ -14,8 +14,7 @@ const authCodes = new Map();
 const accessTokens = new Map();
 
 function userIdFromName(name) {
-  const hex = createHash('sha256').update(name.toLowerCase(), 'utf8').digest('hex');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+  return `dev:${name.trim().toLowerCase()}`;
 }
 
 function escapeHtml(str) {
