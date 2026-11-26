@@ -5,6 +5,7 @@ dist/
 *.sqlite-shm
 *.sqlite-wal
 .env
+etwin.toml
 legacy/www/client.js
 legacy/website-bin/website.js
 legacy/website-bin/node_modules/

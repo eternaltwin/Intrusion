@@ -39,6 +39,37 @@ export function ModalDialog({
       onClose();
     };
     dialog.addEventListener('close', handleClose);
+
+    // Fallback for browsers without declarative <dialog closedby="any"> support (e.g. Safari)
+    if (!('closedBy' in HTMLDialogElement.prototype)) {
+      const isOutside = (e: PointerEvent) => {
+        const r = dialog.getBoundingClientRect();
+        return (
+          e.clientX < r.left ||
+          e.clientX > r.right ||
+          e.clientY < r.top ||
+          e.clientY > r.bottom
+        );
+      };
+      let pressedOutside = false;
+      const onPointerDown = (e: PointerEvent) => {
+        pressedOutside = dialog.open && e.target === dialog && isOutside(e);
+      };
+      const onPointerUp = (e: PointerEvent) => {
+        if (dialog.open && pressedOutside && e.target === dialog && isOutside(e)) {
+          dialog.close();
+        }
+        pressedOutside = false;
+      };
+      dialog.addEventListener('pointerdown', onPointerDown);
+      dialog.addEventListener('pointerup', onPointerUp);
+      return () => {
+        dialog.removeEventListener('close', handleClose);
+        dialog.removeEventListener('pointerdown', onPointerDown);
+        dialog.removeEventListener('pointerup', onPointerUp);
+      };
+    }
+
     return () => dialog.removeEventListener('close', handleClose);
   }, [onClose]);
 
@@ -52,13 +83,15 @@ export function ModalDialog({
       >
         <div className="window classicPopupWindow">
           <div className="wtitle">
-            <img
+            <button
+              type="button"
               className="wbutton"
-              src="/img/design/pixel.gif"
-              alt="Fermer"
+              aria-label="Fermer"
               onClick={() => dialogRef.current?.close()}
             />
-            <span id={titleId}>{title}</span>
+            <h1 id={titleId} className="classicPopupHeading">
+              {title}
+            </h1>
           </div>
           <div className="container">{children}</div>
         </div>

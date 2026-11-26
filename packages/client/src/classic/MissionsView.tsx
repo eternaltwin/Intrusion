@@ -379,6 +379,7 @@ export function MissionsView({
           <div className="classicPopupActions">
             <button
               type="button"
+              autoFocus
               disabled={refreshing}
               onClick={() => setConfirmRefreshOpen(false)}
               className="classicPopupBtn secondary"

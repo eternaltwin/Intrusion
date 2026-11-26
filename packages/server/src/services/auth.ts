@@ -71,16 +71,37 @@ export function buildEtwinAuthorizationUrl(config: EtwinOauthConfig, state: stri
   return authUrl.toString();
 }
 
+const ALLOWED_ETWIN_AUTH_CONTEXT_TYPES = new Set([
+  'user',
+  'accesstoken',
+  'access_token',
+  'oauthaccesstoken',
+  'oauth_access_token',
+]);
+
 export function parseEtwinSelfIdentity(payload: unknown): EtwinIdentity {
   if (!payload || typeof payload !== 'object') {
     throw new Error('Profil Eternaltwin invalide.');
   }
   const root = payload as Record<string, any>;
-  if (typeof root.type === 'string' && root.type.toLowerCase() !== 'user') {
+  if (
+    typeof root.type === 'string' &&
+    !ALLOWED_ETWIN_AUTH_CONTEXT_TYPES.has(root.type.trim().toLowerCase())
+  ) {
     throw new Error('Contexte Eternaltwin non-utilisateur refusé.');
   }
-  const userObj: Record<string, any> =
-    root.user && typeof root.user === 'object' ? root.user : root;
+  const hasNestedUser = Boolean(root.user && typeof root.user === 'object');
+  if (
+    typeof root.type === 'string' &&
+    root.type.trim().toLowerCase() !== 'user' &&
+    !hasNestedUser
+  ) {
+    throw new Error('Contexte Eternaltwin non-utilisateur refusé.');
+  }
+  const userObj: Record<string, any> = hasNestedUser ? root.user : root;
+  if (typeof userObj.type === 'string' && userObj.type.trim().toLowerCase() !== 'user') {
+    throw new Error('Contexte Eternaltwin non-utilisateur refusé.');
+  }
 
   const rawId = typeof userObj.id === 'string' ? userObj.id.trim() : '';
   if (!rawId || rawId.length > 128) {
@@ -93,6 +114,12 @@ export function parseEtwinSelfIdentity(payload: unknown): EtwinIdentity {
       : undefined) ??
     (typeof userObj.displayName?.current?.value === 'string'
       ? userObj.displayName.current.value
+      : undefined) ??
+    (typeof userObj.profile?.display_name === 'string'
+      ? userObj.profile.display_name
+      : undefined) ??
+    (typeof userObj.profile?.displayName === 'string'
+      ? userObj.profile.displayName
       : undefined) ??
     (typeof userObj.display_name === 'string' ? userObj.display_name : undefined) ??
     (typeof userObj.displayName === 'string' ? userObj.displayName : undefined) ??

@@ -8,12 +8,25 @@ import type { EtwinOauthConfig } from './services/auth.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../..');
 
-const envFilePath = path.join(repoRoot, '.env');
-if (fs.existsSync(envFilePath) && typeof process.loadEnvFile === 'function') {
-  process.loadEnvFile(envFilePath);
+const envCandidates = [
+  process.env.ENV_FILE,
+  path.resolve(process.cwd(), '.env'),
+  path.join(repoRoot, '.env'),
+].filter((p): p is string => Boolean(p));
+
+if (typeof process.loadEnvFile === 'function') {
+  const seen = new Set<string>();
+  for (const candidate of envCandidates) {
+    const resolved = path.resolve(candidate);
+    if (!seen.has(resolved) && fs.existsSync(resolved)) {
+      seen.add(resolved);
+      process.loadEnvFile(resolved);
+    }
+  }
 }
 
 const isProduction = process.env.NODE_ENV === 'production';
+const host = process.env.HOST?.trim() || undefined;
 const port = parseInt(process.env.PORT ?? '8001', 10);
 const publicUrl =
   process.env.PUBLIC_URL ?? (isProduction ? `http://localhost:${port}` : 'http://localhost:5173');
@@ -23,12 +36,27 @@ const dbPath = process.env.DB_PATH ?? path.join(repoRoot, 'data', 'intrusion.sql
 const assetsDir = path.join(repoRoot, 'assets');
 const clientDistDir = path.join(repoRoot, 'packages', 'client', 'dist');
 
+function cleanEnvSecret(raw: string | undefined): string {
+  const val = (raw ?? '').trim();
+  if (!val || (val.startsWith('<') && val.endsWith('>'))) return '';
+  return val;
+}
+
 const etwinUrl = process.env.ETWIN_URL ?? 'https://eternaltwin.org';
 const etwinExternalUrl = process.env.ETWIN_EXTERNAL_URL ?? etwinUrl;
-const etwinClientId = (process.env.ETWIN_CLIENT_ID ?? '').trim();
-const etwinClientSecret = (process.env.ETWIN_CLIENT_SECRET ?? '').trim();
+const etwinClientId = cleanEnvSecret(process.env.ETWIN_CLIENT_ID);
+const etwinClientSecret = cleanEnvSecret(process.env.ETWIN_CLIENT_SECRET);
 const etwinCallbackUrl =
   process.env.ETWIN_CALLBACK_URL ?? `${publicUrl.replace(/\/+$/, '')}/api/auth/etwin/callback`;
+
+if (
+  (process.env.ETWIN_CLIENT_ID?.includes('<') || process.env.ETWIN_CLIENT_SECRET?.includes('<')) &&
+  (!etwinClientId || !etwinClientSecret)
+) {
+  console.warn(
+    '[Intrusion Server] ETWIN_CLIENT_ID / ETWIN_CLIENT_SECRET contiennent encore des placeholders (<...>) dans .env : OAuth Eternaltwin ignoré jusqu’à configuration réelle.'
+  );
+}
 
 const etwinOauth: EtwinOauthConfig | undefined =
   etwinClientId && etwinClientSecret
@@ -62,7 +90,7 @@ const { app } = createApp({
   allowDevAuth,
 });
 
-serve({ fetch: app.fetch, port }, (info) => {
+serve({ fetch: app.fetch, port, ...(host ? { hostname: host } : {}) }, (info) => {
   console.log(
     `[Intrusion Server] Listening on http://localhost:${info.port} (mode=${isProduction ? 'production' : 'development'}, etwinOauth=${Boolean(etwinOauth)}, devAuth=${allowDevAuth})`
   );

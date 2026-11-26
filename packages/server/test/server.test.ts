@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from '../src/app.js';
+import { parseEtwinSelfIdentity } from '../src/services/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const assetsDir = path.resolve(__dirname, '../../../assets');
@@ -917,8 +918,14 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
         expect(authHeader).toBe(`Bearer ${secretOauthAccessToken}`);
         return new Response(
           JSON.stringify({
-            type: 'User',
+            type: 'AccessToken',
             scope: 'Default',
+            client: {
+              type: 'OauthClient',
+              id: '00000000-0000-0000-0000-000000000001',
+              key: 'intrusion@clients',
+              display_name: 'Intrusion',
+            },
             user: {
               type: 'User',
               id: '9f310484-663b-44c3-aa64-7c0d2362a684',
@@ -1075,5 +1082,22 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     ).json();
     expect(meRenamed.player.id).toBe(meJson.player.id);
     expect(meRenamed.player.username).toBe('DorianRenamed');
+
+    // 10. Verify parseEtwinSelfIdentity accepts both User & AccessToken contexts and rejects Guest/OauthClient
+    expect(
+      parseEtwinSelfIdentity({
+        type: 'User',
+        scope: 'Default',
+        user: { type: 'User', id: 'u-1', display_name: { current: { value: 'CookieUser' } } },
+      })
+    ).toEqual({ etwinUserId: 'u-1', displayName: 'CookieUser' });
+    expect(() => parseEtwinSelfIdentity({ type: 'Guest', scope: 'Default' })).toThrow();
+    expect(() =>
+      parseEtwinSelfIdentity({
+        type: 'OauthClient',
+        scope: 'Default',
+        client: { type: 'OauthClient', id: 'c-1', display_name: 'Intrusion' },
+      })
+    ).toThrow();
   });
 });

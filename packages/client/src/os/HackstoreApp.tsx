@@ -3,6 +3,7 @@ import { Check, Lock, ShoppingCart, Zap } from 'lucide-react';
 import { formatVirusDesc, type PlayerDto } from '@intrusion/shared';
 import { api, type CatalogResponse } from '../api/client';
 import { SafeHtml } from '../components/SafeHtml';
+import { ModalDialog } from '../components/ModalDialog';
 
 interface HackstoreAppProps {
   player: PlayerDto;
@@ -10,23 +11,41 @@ interface HackstoreAppProps {
   onPlayerUpdate: (p: PlayerDto) => void;
 }
 
+type PendingOsPurchase = {
+  key: string;
+  label: string;
+  price: number;
+  payload: { kind: 'virus'; id: string } | { kind: 'chipset'; id: string } | { kind: 'bios' };
+};
+
 export function HackstoreApp({ player, catalog, onPlayerUpdate }: HackstoreAppProps) {
   const [tab, setTab] = useState<'damage' | 'debuff' | 'combo' | 'utils' | 'chipsets' | 'bios'>('damage');
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingOsPurchase | null>(null);
 
-  async function buy(
+  function requestBuy(
     key: string,
+    label: string,
+    price: number,
     payload: { kind: 'virus'; id: string } | { kind: 'chipset'; id: string } | { kind: 'bios' }
   ) {
     setError(null);
-    setBusyId(key);
+    setPending({ key, label, price, payload });
+  }
+
+  async function confirmBuy() {
+    if (!pending) return;
+    setError(null);
+    setBusyId(pending.key);
     try {
-      const res = await api.buyItem(payload);
+      const res = await api.buyItem(pending.payload);
       onPlayerUpdate(res.player);
+      setPending(null);
     } catch (e: any) {
       setError(e.message);
+      setPending(null);
     } finally {
       setBusyId(null);
     }
@@ -143,7 +162,7 @@ export function HackstoreApp({ player, catalog, onPlayerUpdate }: HackstoreAppPr
                         <button
                           type="button"
                           disabled={busyId === 'bios' || player.money < cost}
-                          onClick={() => buy('bios', { kind: 'bios' })}
+                          onClick={() => requestBuy('bios', `BIOS v${lvl}.0`, cost, { kind: 'bios' })}
                           className="cyber-btn-amber rounded px-3 py-1.5 cursor-pointer disabled:opacity-40"
                         >
                           Flasher ({cost.toLocaleString()} CR)
@@ -178,7 +197,7 @@ export function HackstoreApp({ player, catalog, onPlayerUpdate }: HackstoreAppPr
                           </span>
                         )}
                       </div>
-                      <span className="font-mono text-xs text-[#94a271]">Niv.{c.level}</span>
+                      <span className="font-mono text-xs text-[#94a271]">Niv.{Math.max(1, c.level)}</span>
                     </div>
                     <SafeHtml html={c.desc} className="mt-2 text-xs leading-relaxed text-[#cfd8b3]" />
                   </div>
@@ -197,7 +216,7 @@ export function HackstoreApp({ player, catalog, onPlayerUpdate }: HackstoreAppPr
                       <button
                         type="button"
                         disabled={busyId === c.id || player.money < c.price}
-                        onClick={() => buy(c.id, { kind: 'chipset', id: c.id })}
+                        onClick={() => requestBuy(c.id, `Chipset ${c.name}`, c.price, { kind: 'chipset', id: c.id })}
                         className="cyber-btn-amber flex items-center gap-1.5 rounded px-3 py-1.5 cursor-pointer disabled:opacity-40"
                       >
                         <ShoppingCart className="h-3.5 w-3.5" />
@@ -267,7 +286,7 @@ export function HackstoreApp({ player, catalog, onPlayerUpdate }: HackstoreAppPr
                       <button
                         type="button"
                         disabled={busyId === v.id || player.money < v.price}
-                        onClick={() => buy(v.id, { kind: 'virus', id: v.id })}
+                        onClick={() => requestBuy(v.id, v.name, v.price, { kind: 'virus', id: v.id })}
                         className="cyber-btn-amber flex items-center gap-1 rounded px-3 py-1 cursor-pointer disabled:opacity-40"
                       >
                         <ShoppingCart className="h-3.5 w-3.5" />
@@ -281,6 +300,43 @@ export function HackstoreApp({ player, catalog, onPlayerUpdate }: HackstoreAppPr
           </div>
         )}
       </div>
+
+      <ModalDialog
+        open={pending !== null}
+        title="Confirmer l'achat"
+        maxWidthClass="max-w-md"
+        onClose={() => {
+          if (!busyId) setPending(null);
+        }}
+      >
+        {pending && (
+          <div className="space-y-4 font-mono text-xs">
+            <p className="text-[#e8efd0]">
+              Confirmer l&apos;achat de <strong className="text-[#fed82a]">{pending.label}</strong> pour{' '}
+              <strong className="text-[#fed82a]">{pending.price.toLocaleString()} CR</strong> ?
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                autoFocus
+                disabled={busyId !== null}
+                onClick={() => setPending(null)}
+                className="cyber-btn rounded px-3 py-1.5 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={busyId !== null || player.money < pending.price}
+                onClick={confirmBuy}
+                className="cyber-btn-amber rounded px-3 py-1.5 cursor-pointer disabled:opacity-40"
+              >
+                {busyId !== null ? 'Transaction...' : `Acheter (${pending.price.toLocaleString()} CR)`}
+              </button>
+            </div>
+          </div>
+        )}
+      </ModalDialog>
     </div>
   );
 }

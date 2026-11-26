@@ -263,7 +263,18 @@ ul.tabs li a,
 }
 
 /* Classic site-matched popup dialog (.window / .sitePopup aesthetic) */
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
 dialog.classicPopupDialog {
+  margin: auto;
+  width: min(92vw, 440px);
   border: none;
   background: transparent;
   padding: 0;
@@ -277,6 +288,39 @@ dialog.classicPopupDialog::backdrop {
   background: rgba(16, 18, 10, 0.72);
 }
 
+.window button.wbutton {
+  float: right;
+  position: relative;
+  width: 18px;
+  height: 13px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background-color: transparent;
+  background-image: url('/img/design/window_close.png');
+  cursor: pointer;
+}
+
+.window button.wbutton:hover {
+  background-image: url('/img/design/window_close_over.png');
+}
+
+.window button.wbutton:focus-visible {
+  outline: 1px solid #292b1c;
+}
+
+.window .wtitle h1.classicPopupHeading {
+  display: inline;
+  margin: 0;
+  padding: 0 5px;
+  font-size: 8pt;
+  font-weight: normal;
+  letter-spacing: inherit;
+  text-transform: uppercase;
+  color: #71754c;
+  background-color: #d0d194;
+}
+
 .classicPopupWindow {
   margin-bottom: 0;
   border: 1px solid #d0d194;
@@ -287,6 +331,60 @@ dialog.classicPopupDialog::backdrop {
 .classicPopupWindow .container {
   color: #e9eec6;
   line-height: 1.45;
+}
+
+.classicPopupWindow .classicPopupItemRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  background-color: #3b3d28;
+  border: 1px solid #71754c;
+  outline: 1px solid #292b1c;
+}
+
+.classicPopupWindow .classicPopupItemRow img.itemIcon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  object-fit: contain;
+  border: 1px solid #292b1c;
+  outline: 1px solid #71754c;
+  background-color: #292b1c;
+}
+
+.classicPopupWindow .classicPopupItemRow .itemIconSmall {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 1px solid #292b1c;
+  outline: 1px solid #71754c;
+  background-color: #292b1c;
+}
+
+.classicPopupWindow .classicPopupItemRow .itemIconSmall img {
+  width: 16px;
+  height: 16px;
+}
+
+.classicPopupWindow .classicPopupItemMeta {
+  min-width: 0;
+  flex: 1;
+}
+
+.classicPopupWindow .classicPopupItemMeta .itemTitle {
+  font-size: 9.5pt;
+  font-weight: bold;
+  color: #fed82a;
+}
+
+.classicPopupWindow .classicPopupItemMeta .itemSub {
+  font-size: 8pt;
+  color: #d0d194;
 }
 
 .classicPopupWindow .classicPopupLead {
