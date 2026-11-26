@@ -131,7 +131,8 @@ export function HackstoreApp({ player, catalog, onPlayerUpdate }: HackstoreAppPr
                     >
                       <div>
                         <div className="font-bold">
-                          BIOS v{lvl}.0 — Multiplicateur CPU +{lvl === 4 ? '3.5' : lvl}.0x
+                          BIOS v{lvl}.0 — Cadence d&apos;exécution{' '}
+                          {lvl === 1 ? '1.00x (standard)' : lvl === 2 ? '1.32x (+32%)' : lvl === 3 ? '1.69x (+69%)' : '2.25x (+125%)'}
                         </div>
                       </div>
                       {owned ? (

@@ -1850,7 +1850,7 @@ class GNetwork {
 
 
 		// random fx
-		if ( !term.fl_lowq && term.countFx()<=10 && Std.random(100)<15 ) {
+		if ( !term.fl_lowq && term.countFx()<=10 && Math.random()<0.15*mt.Timer.tmod ) {
 //			if ( Std.random(100)<50 )
 				// electric
 				term.addFx(sdm, Data.DP_BG, AFX_PlayFrames, "fx_glight", Std.random(1000), Std.random(1000)).mc._alpha = Std.random(30)+10;
@@ -1874,12 +1874,12 @@ class GNetwork {
 						spamCpt = Std.random(Std.int(Data.SECONDS(5))) + Data.SECONDS(5);
 						term.startAnim(A_EraseText, groundField).spd*=1.5;
 					}
-				spamCpt-=mt.Timer.tmod*mt.Timer.tmod;
+				spamCpt-=mt.Timer.tmod;
 			}
 
 			// scrolling spam (creation)
 			var max = if(term.fl_lowq) 1 else MAX_SCROLLING_SPAMS;
-			if ( gspamList.length<max && Std.random(100)<3 ) {
+			if ( gspamList.length<max && Math.random()<0.03*mt.Timer.tmod ) {
 				var cont = sdm.empty(Data.DP_BG);
 				cont._alpha = 25;
 				cont._x = 850;

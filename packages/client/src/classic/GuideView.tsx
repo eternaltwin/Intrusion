@@ -54,7 +54,8 @@ export function GuideView() {
                   </li>
                   <li>
                     <strong>Chronomètre :</strong> chaque réseau dispose d&apos;un temps limité avant
-                    traçage complet de votre connexion (suspendu pendant le chargement d&apos;un virus).
+                    traçage complet de votre connexion (le temps continue de s&apos;écouler pendant
+                    le chargement de vos virus et dossiers).
                   </li>
                   <li>
                     <strong>Navigation fluide :</strong> cliquez sur un dossier pour l&apos;ouvrir,{' '}
@@ -166,7 +167,7 @@ export function GuideView() {
                   </li>
                   <li>
                     <code>code_virus nom_fichier</code> (ex : <code>dmgm noyau.core</code>) : lancer
-                    un virus directement par son identifiant avec auto-complétion <strong>Tab</strong>.
+                    un virus instantanément par son identifiant avec auto-complétion <strong>Tab</strong>.
                   </li>
                   <li>
                     <code>alias d = dmgm</code> dans votre fichier <strong>.hackrc</strong> : créer

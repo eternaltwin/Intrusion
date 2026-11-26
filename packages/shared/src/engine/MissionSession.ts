@@ -392,9 +392,10 @@ export class MissionSession {
 
   public getSpeed(): number {
     let base = this.hasChipset('turbo') ? 1.5 : 1.0;
-    const bios = Math.min(4, Math.max(1, this.init.biosLevel));
-    if (bios < 4) base += bios;
-    else base += 3.5;
+    const bios = Math.min(4, Math.max(1, Math.trunc(this.init.biosLevel)));
+    if (bios === 2) base += 0.15;
+    else if (bios === 3) base += 0.3;
+    else if (bios >= 4) base += 0.5;
     const sysSpeed = this.currentSystem ? this.currentSystem.speed : 1.0;
     return base * sysSpeed;
   }
@@ -1286,13 +1287,15 @@ export class MissionSession {
     const speed = this.getSpeed();
     const fileSize = f && !['cd', 'exit', 'target'].includes(virusId) ? f.size : 1;
 
-    // Exact duration math from VirusMan.getCT + Progress.start
-    const dSec =
-      virusId === 'exit' || virusId === 'target' || (this.isLeetMode && virusId !== 'connec')
-        ? 0.1 / speed
-        : ((1.0 / speed) * fileSize * multiplier) / speed;
+    // Exact duration math from VirusMan.getCT + Progress.start:
+    // Instant skip (<= 0.1s) is strictly reserved for Uber-Eleet CLI casts (excluding connec) + target/exit UI actions.
+    const isInstantEligible =
+      virusId === 'exit' || virusId === 'target' || (this.isLeetMode && virusId !== 'connec');
+    const rawSec = isInstantEligible
+      ? 0.1 / speed
+      : ((1.0 / speed) * fileSize * multiplier) / speed;
 
-    if (dSec < 0.1) {
+    if (isInstantEligible && rawSec <= 0.1001) {
       this.completeCast({
         virusId,
         targetNodeId,
@@ -1307,6 +1310,7 @@ export class MissionSession {
       return { ok: true };
     }
 
+    const dSec = isInstantEligible ? rawSec : Math.max(0.15, rawSec);
     const durationMs = Math.round(dSec * 1000);
     this.activeCast = {
       virusId,

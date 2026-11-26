@@ -6843,7 +6843,7 @@ GNetwork.prototype = {
 		} else {
 			tmp = false;
 		}
-		if(tmp && Std.random(100) < 15) {
+		if(tmp && Math.random() < 0.15 * mt_Timer.tmod) {
 			this.term.addFx(this.sdm,Data.DP_BG,AnimFxType.AFX_PlayFrames,"fx_glight",Std.random(1000),Std.random(1000)).mc.set__alpha(Std.random(30) + 10);
 		}
 		if(!MissionGen.isTutorial(this.term.mdata)) {
@@ -6864,10 +6864,10 @@ GNetwork.prototype = {
 					this.spamCpt = tmp + n * 32;
 					this.term.startAnim(AnimType.A_EraseText,this.groundField).spd *= 1.5;
 				}
-				this.spamCpt -= mt_Timer.tmod * mt_Timer.tmod;
+				this.spamCpt -= mt_Timer.tmod;
 			}
 			var max = this.term.fl_lowq ? 1 : GNetwork.MAX_SCROLLING_SPAMS;
-			if(this.gspamList.length < max && Std.random(100) < 3) {
+			if(this.gspamList.length < max && Math.random() < 0.03 * mt_Timer.tmod) {
 				var cont = this.sdm.empty(Data.DP_BG);
 				cont.set__alpha(25);
 				var _this = cont;
@@ -9519,17 +9519,23 @@ MissionGen.prototype = {
 var Progress = function() { };
 $hxClasses["Progress"] = Progress;
 Progress.__name__ = "Progress";
-Progress.start = function(d,cb,label,anim) {
+Progress.start = function(d,cb,label,anim,fl_allowInstant) {
 	if(label == null) {
 		label = "Chargement...";
 	}
 	if(anim == null) {
 		anim = BarAnim.BA_Normal;
 	}
+	if(fl_allowInstant == null) {
+		fl_allowInstant = false;
+	}
 	d /= Manager.ME.term.getSpeed();
-	if(d < 0.1) {
+	if(fl_allowInstant && d <= 0.1001) {
 		cb();
 		return;
+	}
+	if(!fl_allowInstant && d < 0.15) {
+		d = 0.15;
 	}
 	if(d >= 0.5) {
 		Manager.ME.term.startLoop("progress_01");
@@ -10702,15 +10708,23 @@ var UserTerminal = function() {
 	this.declareSfx("menu",2,30);
 	this.startSfxLoading();
 	this.soundContainer = Manager.DM.empty(Data.DP_BG);
-	this.speed = this.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"turbo")) ? 1.5 : 1;
-	this.dspeed = this.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"turbo")) ? 1.5 : 1;
-	var bios = Math.min(4,Math.max(0,Manager.PARAMS._bios)) | 0;
-	if(bios < 4) {
-		this.speed += bios;
-		this.dspeed += bios * 0.6;
-	} else {
-		this.speed += 3.5;
-		this.dspeed += 4 * 0.6;
+	this.speed = this.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"turbo")) ? 1.5 : 1.0;
+	this.dspeed = this.hasChipset(data__$ChipsetsXml_AllData.getChipsetData(data_ChipsetsXml.get,"turbo")) ? 1.5 : 1.0;
+	var bios = Math.min(4,Math.max(1,Manager.PARAMS._bios)) | 0;
+	switch(bios) {
+	case 2:
+		this.speed += 0.15;
+		this.dspeed += 0.12;
+		break;
+	case 3:
+		this.speed += 0.30;
+		this.dspeed += 0.25;
+		break;
+	case 4:
+		this.speed += 0.50;
+		this.dspeed += 0.40;
+		break;
+	default:
 	}
 	var tmp;
 	switch(this.gameLevel) {
@@ -14164,6 +14178,18 @@ UserTerminal.prototype = {
 		}
 	}
 	,updateCinematics: function() {
+		if(this.cineList.isEmpty()) {
+			return;
+		}
+		var advance = false;
+		if(this.cptCin == null || isNaN(this.cptCin)) {
+			this.cptCin = 0.0;
+		}
+		this.cptCin += mt_Timer.tmod;
+		if(this.cptCin >= 1.0) {
+			this.cptCin -= 1.0;
+			advance = true;
+		}
 		var _g_head = this.cineList.h;
 		while(_g_head != null) {
 			var val = _g_head.item;
@@ -14176,7 +14202,9 @@ UserTerminal.prototype = {
 				}
 				continue;
 			}
-			mc.nextFrame();
+			if(advance && mc._currentframe < mc._totalframes) {
+				mc.nextFrame();
+			}
 			if(mc._currentframe == mc._totalframes) {
 				mc.set__alpha(mc.get__alpha() - mt_Timer.tmod * 3);
 				if(mc.get__alpha() <= 0) {
@@ -14187,10 +14215,12 @@ UserTerminal.prototype = {
 		}
 	}
 	,updateLog: function() {
-		var _this = this.logMC;
-		_this.x = Std.random(20);
+		if(Math.random() < mt_Timer.tmod) {
+			var _this = this.logMC;
+			_this.x = Std.random(20);
+		}
 		if(this.logMC.y > 0) {
-			this.logMC.y -= 1;
+			this.logMC.y = Math.max(0,this.logMC.y - mt_Timer.tmod);
 		}
 		var now = new Date().getTime();
 		var n = 0;
@@ -14325,7 +14355,7 @@ UserTerminal.prototype = {
 			_g_head = _g_head.next;
 			var sa = val;
 			var sound = sa.s.data;
-			var v = sa.current + sa.dir;
+			var v = sa.current + sa.dir * mt_Timer.tmod;
 			var fl_done = false;
 			if(sa.dir < 0 && v <= sa.target) {
 				fl_done = true;
@@ -14381,7 +14411,7 @@ UserTerminal.prototype = {
 			a.update();
 		}
 		if(this.bootCooldown > 0) {
-			this.bootCooldown--;
+			this.bootCooldown -= mt_Timer.tmod;
 		}
 		if(this.loadingSteps <= 0 && this.boot._name != null && !this.hasAnim(this.boot) && Std.random(100) < 80 && this.bootCooldown <= 0) {
 			var str = MCField2.get_field2(this.boot).text;
@@ -14687,8 +14717,10 @@ VirusMan.prototype = {
 		if(ct == null) {
 			ct = this.getCT();
 		}
+		var fl_instant = this.virus == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"exit") || this.virus == data__$VirusXml_AllData.getVirus(data_VirusXml.get,"target");
 		if(this.term.fl_leet && this.virus.target != "_net") {
 			ct = 0.1;
+			fl_instant = true;
 		}
 		switch(this.virus.target) {
 		case "_folder":
@@ -14726,7 +14758,7 @@ VirusMan.prototype = {
 				});
 			}
 			me.term.loseMana(me.getManaCost(me.virus));
-		},this.virus.name,ct >= 3 ? BarAnim.BA_Slow : BarAnim.BA_Normal);
+		},this.virus.name,ct >= 3 ? BarAnim.BA_Slow : BarAnim.BA_Normal,fl_instant);
 		this.term.detachBubble();
 	}
 	,canBeDamaged: function(f) {
@@ -16278,10 +16310,10 @@ WinApp.prototype = {
 		return mc;
 	}
 	,onScrollDown: function() {
-		this.scrollY = WinApp.SCROLL_SPEED * mt_Timer.tmod | 0;
+		this.scrollY = WinApp.SCROLL_SPEED;
 	}
 	,onScrollUp: function() {
-		this.scrollY = -WinApp.SCROLL_SPEED * mt_Timer.tmod | 0;
+		this.scrollY = -WinApp.SCROLL_SPEED;
 	}
 	,onStopScroll: function() {
 		this.scrollX = 0;
@@ -16296,7 +16328,7 @@ WinApp.prototype = {
 		}
 	}
 	,onMouseWheel: function(delta) {
-		this.scroll(0,-delta * WinApp.SCROLL_SPEED * mt_Timer.tmod | 0);
+		this.scroll(0,-delta * WinApp.SCROLL_SPEED);
 	}
 	,onOver: function(mc) {
 		mc.filters = common_GlowFilter.create(10875441,0.8,4,4);
@@ -16325,10 +16357,6 @@ WinApp.prototype = {
 			var _this = this.scroller;
 			_this.y = Math.max(-this.scroller.height + this.hei,this.scroller.y);
 		}
-		var _this = this.scroller;
-		_this.x = Math.round(this.scroller.x);
-		var _this = this.scroller;
-		_this.y = Math.round(this.scroller.y);
 	}
 	,onClose: function() {
 		this.term.detachBubble();
@@ -16337,7 +16365,7 @@ WinApp.prototype = {
 	}
 	,update: function() {
 		if(this.scrollX != 0 || this.scrollY != 0) {
-			this.scroll(this.scrollX,this.scrollY);
+			this.scroll(this.scrollX * mt_Timer.tmod,this.scrollY * mt_Timer.tmod);
 		}
 	}
 	,__class__: WinApp

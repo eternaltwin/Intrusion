@@ -41,8 +41,8 @@ class WinApp {
 
 	var wid			: Int;
 	var hei			: Int;
-	var scrollX		: Int;
-	var scrollY		: Int;
+	var scrollX		: Float;
+	var scrollY		: Float;
 
 	var ml			: Dynamic; // mouse listener
 	var kl			: Dynamic; // key listener
@@ -205,10 +205,10 @@ class WinApp {
 
 
 	function onScrollDown() {
-		scrollY = Std.int(SCROLL_SPEED * mt.Timer.tmod);
+		scrollY = SCROLL_SPEED;
 	}
 	function onScrollUp() {
-		scrollY = Std.int(-SCROLL_SPEED * mt.Timer.tmod);
+		scrollY = -SCROLL_SPEED;
 	}
 
 	function onStopScroll() {
@@ -228,7 +228,7 @@ class WinApp {
 	}
 
 	public function onMouseWheel(delta) {
-		scroll( 0, Std.int( -delta * SCROLL_SPEED * mt.Timer.tmod ) );
+		scroll( 0, -delta * SCROLL_SPEED );
 	}
 
 	function onOver(mc:MovieClip) {
@@ -239,7 +239,7 @@ class WinApp {
 		mc.filters = [];
 	}
 
-	function scroll(dx,dy) {
+	function scroll(dx:Float, dy:Float) {
 		if ( scroller.width < win.resolve("mask").width )
 			dx = 0;
 		if ( scroller.height < win.resolve("mask").height )
@@ -255,9 +255,6 @@ class WinApp {
 			scroller._y = Math.min( win.resolve("mask")._y, scroller._y );
 			scroller._y = Math.max( -scroller._height + hei, scroller._y );
 		}
-
-		scroller._x = Math.round(scroller._x);
-		scroller._y = Math.round(scroller._y);
 	}
 
 	function onClose() {
@@ -268,7 +265,7 @@ class WinApp {
 
 	public function update() {
 		if ( scrollX!=0 || scrollY!=0 )
-			scroll(scrollX, scrollY);
+			scroll(scrollX * mt.Timer.tmod, scrollY * mt.Timer.tmod);
 //		scrollUp._visible = inner._height>=hei;
 //		scrollDown._visible = inner._height>=hei;
 	}

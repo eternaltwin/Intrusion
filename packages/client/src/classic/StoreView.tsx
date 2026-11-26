@@ -13,9 +13,9 @@ const TARGET_LABELS: Record<VirusTarget, string> = {
 };
 
 const BIOS_DESCRIPTIONS: Record<number, string> = {
-  2: 'Overclocking BUS v2.0 : accélère sensiblement la vitesse d’exécution de tous vos virus et des animations terminal.',
-  3: 'Noyau Temps-Réel v3.0 : vitesse de cast haute fréquence pour neutraliser les antivirus de niveau 6+ avant leur cycle.',
-  4: 'Hyperviseur Quantique v4.0 : réactivité maximale du terminal pour les réseaux haute sécurité.',
+  2: 'Overclocking BUS v2.0 (+32% vitesse d’exécution) : accélère le chargement des dossiers, virus et connexions réseau.',
+  3: 'Noyau Temps-Réel v3.0 (+69% vitesse d’exécution) : cadence accrue pour contrer les systèmes et antivirus avancés.',
+  4: 'Hyperviseur Quantique v4.0 (+125% vitesse d’exécution) : vitesse équivalente à un chipset Overclock intégré (cumulable).',
 };
 
 export function StoreView({

@@ -108,7 +108,7 @@ class UserTerminal {
 	var caretIdx		: Int;
 	var bmc				: BubbleMC;
 	var boot			: MCField2;
-	var bootCooldown	: Int;
+	var bootCooldown	: Float;
 	var gtimerMC		: MCField;
 	var lastTimer		: Time;
 	var comboMc			: MovieClip;
@@ -328,19 +328,23 @@ class UserTerminal {
 		startSfxLoading();
 		soundContainer = Manager.DM.empty(Data.DP_BG);
 
-		speed = if(hasChipset(ChipsetsXml.get.turbo)) 1.5 else 1;
-		dspeed = if (hasChipset(ChipsetsXml.get.turbo)) 1.5 else 1;
+		speed = if(hasChipset(ChipsetsXml.get.turbo)) 1.5 else 1.0;
+		dspeed = if (hasChipset(ChipsetsXml.get.turbo)) 1.5 else 1.0;
 		//#if debug
 		//Manager.PARAMS._bios=3;
 		//#end
-		var bios = Std.int(Math.min(4, Math.max(0, Manager.PARAMS._bios)));
-		if (bios<4) {
-			speed+=bios;
-			dspeed+=bios*0.6;
-		}
-		else {
-			speed+=3.5;
-			dspeed+=4*0.6;
+		var bios = Std.int(Math.min(4, Math.max(1, Manager.PARAMS._bios)));
+		switch (bios) {
+			case 2:
+				speed += 0.15;
+				dspeed += 0.12;
+			case 3:
+				speed += 0.30;
+				dspeed += 0.25;
+			case 4:
+				speed += 0.50;
+				dspeed += 0.40;
+			default:
 		}
 
 		gameDiff = switch(gameLevel) {
@@ -3322,6 +3326,16 @@ class UserTerminal {
 
 
 	function updateCinematics() {
+		if (cineList.isEmpty())
+			return;
+		var advance = false;
+		if (cptCin == null || Math.isNaN(cptCin))
+			cptCin = 0.0;
+		cptCin += Timer.tmod;
+		if (cptCin >= 1.0) {
+			cptCin -= 1.0;
+			advance = true;
+		}
 		for (mc in cineList) {
 			if ( mc._currentframe==1 && mc._alpha<100 ) {
 				mc._alpha+=Timer.tmod*6;
@@ -3330,14 +3344,8 @@ class UserTerminal {
 				continue;
 			}
 
-//			cptCin+=Timer.tmod;
-//			if ( cptCin>=CIN_DELAYS[mc._currentframe-1] ) {
-//				if ( mc._currentframe<mc._totalframes )
-//					cptCin = 0;
+			if ( advance && mc._currentframe<mc._totalframes )
 				mc.nextFrame();
-//			}
-//			else
-//				continue;
 
 			if ( mc._currentframe==mc._totalframes ) {
 				mc._alpha-=Timer.tmod*3;
@@ -3351,9 +3359,10 @@ class UserTerminal {
 	}
 
 	function updateLog() {
-		logMC._x = Std.random(20);
+		if ( Math.random() < Timer.tmod )
+			logMC._x = Std.random(20);
 		if ( logMC._y>0 )
-			logMC._y--;
+			logMC._y = Math.max(0, logMC._y - Timer.tmod);
 		var now = Date.now().getTime();
 		var n = 0;
 		for (l in logLines) {
@@ -3481,7 +3490,7 @@ class UserTerminal {
 	function updateSoundAnims() {
 		for (sa in soundAnims) {
 			var sound = sa.s.data;
-			var v = sa.current + sa.dir;
+			var v = sa.current + sa.dir * Timer.tmod;
 			var fl_done = false;
 			if ( sa.dir<0 && v<=sa.target )
 				fl_done = true;
@@ -3539,7 +3548,7 @@ class UserTerminal {
 
 		// flood dans l'�cran de boot
 		if ( bootCooldown>0 )
-			bootCooldown--;
+			bootCooldown -= Timer.tmod;
 		if ( loadingSteps<=0 && boot._name!=null && !hasAnim(boot) && Std.random(100)<80 && bootCooldown<=0 ) {
 			var str = boot.field2.text;
 			str+=" "+TD.texts.get("bootResult")+"\n"+TD.texts.get("bootLine");
