@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
@@ -7,9 +8,15 @@ import type { EtwinOauthConfig } from './services/auth.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../..');
 
+const envFilePath = path.join(repoRoot, '.env');
+if (fs.existsSync(envFilePath) && typeof process.loadEnvFile === 'function') {
+  process.loadEnvFile(envFilePath);
+}
+
 const isProduction = process.env.NODE_ENV === 'production';
 const port = parseInt(process.env.PORT ?? '8001', 10);
-const publicUrl = process.env.PUBLIC_URL ?? `http://localhost:${port}`;
+const publicUrl =
+  process.env.PUBLIC_URL ?? (isProduction ? `http://localhost:${port}` : 'http://localhost:5173');
 const sourceRepoUrl =
   process.env.SOURCE_REPO_URL ?? 'https://github.com/eternaltwin/intrusion';
 const dbPath = process.env.DB_PATH ?? path.join(repoRoot, 'data', 'intrusion.sqlite');

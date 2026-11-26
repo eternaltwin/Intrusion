@@ -145,7 +145,16 @@ export async function exchangeEtwinCodeForIdentity(
   });
 
   if (!tokenRes.ok) {
-    throw new Error(`Échec de l'échange OAuth Eternaltwin (HTTP ${tokenRes.status}).`);
+    let oauthErrCode = '';
+    try {
+      const errBody = (await tokenRes.json()) as { error?: unknown };
+      if (typeof errBody?.error === 'string' && /^[a-z0-9_.-]{1,64}$/i.test(errBody.error)) {
+        oauthErrCode = ` [${errBody.error}]`;
+      }
+    } catch {
+      // Ignore non-JSON error body
+    }
+    throw new Error(`Échec de l'échange OAuth Eternaltwin (HTTP ${tokenRes.status}${oauthErrCode}).`);
   }
 
   const tokenJson = (await tokenRes.json()) as { access_token?: unknown };

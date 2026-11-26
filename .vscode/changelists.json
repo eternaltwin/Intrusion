@@ -3,7 +3,9 @@
     {
       "name": "Default",
       "files": [
-        ".gitignore",
+        ".env.example",
+        "packages/server/src/index.ts",
+        "packages/server/src/services/auth.ts",
         ".vscode/changelists.json"
       ]
     }
