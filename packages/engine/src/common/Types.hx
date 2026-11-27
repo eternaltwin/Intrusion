@@ -1,6 +1,7 @@
 package common;
 import pixi.core.display.DisplayObject;
 import pixi.core.display.Container;
+import pixi.core.renderers.webgl.filters.Filter;
 
 import mt.gx.HashEx;
 
@@ -23,7 +24,9 @@ typedef FrameSpriteEntry = {
     ?transform: Transform,
     ?alpha: Null<Float>,
     ?tint: Null<Int>,
-    ?isMask: Bool
+    ?isMask: Bool,
+    ?clipDepth: Null<Int>,
+    ?colorFilter: Null<Filter>
 }
 
 // Key is the depth

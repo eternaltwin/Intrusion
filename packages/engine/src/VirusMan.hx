@@ -235,8 +235,11 @@ class VirusMan {
 		var me = this;
 		if (ct==null)
 			ct = getCT();
-		if ( term.fl_leet && virus.target!="_net" )
+		var fl_instant = virus==VirusXml.get.exit || virus==VirusXml.get.target;
+		if ( term.fl_leet && virus.target!="_net" ) {
 			ct = 0.1;
+			fl_instant = true;
+		}
 
 		// son
 		switch(virus.target) {
@@ -277,7 +280,7 @@ class VirusMan {
 				});
 				
 			me.term.loseMana( me.getManaCost(me.virus) );
-		}, virus.name, if(ct>=3) BA_Slow else BA_Normal );
+		}, virus.name, if(ct>=3) BA_Slow else BA_Normal, fl_instant );
 		term.detachBubble();
 	}
 

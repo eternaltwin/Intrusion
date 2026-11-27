@@ -263,11 +263,28 @@ ul.tabs li a,
 }
 
 /* Classic site-matched popup dialog (.window / .sitePopup aesthetic) */
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
 dialog.classicPopupDialog {
+  box-sizing: border-box;
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  inline-size: min(92dvw, 440px);
+  max-inline-size: calc(100dvw - 24px);
+  max-block-size: calc(100dvh - 24px);
   border: none;
   background: transparent;
   padding: 0;
   overflow: visible;
+  text-align: left;
   color: #e9eec6;
   font-family: Trebuchet MS, Arial, Verdana, sans-serif;
   font-size: 9.5pt;
@@ -277,16 +294,117 @@ dialog.classicPopupDialog::backdrop {
   background: rgba(16, 18, 10, 0.72);
 }
 
-.classicPopupWindow {
-  margin-bottom: 0;
+.window button.wbutton {
+  float: right;
+  position: relative;
+  width: 18px;
+  height: 13px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background-color: transparent;
+  background-image: url('/img/design/window_close.png');
+  cursor: pointer;
+}
+
+.window button.wbutton:hover {
+  background-image: url('/img/design/window_close_over.png');
+}
+
+.window button.wbutton:focus-visible {
+  outline: 1px solid #292b1c;
+}
+
+.window .wtitle h1.classicPopupHeading {
+  display: inline;
+  margin: 0;
+  padding: 0 5px;
+  font-size: 8pt;
+  font-weight: normal;
+  letter-spacing: inherit;
+  text-transform: uppercase;
+  color: #71754c;
+  background-color: #d0d194;
+}
+
+dialog.classicPopupDialog > .window.classicPopupWindow {
+  box-sizing: border-box;
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  margin: 0;
   border: 1px solid #d0d194;
   outline: 2px solid #000;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75);
 }
 
-.classicPopupWindow .container {
+dialog.classicPopupDialog .classicPopupWindow > .container {
+  box-sizing: border-box;
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  margin: 0;
+  padding: 10px;
+  background-color: #595c3c;
+  border: 1px solid #d0d194;
+  outline: 1px solid #3b3d28;
+  overflow: visible;
   color: #e9eec6;
   line-height: 1.45;
+}
+
+.classicPopupWindow .classicPopupItemRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  background-color: #3b3d28;
+  border: 1px solid #71754c;
+  outline: 1px solid #292b1c;
+}
+
+.classicPopupWindow .classicPopupItemRow img.itemIcon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  object-fit: contain;
+  border: 1px solid #292b1c;
+  outline: 1px solid #71754c;
+  background-color: #292b1c;
+}
+
+.classicPopupWindow .classicPopupItemRow .itemIconSmall {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 1px solid #292b1c;
+  outline: 1px solid #71754c;
+  background-color: #292b1c;
+}
+
+.classicPopupWindow .classicPopupItemRow .itemIconSmall img {
+  width: 16px;
+  height: 16px;
+}
+
+.classicPopupWindow .classicPopupItemMeta {
+  min-width: 0;
+  flex: 1;
+}
+
+.classicPopupWindow .classicPopupItemMeta .itemTitle {
+  font-size: 9.5pt;
+  font-weight: bold;
+  color: #fed82a;
+}
+
+.classicPopupWindow .classicPopupItemMeta .itemSub {
+  font-size: 8pt;
+  color: #d0d194;
 }
 
 .classicPopupWindow .classicPopupLead {
@@ -322,9 +440,11 @@ dialog.classicPopupDialog::backdrop {
 
 .classicPopupWindow .classicPopupActions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: safe center;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 12px;
+  margin-block-start: 12px;
 }
 
 .classicPopupWindow button.classicPopupBtn {
@@ -621,4 +741,11 @@ dialog.classicPopupDialog::backdrop {
   padding: 0;
   border: 0;
   white-space: nowrap;
+}
+
+.mxbottom {
+  min-height: 22px;
+  height: auto;
+  padding: 7px 12px 8px;
+  line-height: 1.4;
 }

@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } 
 import type { ChipsetDef, PlayerDto, VirusDef } from '@intrusion/shared';
 import { api } from '../api/client';
 import { useVirusTooltip } from './TooltipContext';
+import { ModalDialog } from '../components/ModalDialog';
+
+type PendingDeckPurchase = 'expand_slot' | 'new_deck';
 
 export function DecksView({
   player,
@@ -35,6 +38,8 @@ export function DecksView({
   const [dragSource, setDragSource] = useState<'deck' | 'pool' | null>(null);
   const [dragTargetZone, setDragTargetZone] = useState<'deck' | 'pool' | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
+  const [pendingPurchase, setPendingPurchase] = useState<PendingDeckPurchase | null>(null);
+  const [buying, setBuying] = useState(false);
   const saveReqIdRef = useRef(0);
   const pendingSavesRef = useRef(0);
 
@@ -223,25 +228,28 @@ export function DecksView({
     onDragEndItem();
   };
 
-  const handleExpandDeck = async () => {
+  const confirmDeckPurchase = async () => {
+    if (!pendingPurchase) return;
+    setBuying(true);
     try {
-      const res = await api.buyItem({ kind: 'deck_slot', deckId: activeDeck.id });
-      onPlayerUpdate(res.player);
-      onNotify(`Capacité du deck augmentée à ${activeDeck.capacity + 1} emplacements !`);
+      if (pendingPurchase === 'expand_slot') {
+        const prevCap = activeDeck.capacity;
+        const res = await api.buyItem({ kind: 'deck_slot', deckId: activeDeck.id });
+        onPlayerUpdate(res.player);
+        setPendingPurchase(null);
+        onNotify(`Capacité du deck augmentée à ${prevCap + 1} emplacements !`);
+      } else {
+        const res = await api.buyItem({ kind: 'new_deck' });
+        onPlayerUpdate(res.player);
+        const newest = res.player.decks[res.player.decks.length - 1];
+        if (newest) setSelectedDeckId(newest.id);
+        setPendingPurchase(null);
+        onNotify('Nouveau deck débloqué !');
+      }
     } catch (err: any) {
       onNotify(err.message, true);
-    }
-  };
-
-  const handleBuyNewDeck = async () => {
-    try {
-      const res = await api.buyItem({ kind: 'new_deck' });
-      onPlayerUpdate(res.player);
-      const newest = res.player.decks[res.player.decks.length - 1];
-      if (newest) setSelectedDeckId(newest.id);
-      onNotify('Nouveau deck débloqué !');
-    } catch (err: any) {
-      onNotify(err.message, true);
+    } finally {
+      setBuying(false);
     }
   };
 
@@ -296,7 +304,13 @@ export function DecksView({
         {nextDeckCost !== null && (
           <li>
             <a
-              onClick={handleBuyNewDeck}
+              href="#buy-new-deck"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                hideVirus();
+                setPendingPurchase('new_deck');
+              }}
               title={
                 player.money >= nextDeckCost
                   ? 'Acheter un deck supplémentaire'
@@ -407,7 +421,16 @@ export function DecksView({
 
               {expandCost !== null ? (
                 player.money >= expandCost ? (
-                  <a className="button" onClick={handleExpandDeck}>
+                  <a
+                    href="#expand-deck"
+                    className="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      hideVirus();
+                      setPendingPurchase('expand_slot');
+                    }}
+                  >
                     Agrandir ce deck ({expandCost} <img src="/img/icons/money.png" alt="" />)
                   </a>
                 ) : (
@@ -485,6 +508,117 @@ export function DecksView({
           <div className="clear" />
         </div>
       </div>
+
+      <ModalDialog
+        open={pendingPurchase !== null}
+        variant="classic"
+        maxWidthClass="max-w-md"
+        title={
+          pendingPurchase === 'expand_slot'
+            ? 'Deck_manager.prg -- Agrandir le deck'
+            : 'Deck_manager.prg -- Nouveau deck'
+        }
+        onClose={() => {
+          if (!buying) setPendingPurchase(null);
+        }}
+      >
+        {pendingPurchase && (() => {
+          const cost =
+            pendingPurchase === 'expand_slot' ? expandCost ?? 0 : nextDeckCost ?? 0;
+          const canAfford = cost > 0 && player.money >= cost;
+
+          return (
+            <div>
+              {pendingPurchase === 'expand_slot' ? (
+                <p className="classicPopupLead">
+                  Ajouter un emplacement supplémentaire au deck{' '}
+                  <strong>{activeDeck.name}</strong> ({activeDeck.capacity} →{' '}
+                  <strong>{activeDeck.capacity + 1} emplacements</strong>) pour{' '}
+                  <strong>
+                    {cost}{' '}
+                    <img
+                      src="/img/icons/money.png"
+                      alt=""
+                      style={{ display: 'inline', height: '14px', width: '14px', verticalAlign: '-2px' }}
+                    />
+                  </strong>{' '}
+                  ?
+                </p>
+              ) : (
+                <p className="classicPopupLead">
+                  Débloquer un <strong>deck supplémentaire</strong> (Deck #{player.decks.length + 1}
+                  , 3 emplacements initiaux) pour{' '}
+                  <strong>
+                    {cost}{' '}
+                    <img
+                      src="/img/icons/money.png"
+                      alt=""
+                      style={{ display: 'inline', height: '14px', width: '14px', verticalAlign: '-2px' }}
+                    />
+                  </strong>{' '}
+                  ?
+                </p>
+              )}
+
+              {canAfford ? (
+                <div className="classicPopupWarn">
+                  Solde après achat :{' '}
+                  <strong>
+                    {player.money - cost}{' '}
+                    <img
+                      src="/img/icons/money.png"
+                      alt=""
+                      style={{ display: 'inline', height: '13px', width: '13px', verticalAlign: '-2px' }}
+                    />
+                  </strong>
+                </div>
+              ) : (
+                <div className="classicPopupError">
+                  Crédits insuffisants ({player.money} / {cost}{' '}
+                  <img
+                    src="/img/icons/money.png"
+                    alt=""
+                    style={{ display: 'inline', height: '13px', width: '13px', verticalAlign: '-2px' }}
+                  />
+                  ).
+                </div>
+              )}
+
+              <div className="classicPopupActions">
+                <button
+                  type="button"
+                  autoFocus
+                  disabled={buying}
+                  onClick={() => setPendingPurchase(null)}
+                  className="classicPopupBtn secondary"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  disabled={buying || !canAfford}
+                  onClick={confirmDeckPurchase}
+                  className="classicPopupBtn"
+                >
+                  {buying ? (
+                    'Transaction...'
+                  ) : (
+                    <>
+                      Confirmer ({cost}{' '}
+                      <img
+                        src="/img/icons/money.png"
+                        alt=""
+                        style={{ display: 'inline', height: '13px', width: '13px', verticalAlign: '-2px' }}
+                      />
+                      )
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+      </ModalDialog>
     </div>
   );
 }

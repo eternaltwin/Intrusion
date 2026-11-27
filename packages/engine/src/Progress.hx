@@ -13,15 +13,17 @@ class Progress {
 	static var list		: Array<Bar> = new Array();
 	static var kills	: Array<Bar> = new Array();
 
-	public static function start(d:Float, cb:Void->Void, ?label:String, ?anim:BarAnim) {
+	public static function start(d:Float, cb:Void->Void, ?label:String, ?anim:BarAnim, ?fl_allowInstant=false) {
 		if ( label==null ) label = "Chargement...";
 		if ( anim==null ) anim = BA_Normal;
 		d/=Manager.ME.term.getSpeed();
 
-		if ( d<0.1 ) {
+		if ( fl_allowInstant && d<=0.1001 ) {
 			cb();
 			return;
 		}
+		if ( !fl_allowInstant && d<0.15 )
+			d = 0.15;
 
 		if ( d>=0.5 )
 			Manager.ME.term.startLoop("progress_01");

@@ -1,5 +1,6 @@
 import type {
   AntivirusDef,
+  AuthConfigDto,
   ChipsetDef,
   LangCode,
   MissionEndSummary,
@@ -116,16 +117,12 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  me: () => requestJson<{ player: PlayerDto | null }>('/api/auth/me'),
-  login: (username: string, password: string) =>
-    requestJson<{ player: PlayerDto }>('/api/auth/login', {
+  me: () =>
+    requestJson<{ player: PlayerDto | null; auth?: AuthConfigDto }>('/api/auth/me'),
+  devLogin: (username: string) =>
+    requestJson<{ player: PlayerDto; auth?: AuthConfigDto }>('/api/auth/dev-login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
-    }),
-  register: (username: string, password: string) =>
-    requestJson<{ player: PlayerDto }>('/api/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username }),
     }),
   logout: () => requestJson<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
 

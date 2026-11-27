@@ -2,8 +2,14 @@ import { useEffect, useState } from 'react';
 import { formatVirusDesc, type ChipsetDef, type PlayerDto, type VirusDef, type VirusTarget } from '@intrusion/shared';
 import { api } from '../api/client';
 import { useVirusTooltip } from './TooltipContext';
+import { ModalDialog } from '../components/ModalDialog';
 
 type StoreTab = 'home' | 'dmg' | 'debuff' | 'combo' | 'utils' | 'chipset' | 'bios';
+
+type PendingPurchase =
+  | { kind: 'virus'; virus: VirusDef }
+  | { kind: 'chipset'; chipset: ChipsetDef }
+  | { kind: 'bios'; level: number; cost: number };
 
 const TARGET_LABELS: Record<VirusTarget, string> = {
   _file: 'Fichier / Anti-virus',
@@ -13,9 +19,9 @@ const TARGET_LABELS: Record<VirusTarget, string> = {
 };
 
 const BIOS_DESCRIPTIONS: Record<number, string> = {
-  2: 'Overclocking BUS v2.0 : accélère sensiblement la vitesse d’exécution de tous vos virus et des animations terminal.',
-  3: 'Noyau Temps-Réel v3.0 : vitesse de cast haute fréquence pour neutraliser les antivirus de niveau 6+ avant leur cycle.',
-  4: 'Hyperviseur Quantique v4.0 : réactivité maximale du terminal pour les réseaux haute sécurité.',
+  2: 'Overclocking BUS v2.0 (+32% vitesse d’exécution) : accélère le chargement des dossiers, virus et connexions réseau.',
+  3: 'Noyau Temps-Réel v3.0 (+69% vitesse d’exécution) : cadence accrue pour contrer les systèmes et antivirus avancés.',
+  4: 'Hyperviseur Quantique v4.0 (+125% vitesse d’exécution) : vitesse équivalente à un chipset Overclock intégré (cumulable).',
 };
 
 export function StoreView({
@@ -36,6 +42,7 @@ export function StoreView({
   const [tab, setTab] = useState<StoreTab>('home');
   const [selectedVirusId, setSelectedVirusId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pendingPurchase, setPendingPurchase] = useState<PendingPurchase | null>(null);
   const { showVirus, hideVirus } = useVirusTooltip();
 
   useEffect(() => {
@@ -53,42 +60,61 @@ export function StoreView({
     setSelectedVirusId(virusId);
   };
 
-  const buyVirus = async (v: VirusDef) => {
-    setBusyId(v.id);
-    try {
-      const res = await api.buyItem({ kind: 'virus', id: v.id });
-      onPlayerUpdate(res.player);
-      onNotify(`Programme ${v.name} ajouté à votre réserve !`);
-    } catch (err: any) {
-      onNotify(err.message, true);
-    } finally {
-      setBusyId(null);
-    }
+  const requestBuyVirus = (v: VirusDef) => {
+    hideVirus();
+    setPendingPurchase({ kind: 'virus', virus: v });
   };
 
-  const buyChipset = async (c: ChipsetDef) => {
-    setBusyId(c.id);
-    try {
-      const res = await api.buyItem({ kind: 'chipset', id: c.id });
-      onPlayerUpdate(res.player);
-      onNotify(`Chipset ${c.name} acquis ! Vous pouvez l’activer depuis la page Decks.`);
-    } catch (err: any) {
-      onNotify(err.message, true);
-    } finally {
-      setBusyId(null);
-    }
+  const requestBuyChipset = (c: ChipsetDef) => {
+    hideVirus();
+    setPendingPurchase({ kind: 'chipset', chipset: c });
   };
 
-  const buyBios = async () => {
-    setBusyId('bios');
-    try {
-      const res = await api.buyItem({ kind: 'bios' });
-      onPlayerUpdate(res.player);
-      onNotify(`Votre système a été mis à jour vers le BIOS v${res.player.biosLevel} !`);
-    } catch (err: any) {
-      onNotify(err.message, true);
-    } finally {
-      setBusyId(null);
+  const requestBuyBios = (level: number, cost: number) => {
+    hideVirus();
+    setPendingPurchase({ kind: 'bios', level, cost });
+  };
+
+  const confirmPurchase = async () => {
+    if (!pendingPurchase) return;
+    if (pendingPurchase.kind === 'virus') {
+      const v = pendingPurchase.virus;
+      setBusyId(v.id);
+      try {
+        const res = await api.buyItem({ kind: 'virus', id: v.id });
+        onPlayerUpdate(res.player);
+        setPendingPurchase(null);
+        onNotify(`Programme ${v.name} ajouté à votre réserve !`);
+      } catch (err: any) {
+        onNotify(err.message, true);
+      } finally {
+        setBusyId(null);
+      }
+    } else if (pendingPurchase.kind === 'chipset') {
+      const c = pendingPurchase.chipset;
+      setBusyId(c.id);
+      try {
+        const res = await api.buyItem({ kind: 'chipset', id: c.id });
+        onPlayerUpdate(res.player);
+        setPendingPurchase(null);
+        onNotify(`Chipset ${c.name} acquis ! Vous pouvez l’activer depuis la page Decks.`);
+      } catch (err: any) {
+        onNotify(err.message, true);
+      } finally {
+        setBusyId(null);
+      }
+    } else {
+      setBusyId('bios');
+      try {
+        const res = await api.buyItem({ kind: 'bios' });
+        onPlayerUpdate(res.player);
+        setPendingPurchase(null);
+        onNotify(`Votre système a été mis à jour vers le BIOS v${res.player.biosLevel}.0 !`);
+      } catch (err: any) {
+        onNotify(err.message, true);
+      } finally {
+        setBusyId(null);
+      }
     }
   };
 
@@ -167,7 +193,15 @@ export function StoreView({
                       {out || busyId === v.id ? (
                         <div className="offButton">Acheter</div>
                       ) : (
-                        <a className="button" onClick={() => buyVirus(v)}>
+                        <a
+                          href={`#buy-${v.id}`}
+                          className="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            requestBuyVirus(v);
+                          }}
+                        >
                           Acheter
                         </a>
                       )}
@@ -309,7 +343,8 @@ export function StoreView({
                       className="button"
                       onClick={(e) => {
                         e.preventDefault();
-                        buyVirus(selectedVirus);
+                        e.stopPropagation();
+                        requestBuyVirus(selectedVirus);
                       }}
                     >
                       Acheter
@@ -401,7 +436,7 @@ export function StoreView({
                           <div>{c.desc}</div>
                         </td>
                         <td className="cc">
-                          <div>{c.level}</div>
+                          <div>{Math.max(1, c.level)}</div>
                         </td>
                         <td className={`price${bought ? ' bought' : ''}`}>
                           <div className={out ? 'out' : ''}>
@@ -410,13 +445,21 @@ export function StoreView({
                             </div>
                           </div>
                         </td>
-                        <td>
+                        <td onClick={(e) => e.stopPropagation()}>
                           {bought ? (
                             <div className="offButton">Acquis</div>
                           ) : out || busyId === c.id ? (
                             <div className="offButton">Acheter</div>
                           ) : (
-                            <a className="button" onClick={() => buyChipset(c)}>
+                            <a
+                              href={`#buy-chipset-${c.id}`}
+                              className="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                requestBuyChipset(c);
+                              }}
+                            >
                               Acheter
                             </a>
                           )}
@@ -466,11 +509,19 @@ export function StoreView({
                           </div>
                         </div>
                       </td>
-                      <td>
+                      <td onClick={(e) => e.stopPropagation()}>
                         {bought ? (
                           <div className="offButton">Installé</div>
                         ) : canBuy ? (
-                          <a className="button" onClick={buyBios}>
+                          <a
+                            href={`#buy-bios-${lvl}`}
+                            className="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              requestBuyBios(lvl, cost);
+                            }}
+                          >
                             Acheter
                           </a>
                         ) : (
@@ -487,6 +538,183 @@ export function StoreView({
           </>
         )}
       </div>
+
+      <ModalDialog
+        open={pendingPurchase !== null}
+        variant="classic"
+        maxWidthClass="max-w-md"
+        title="HackStore.prg -- Confirmation d'achat"
+        onClose={() => {
+          if (!busyId) setPendingPurchase(null);
+        }}
+      >
+        {pendingPurchase && (() => {
+          const price =
+            pendingPurchase.kind === 'virus'
+              ? pendingPurchase.virus.price
+              : pendingPurchase.kind === 'chipset'
+                ? pendingPurchase.chipset.price
+                : pendingPurchase.cost;
+          const canAfford = player.money >= price;
+          const isBusy = busyId !== null;
+          const ownedVirusCopies =
+            pendingPurchase.kind === 'virus'
+              ? player.viruses.filter((id) => id === pendingPurchase.virus.id).length
+              : 0;
+
+          return (
+            <div>
+              {pendingPurchase.kind === 'virus' && (
+                <>
+                  <div className="classicPopupItemRow">
+                    <img
+                      className="itemIcon"
+                      src={`/img/dockicons/xl/${pendingPurchase.virus.id}.png`}
+                      alt=""
+                    />
+                    <div className="classicPopupItemMeta">
+                      <div className="itemTitle">{pendingPurchase.virus.name}</div>
+                      <div className="itemSub">
+                        {pendingPurchase.virus.catName} · Coût : {pendingPurchase.virus.cc} CC
+                      </div>
+                    </div>
+                  </div>
+                  <p className="classicPopupLead">
+                    Confirmer l&apos;achat d&apos;un exemplaire de{' '}
+                    <strong>{pendingPurchase.virus.name}</strong> pour{' '}
+                    <strong>
+                      {price}{' '}
+                      <img
+                        src="/img/icons/money.png"
+                        alt=""
+                        style={{ display: 'inline', height: '14px', width: '14px', verticalAlign: '-2px' }}
+                      />
+                    </strong>{' '}
+                    ?
+                  </p>
+                  {ownedVirusCopies > 0 && (
+                    <div className="classicPopupWarn">
+                      Vous possédez déjà <strong>{ownedVirusCopies}</strong> exemplaire
+                      {ownedVirusCopies > 1 ? 's' : ''} de ce programme en réserve (passage à{' '}
+                      <strong>x{ownedVirusCopies + 1}</strong>).
+                    </div>
+                  )}
+                </>
+              )}
+
+              {pendingPurchase.kind === 'chipset' && (
+                <>
+                  <div className="classicPopupItemRow">
+                    <span className="itemIconSmall">
+                      <img src="/img/icons/chip.png" alt="" />
+                    </span>
+                    <div className="classicPopupItemMeta">
+                      <div className="itemTitle">{pendingPurchase.chipset.name}</div>
+                      <div className="itemSub">{pendingPurchase.chipset.desc}</div>
+                    </div>
+                  </div>
+                  <p className="classicPopupLead">
+                    Confirmer l&apos;acquisition du chipset{' '}
+                    <strong>{pendingPurchase.chipset.name}</strong> pour{' '}
+                    <strong>
+                      {price}{' '}
+                      <img
+                        src="/img/icons/money.png"
+                        alt=""
+                        style={{ display: 'inline', height: '14px', width: '14px', verticalAlign: '-2px' }}
+                      />
+                    </strong>{' '}
+                    ?
+                  </p>
+                </>
+              )}
+
+              {pendingPurchase.kind === 'bios' && (
+                <>
+                  <div className="classicPopupItemRow">
+                    <span className="itemIconSmall">
+                      <img src="/img/icons/uc.png" alt="" />
+                    </span>
+                    <div className="classicPopupItemMeta">
+                      <div className="itemTitle">Mise à niveau BIOS v{pendingPurchase.level}.0</div>
+                      <div className="itemSub">{BIOS_DESCRIPTIONS[pendingPurchase.level]}</div>
+                    </div>
+                  </div>
+                  <p className="classicPopupLead">
+                    Confirmer l&apos;installation permanente du{' '}
+                    <strong>BIOS v{pendingPurchase.level}.0</strong> pour{' '}
+                    <strong>
+                      {price}{' '}
+                      <img
+                        src="/img/icons/money.png"
+                        alt=""
+                        style={{ display: 'inline', height: '14px', width: '14px', verticalAlign: '-2px' }}
+                      />
+                    </strong>{' '}
+                    ?
+                  </p>
+                </>
+              )}
+
+              {canAfford ? (
+                <div className="classicPopupWarn">
+                  Solde après achat :{' '}
+                  <strong>
+                    {player.money - price}{' '}
+                    <img
+                      src="/img/icons/money.png"
+                      alt=""
+                      style={{ display: 'inline', height: '13px', width: '13px', verticalAlign: '-2px' }}
+                    />
+                  </strong>
+                </div>
+              ) : (
+                <div className="classicPopupError">
+                  Crédits insuffisants ({player.money} / {price}{' '}
+                  <img
+                    src="/img/icons/money.png"
+                    alt=""
+                    style={{ display: 'inline', height: '13px', width: '13px', verticalAlign: '-2px' }}
+                  />
+                  ).
+                </div>
+              )}
+
+              <div className="classicPopupActions">
+                <button
+                  type="button"
+                  autoFocus
+                  disabled={isBusy}
+                  onClick={() => setPendingPurchase(null)}
+                  className="classicPopupBtn secondary"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  disabled={isBusy || !canAfford}
+                  onClick={confirmPurchase}
+                  className="classicPopupBtn"
+                >
+                  {isBusy ? (
+                    'Transaction...'
+                  ) : (
+                    <>
+                      Acheter ({price}{' '}
+                      <img
+                        src="/img/icons/money.png"
+                        alt=""
+                        style={{ display: 'inline', height: '13px', width: '13px', verticalAlign: '-2px' }}
+                      />
+                      )
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+      </ModalDialog>
     </div>
   );
 }

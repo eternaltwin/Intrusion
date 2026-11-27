@@ -143,7 +143,7 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
     // Connect to target tutorial node
     const cRes = session.connectToNode(targetNode.id);
     expect(cRes.ok).toBe(true);
-    session.tick(3000);
+    advanceMs(session, 3000);
     expect(session.connectedNodeId).toBe(targetNode.id);
 
     // Autocomplete CLI alias 'scan' -> 'scan1 '
@@ -161,12 +161,12 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
     while (!guardian.deleted) {
       const gRes = session.executeCliCommand(`d ${guardian.name}`);
       expect(gRes.ok).toBe(true);
-      session.tick(2000);
+      advanceMs(session, 2000);
     }
     while (!core.deleted) {
       const exec = session.executeCliCommand(`d ${core.name}`);
       expect(exec.ok).toBe(true);
-      session.tick(2000);
+      advanceMs(session, 2000);
     }
 
     expect(sys.crashed).toBe(true);
@@ -241,7 +241,7 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
       (n) => n.system !== null && session.canReachNode(n) && !session.isNodeShielded(n)
     )!;
     session.connectToNode(reachableNode.id);
-    session.tick(3000);
+    advanceMs(session, 3000);
     const sys = session.currentSystem!;
     clearAndInjectAvs(sys, ['sysdef', 'sysdef', 'sysdef']);
 
@@ -253,7 +253,7 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
     guardian.life = 1;
     session.selectFile(guardian.id);
     session.useVirusById('dmgxl', guardian.id);
-    session.tick(3000);
+    advanceMs(session, 3000);
     expect(hpBeforeGuardian - session.life).toBe(45);
 
     const hpBeforeCore = session.life;
@@ -262,7 +262,7 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
     delete core.effects.E_CShield;
     session.selectFile(core.id);
     session.useVirusById('dmgxl', core.id);
-    session.tick(3000);
+    advanceMs(session, 3000);
     expect(sys.crashed).toBe(true);
     expect(hpBeforeCore - session.life).toBe(45);
 
@@ -272,7 +272,7 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
       (n) => n.system !== null && stealthSession.canReachNode(n) && !stealthSession.isNodeShielded(n)
     )!;
     stealthSession.connectToNode(stealthTarget.id);
-    stealthSession.tick(3000);
+    advanceMs(stealthSession, 3000);
     const stealthSys = stealthSession.currentSystem!;
     clearAndInjectAvs(stealthSys, ['sysdef', 'sysdef', 'tique']);
 
@@ -284,20 +284,20 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
 
     stealthSession.currentFolderId = stealthGuardian.parentId;
     stealthSession.useVirusById('invis');
-    stealthSession.tick(3000);
+    advanceMs(stealthSession, 3000);
     expect(stealthSession.userEffects.UE_Furtivity).toBe(2);
 
     const hpStealthBefore = stealthSession.life;
     // Consume 1st invis stack on guardian
     stealthSession.useVirusById('dmgxl', stealthGuardian.id);
-    stealthSession.tick(3000);
+    advanceMs(stealthSession, 3000);
     expect(stealthSession.userEffects.UE_Furtivity).toBe(1);
     expect(stealthSession.life).toBe(hpStealthBefore);
 
     // Consume 2nd (LAST) invis stack on core — must STILL dodge both tique and sysdef!
     stealthSession.currentFolderId = stealthCore.parentId;
     stealthSession.useVirusById('dmgxl', stealthCore.id);
-    stealthSession.tick(3000);
+    advanceMs(stealthSession, 3000);
     expect(stealthSys.crashed).toBe(true);
     expect(stealthSession.life).toBe(hpStealthBefore);
 
@@ -307,7 +307,7 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
       (n) => n.system !== null && dsileSession.canReachNode(n) && !dsileSession.isNodeShielded(n)
     )!;
     dsileSession.connectToNode(dsileTarget.id);
-    dsileSession.tick(3000);
+    advanceMs(dsileSession, 3000);
     const dsileSys = dsileSession.currentSystem!;
     clearAndInjectAvs(dsileSys, ['sysdef', 'repurgator', 'tique']);
     const dsileGuardian = Object.values(dsileSys.files).find((f) => f.key === 'file.guardian')!;
@@ -315,7 +315,7 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
     dsileSession.currentFolderId = dsileGuardian.parentId;
     const hpBeforeDsile2 = dsileSession.life;
     dsileSession.useVirusById('dsile2', dsileGuardian.id);
-    dsileSession.tick(3000);
+    advanceMs(dsileSession, 3000);
     expect(dsileGuardian.deleted).toBe(true);
     expect(dsileSession.life).toBe(hpBeforeDsile2);
     expect(dsileSession.userEffects.UE_Furtivity).toBeUndefined();
@@ -1099,5 +1099,141 @@ describe('@intrusion/shared — PRNG, XML Loaders, Procedural Gen & Simulation E
     }
     expect(places.size).toBeGreaterThan(1);
     expect(checkedTvTheft).toBe(true);
+  });
+
+  it('enforces authentic cast speeds across BIOS v1..v4, Overclock & Slower nodes, keeping instant casts exclusive to Uber-Eleet', () => {
+    const fr = loadBundleFromDisk('fr');
+    const mission = {
+      ...generateMission(fr, 6, 4040, true),
+      gl: 6,
+      type: { kind: 'CrashTerminal' as const, owner: 'SpeedCheck' },
+    };
+
+    const createSpeedSession = (biosLevel: number, leet: boolean, chipset: string | null = null) =>
+      new MissionSession(fr, {
+        missionKey: `speed_${biosLevel}_${leet}`,
+        seed: 4040,
+        gl: 6,
+        mission,
+        decks: [
+          {
+            id: 'd1',
+            name: 'SpeedDeck',
+            capacity: 8,
+            isFavorite: true,
+            content: ['dmgs', 'dmgl', 'extrac', 'pbomb', 'scan1'],
+          },
+        ],
+        chipset,
+        isChallenge: false,
+        biosLevel,
+        tries: 0,
+        profile: {
+          username: 'Chronos',
+          level: 8,
+          leet,
+          adult: true,
+          cfg: '',
+          sfx: false,
+          ambiant: false,
+          beat: false,
+          lang: 'fr',
+        },
+      });
+
+    // 1. BIOS v1 (starter) = exact 1.0x Motion-Twin 2011 speeds
+    const s1 = createSpeedSession(1, false);
+    expect(s1.getSpeed()).toBeCloseTo(1.0, 5);
+    const node1 = Object.values(s1.nodes).find(
+      (n) => n.system !== null && n.system.speed === 1 && s1.canReachNode(n) && !s1.isNodeShielded(n)
+    )!;
+    expect(s1.connectToNode(node1.id).ok).toBe(true);
+    expect(s1.activeCast?.durationMs).toBe(2000); // connec = 2.0s at 1.0x
+    advanceMs(s1, 2000);
+    expect(s1.connectedNodeId).toBe(node1.id);
+
+    const sys1 = s1.currentSystem!;
+    for (const f of Object.values(sys1.files)) {
+      f.avKey = null;
+      f.password = null;
+    }
+    const sub1 = sys1.files[sys1.rootFolderId].childrenIds
+      .map((id) => sys1.files[id])
+      .find((f) => f.isFolder && f.childrenIds.some((cid) => !sys1.files[cid].isFolder))!;
+    expect(s1.openFolder(sub1.id).ok).toBe(true);
+    expect(s1.activeCast?.durationMs).toBe(600); // child cd = 0.6s at 1.0x
+    advanceMs(s1, 600);
+    expect(s1.currentFolderId).toBe(sub1.id);
+
+    expect(s1.openFolder(sys1.rootFolderId).ok).toBe(true);
+    expect(s1.activeCast?.durationMs).toBe(300); // parent cd .. = 0.3s at 1.0x
+    advanceMs(s1, 300);
+
+    s1.currentFolderId = sub1.id;
+    const doc1 = sub1.childrenIds
+      .map((id) => sys1.files[id])
+      .find((f) => !f.isFolder && f.key !== 'file.core')!;
+    doc1.size = 1;
+    doc1.life = 20;
+    expect(s1.useVirusById('dmgs', doc1.id).ok).toBe(true);
+    expect(s1.activeCast?.durationMs).toBe(200); // dmgs = 0.2s at 1.0x (NOT instant)
+    advanceMs(s1, 200);
+
+    // 2. Normal mode at MAX speed (BIOS v4 + Overclock = speed 2.0 => 4x) STILL never executes viruses or cd instantaneously!
+    const sMax = createSpeedSession(4, false, 'turbo');
+    expect(sMax.getSpeed()).toBeCloseTo(2.0, 5);
+    const nodeMax = sMax.nodes[node1.id];
+    expect(sMax.connectToNode(nodeMax.id).ok).toBe(true);
+    expect(sMax.activeCast?.durationMs).toBe(500); // connec = 2.0 / 4 = 0.5s
+    advanceMs(sMax, 500);
+    const sysMax = sMax.currentSystem!;
+    for (const f of Object.values(sysMax.files)) {
+      f.avKey = null;
+      f.password = null;
+    }
+    const subMax = sysMax.files[sub1.id];
+    expect(sMax.openFolder(subMax.id).ok).toBe(true);
+    expect(sMax.activeCast).not.toBeNull();
+    expect(sMax.activeCast!.durationMs).toBeGreaterThanOrEqual(150); // cd still shows progress bar
+    advanceMs(sMax, 200);
+
+    const docMax = sysMax.files[doc1.id];
+    docMax.size = 1;
+    docMax.life = 20;
+    expect(sMax.useVirusById('dmgs', docMax.id).ok).toBe(true);
+    expect(sMax.activeCast).not.toBeNull();
+    expect(sMax.activeCast!.durationMs).toBe(150); // clamped >= 150ms, never 0ms instant in normal mode!
+    advanceMs(sMax, 200);
+
+    // 3. Uber-Eleet mode (even at BIOS v1, speed = 1.0): CLI viruses and cd ARE instantaneous (0ms), while connec still casts!
+    const sLeet = createSpeedSession(1, true);
+    const nodeLeet = sLeet.nodes[node1.id];
+    expect(sLeet.connectToNode(nodeLeet.id).ok).toBe(true);
+    expect(sLeet.activeCast?.durationMs).toBe(2000); // connec is never instant
+    advanceMs(sLeet, 2000);
+    const sysLeet = sLeet.currentSystem!;
+    for (const f of Object.values(sysLeet.files)) {
+      f.avKey = null;
+      f.password = null;
+      delete f.effects.E_Shield;
+      delete f.effects.E_Immune;
+      delete f.effects.E_CShield;
+    }
+    const subLeet = sysLeet.files[sub1.id];
+    expect(sLeet.executeCliCommand(`cd ${subLeet.name}`).ok).toBe(true);
+    expect(sLeet.activeCast).toBeNull(); // 0ms instant in Uber-Eleet!
+    expect(sLeet.currentFolderId).toBe(subLeet.id);
+
+    const docLeet = sysLeet.files[doc1.id];
+    docLeet.life = 10;
+    docLeet.lifeTotal = 10;
+    expect(sLeet.executeCliCommand(`dmgs ${docLeet.name}`).ok).toBe(true);
+    expect(sLeet.activeCast).toBeNull(); // 0ms instant in Uber-Eleet!
+    expect(docLeet.life).toBeLessThan(10);
+
+    // On a Slower ('Frein', speed = 0.4) server at BIOS v1, even Uber-Eleet gets a slight 250ms delay
+    sysLeet.speed = 0.4;
+    expect(sLeet.executeCliCommand(`dmgs ${docLeet.name}`).ok).toBe(true);
+    expect(sLeet.activeCast?.durationMs).toBe(250);
   });
 });

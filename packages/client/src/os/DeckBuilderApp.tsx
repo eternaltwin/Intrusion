@@ -3,6 +3,7 @@ import { Cpu, Plus, RotateCcw, Star, Trash2 } from 'lucide-react';
 import { formatVirusDesc, type PlayerDto, type VirusDef } from '@intrusion/shared';
 import { api, type CatalogResponse } from '../api/client';
 import { SafeHtml } from '../components/SafeHtml';
+import { ModalDialog } from '../components/ModalDialog';
 
 interface DeckBuilderAppProps {
   player: PlayerDto;
@@ -20,6 +21,8 @@ export function DeckBuilderApp({ player, catalog, onPlayerUpdate }: DeckBuilderA
     player.decks.find((d) => d.id === selectedDeckId) ?? player.decks[0];
   const [editingName, setEditingName] = useState<string>(activeDeck?.name ?? '');
   const [error, setError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<'new_deck' | 'expand_slot' | null>(null);
+  const [buying, setBuying] = useState(false);
 
   useEffect(() => {
     setEditingName(activeDeck?.name ?? '');
@@ -78,26 +81,26 @@ export function DeckBuilderApp({ player, catalog, onPlayerUpdate }: DeckBuilderA
     await updateDeckContent(next);
   }
 
-  async function handleBuyNewDeck() {
+  async function confirmDeckBuy() {
+    if (!pendingAction) return;
     setError(null);
+    setBuying(true);
     try {
-      const res = await api.buyItem({ kind: 'new_deck' });
-      onPlayerUpdate(res.player);
-      const newest = res.player.decks[res.player.decks.length - 1];
-      if (newest) setSelectedDeckId(newest.id);
+      if (pendingAction === 'new_deck') {
+        const res = await api.buyItem({ kind: 'new_deck' });
+        onPlayerUpdate(res.player);
+        const newest = res.player.decks[res.player.decks.length - 1];
+        if (newest) setSelectedDeckId(newest.id);
+      } else if (activeDeck) {
+        const res = await api.buyItem({ kind: 'deck_slot', deckId: activeDeck.id });
+        onPlayerUpdate(res.player);
+      }
+      setPendingAction(null);
     } catch (e: any) {
       setError(e.message);
-    }
-  }
-
-  async function handleExpandSlot() {
-    if (!activeDeck) return;
-    setError(null);
-    try {
-      const res = await api.buyItem({ kind: 'deck_slot', deckId: activeDeck.id });
-      onPlayerUpdate(res.player);
-    } catch (e: any) {
-      setError(e.message);
+      setPendingAction(null);
+    } finally {
+      setBuying(false);
     }
   }
 
@@ -146,7 +149,7 @@ export function DeckBuilderApp({ player, catalog, onPlayerUpdate }: DeckBuilderA
               {nextDeckCost !== null && (
                 <button
                   type="button"
-                  onClick={handleBuyNewDeck}
+                  onClick={() => setPendingAction('new_deck')}
                   className="cyber-btn flex items-center gap-1 rounded px-2.5 py-1.5 font-mono text-xs cursor-pointer"
                 >
                   <Plus className="h-3.5 w-3.5 text-[#fed82a]" />
@@ -205,7 +208,7 @@ export function DeckBuilderApp({ player, catalog, onPlayerUpdate }: DeckBuilderA
                 {nextSlotCost !== null && (
                   <button
                     type="button"
-                    onClick={handleExpandSlot}
+                    onClick={() => setPendingAction('expand_slot')}
                     className="cyber-btn-amber rounded px-3 py-1 font-mono text-xs cursor-pointer"
                   >
                     +1 Slot ({nextSlotCost.toLocaleString()} CR)
@@ -407,6 +410,57 @@ export function DeckBuilderApp({ player, catalog, onPlayerUpdate }: DeckBuilderA
           )}
         </div>
       </div>
+
+      <ModalDialog
+        open={pendingAction !== null}
+        title="Confirmer l'extension"
+        maxWidthClass="max-w-md"
+        onClose={() => {
+          if (!buying) setPendingAction(null);
+        }}
+      >
+        {pendingAction && (() => {
+          const cost =
+            pendingAction === 'new_deck' ? nextDeckCost ?? 0 : nextSlotCost ?? 0;
+          return (
+            <div className="space-y-4 font-mono text-xs">
+              <p className="text-[#e8efd0]">
+                {pendingAction === 'new_deck' ? (
+                  <>
+                    Débloquer un <strong className="text-[#fed82a]">nouveau deck</strong> pour{' '}
+                    <strong className="text-[#fed82a]">{cost.toLocaleString()} CR</strong> ?
+                  </>
+                ) : (
+                  <>
+                    Ajouter un emplacement au deck{' '}
+                    <strong className="text-[#fed82a]">{activeDeck?.name}</strong> pour{' '}
+                    <strong className="text-[#fed82a]">{cost.toLocaleString()} CR</strong> ?
+                  </>
+                )}
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  autoFocus
+                  disabled={buying}
+                  onClick={() => setPendingAction(null)}
+                  className="cyber-btn rounded px-3 py-1.5 cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  disabled={buying || player.money < cost}
+                  onClick={confirmDeckBuy}
+                  className="cyber-btn-amber rounded px-3 py-1.5 cursor-pointer disabled:opacity-40"
+                >
+                  {buying ? 'Transaction...' : `Confirmer (${cost.toLocaleString()} CR)`}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+      </ModalDialog>
     </div>
   );
 }

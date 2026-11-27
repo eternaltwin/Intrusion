@@ -307,7 +307,14 @@ export function MissionsView({
               {data.available.map((m) => renderCard(m, 'details'))}
               <div className="clear" />
               <div style={{ marginTop: 10 }}>
-                <a className="optionLink" onClick={() => setConfirmRefreshOpen(true)}>
+                <a
+                  className="optionLink"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setConfirmRefreshOpen(true);
+                  }}
+                >
                   [Renouveler les offres disponibles ({refreshCost}{' '}
                   <img
                     src="/img/icons/money.png"
@@ -379,6 +386,7 @@ export function MissionsView({
           <div className="classicPopupActions">
             <button
               type="button"
+              autoFocus
               disabled={refreshing}
               onClick={() => setConfirmRefreshOpen(false)}
               className="classicPopupBtn secondary"

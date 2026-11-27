@@ -235,6 +235,55 @@ export function CyberdeckShell({
           <TerminalConfigApp player={player} onPlayerUpdate={onPlayerUpdate} />
         )}
       </main>
+
+      <footer className="border-t border-[#2a331d] bg-[#10150c] px-4 py-1.5 text-center font-mono text-[11px] text-[#8f9b6c]">
+        Intrusion &copy; 2011{' '}
+        <a
+          href="https://motion-twin.com/"
+          target="_blank"
+          rel="noreferrer"
+          className="text-[#d8dfb8] underline"
+        >
+          Motion-Twin
+        </a>{' '}
+        (Assets{' '}
+        <a
+          href="https://creativecommons.org/licenses/by-nc-sa/4.0/deed.fr"
+          target="_blank"
+          rel="noreferrer"
+          className="text-[#d8dfb8] underline"
+        >
+          CC-BY-NC-SA 4.0
+        </a>
+        ) &middot; Hébergé à titre non commercial par{' '}
+        <a
+          href="https://eternaltwin.org"
+          target="_blank"
+          rel="noreferrer"
+          className="text-[#fed82a] underline"
+        >
+          Eternaltwin
+        </a>{' '}
+        &middot; Licence{' '}
+        <a
+          href="https://www.gnu.org/licenses/agpl-3.0.html"
+          target="_blank"
+          rel="noreferrer"
+          className="text-[#d8dfb8] underline"
+        >
+          AGPL-3.0
+        </a>{' '}
+        (
+        <a
+          href="https://github.com/eternaltwin/intrusion"
+          target="_blank"
+          rel="noreferrer"
+          className="text-[#fed82a] underline"
+        >
+          Code source
+        </a>
+        )
+      </footer>
     </div>
   );
 }
