@@ -1,18 +1,32 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from '../src/app.js';
-import { parseEtwinSelfIdentity } from '../src/services/auth.js';
+import {
+  openDatabaseFromEnv,
+  resolvePgPoolConfig,
+  type AppDatabase,
+} from '../src/db/database.js';
+import { importLegacySqliteDatabase } from '../src/db/localSqliteMigration.js';
+import { parseEternaltwinSelfIdentity } from '../src/services/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const assetsDir = path.resolve(__dirname, '../../../assets');
 
-describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challenge API', () => {
-  it('completes end-to-end hacker lifecycle on in-memory SQLite', async () => {
-    const { app } = createApp({
-      dbPath: ':memory:',
-      assetsDir,
-    });
+const openDbs: AppDatabase[] = [];
+afterEach(async () => {
+  while (openDbs.length > 0) {
+    const db = openDbs.pop();
+    if (db) await db.close().catch(() => {});
+  }
+});
+
+describe('@intrusion/server — PostgreSQL, Eternaltwin OAuth, Multi-Decks, Store, Storage & Daily Challenge API', () => {
+  it('completes end-to-end hacker lifecycle on PostgreSQL', async () => {
+    const { app, db } = await createApp({ assetsDir });
+    openDbs.push(db);
 
     // 1. Authenticate operator via dev-mode Eternaltwin mock (no password stored)
     const regRes = await app.request('/api/auth/dev-login', {
@@ -201,10 +215,16 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(chalEndJson.isRanked).toBe(true);
     expect(chalEndJson.score).toBe(1635);
 
-    const chalBoard = await (await app.request('/api/challenges/today', { headers: { Cookie: cookie } })).json();
+    const chalBoard = await (
+      await app.request('/api/challenges/today', { headers: { Cookie: cookie } })
+    ).json();
     expect(chalBoard.challenges.length).toBe(3);
     expect(chalBoard.challenges.map((c: any) => c.level)).toEqual([5, 7, 9]);
-    expect(chalBoard.challenges.map((c: any) => c.difficulty)).toEqual(['easy', 'medium', 'hard']);
+    expect(chalBoard.challenges.map((c: any) => c.difficulty)).toEqual([
+      'easy',
+      'medium',
+      'hard',
+    ]);
     expect(chalBoard.hasPlayedRanked).toBe(true);
     expect(chalBoard.leaderboard.length).toBe(1);
     expect(chalBoard.leaderboard[0].bestScore).toBe(1635);
@@ -224,7 +244,9 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(chalStart9Json.init.decks.length).toBe(1);
 
     // 7. Refreshing missions flushes active missions and sets midnight expiry
-    const beforeRefresh = await (await app.request('/api/missions', { headers: { Cookie: cookie } })).json();
+    const beforeRefresh = await (
+      await app.request('/api/missions', { headers: { Cookie: cookie } })
+    ).json();
     expect(beforeRefresh.available.length).toBeGreaterThan(0);
     const missionToStart = beforeRefresh.available[0];
     const startActiveRes = await app.request(`/api/missions/${missionToStart.missionKey}/start`, {
@@ -233,10 +255,14 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     });
     expect(startActiveRes.status).toBe(200);
 
-    const midCheck = await (await app.request('/api/missions', { headers: { Cookie: cookie } })).json();
+    const midCheck = await (
+      await app.request('/api/missions', { headers: { Cookie: cookie } })
+    ).json();
     expect(midCheck.active.length).toBe(1);
 
-    const meBeforeRefresh = await (await app.request('/api/auth/me', { headers: { Cookie: cookie } })).json();
+    const meBeforeRefresh = await (
+      await app.request('/api/auth/me', { headers: { Cookie: cookie } })
+    ).json();
     const moneyBeforeRefresh = meBeforeRefresh.player.money;
 
     const refreshRes = await app.request('/api/missions/refresh', {
@@ -252,7 +278,9 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     nextMidnight.setHours(24, 0, 0, 0);
     expect(refreshJson.available[0].expiresAt).toBe(nextMidnight.getTime());
 
-    const afterRefresh = await (await app.request('/api/missions', { headers: { Cookie: cookie } })).json();
+    const afterRefresh = await (
+      await app.request('/api/missions', { headers: { Cookie: cookie } })
+    ).json();
     expect(afterRefresh.active.length).toBe(0);
     expect(afterRefresh.completed.length).toBe(0);
 
@@ -309,10 +337,8 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
   });
 
   it('prevents tutorial replay exploits, preserves Scout challenge ranked attempts, and transitions level 3 -> 4 to 9 missions', async () => {
-    const { app, db } = createApp({
-      dbPath: ':memory:',
-      assetsDir,
-    });
+    const { app, db } = await createApp({ assetsDir });
+    openDbs.push(db);
 
     const regRes = await app.request('/api/auth/dev-login', {
       method: 'POST',
@@ -380,8 +406,9 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(tutoEndJson.player.valuables.mp3).toBeUndefined();
 
     // 2. Grant Scout chipset and verify Scout challenge run does NOT consume daily ranked attempt
-    db.prepare("INSERT INTO user_items (user_id, item_type, item_id, quantity) VALUES (?, 'chipset', 'scout', 1)").run(
-      userId
+    await db.query(
+      "INSERT INTO user_items (user_id, item_type, item_id, quantity) VALUES ($1, 'chipset', 'scout', 1)",
+      [userId]
     );
     const equipScout = await app.request('/api/decks/chipset', {
       method: 'POST',
@@ -451,10 +478,12 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(realChalJson.rewardMoney).toBe(1500);
 
     // 3. Level < 4 active mission does not duplicate on GET /api/missions, and Level 3 -> 4 generates 9 missions
-    db.prepare('DELETE FROM missions WHERE user_id = ?').run(userId);
-    db.prepare('UPDATE users SET xp = 2 WHERE id = ?').run(userId); // xp=2 => level 3
+    await db.query('DELETE FROM missions WHERE user_id = $1', [userId]);
+    await db.query('UPDATE users SET xp = 2 WHERE id = $1', [userId]); // xp=2 => level 3
 
-    const lvl3List1 = await (await app.request('/api/missions', { headers: { Cookie: cookie } })).json();
+    const lvl3List1 = await (
+      await app.request('/api/missions', { headers: { Cookie: cookie } })
+    ).json();
     expect(lvl3List1.available.length).toBe(1);
     expect(lvl3List1.available[0].level).toBe(3);
 
@@ -497,13 +526,14 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(endLvl3Json.player.level).toBe(4);
 
     // Next GET /api/missions transitions to full 9-mission level >= 4 pool
-    const lvl4List = await (await app.request('/api/missions', { headers: { Cookie: cookie } })).json();
+    const lvl4List = await (
+      await app.request('/api/missions', { headers: { Cookie: cookie } })
+    ).json();
     expect(lvl4List.available.length).toBe(9);
     expect(lvl4List.available.every((m: any) => m.level >= 4)).toBe(true);
 
     // 4. Scout mid-run chipset swap exploit is blocked (locked at /start), and cards from failed/Scout runs redeem by number
     const exploitTarget = lvl4List.available[0];
-    // Start WITHOUT scout equipped
     await app.request('/api/decks/chipset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -563,7 +593,7 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(failedRunCardRes.status).toBe(200);
 
     // 5. Level 9 player can roll Level 10 ("hard") missions
-    db.prepare('UPDATE users SET xp = 300, money = 500000 WHERE id = ?').run(userId);
+    await db.query('UPDATE users SET xp = 300, money = 500000 WHERE id = $1', [userId]);
     let sawLevel10 = false;
     for (let i = 0; i < 6 && !sawLevel10; i++) {
       const refRes = await (
@@ -580,10 +610,8 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
   });
 
   it('tracks first-try challenge completions per tier and awards end-of-day Top 3 podium goals', async () => {
-    const { app, db } = createApp({
-      dbPath: ':memory:',
-      assetsDir,
-    });
+    const { app, db } = await createApp({ assetsDir });
+    openDbs.push(db);
 
     const registerAndCookie = async (username: string) => {
       const res = await app.request('/api/auth/dev-login', {
@@ -603,7 +631,14 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     const p4 = await registerAndCookie('PodiumFour');
 
     // Verify all 6 challenge stat icons are served
-    for (const icon of ['ismiley_happy', 'ismiley_yeah', 'ismiley_cool', 'lead2', 'lead31', 'lead3']) {
+    for (const icon of [
+      'ismiley_happy',
+      'ismiley_yeah',
+      'ismiley_cool',
+      'lead2',
+      'lead31',
+      'lead3',
+    ]) {
       const iconRes = await app.request(`/img/icons/${icon}.png`);
       expect(iconRes.status).toBe(200);
     }
@@ -700,49 +735,57 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(retryHardJson.player.goals.challenge_pass_9).toBeUndefined();
 
     // Seed completed past-day ('2000-01-01') ranked runs across tiers 5, 7, 9 for 4 players
-    const insertPastRun = db.prepare(`
-      INSERT INTO challenge_runs (challenge_date, challenge_level, user_id, username, score, success, remaining_sec, kills, is_ranked)
-      VALUES ('2000-01-01', ?, ?, ?, ?, 1, ?, 3, 1)
-    `);
-    // Tier 5: P1 #1 (2000), P2 #2 (1800), P3 #3 (1600), P4 #4 (1400)
-    insertPastRun.run(5, p1.userId, 'PodiumOne', 2000, 120);
-    insertPastRun.run(5, p2.userId, 'PodiumTwo', 1800, 100);
-    insertPastRun.run(5, p3.userId, 'PodiumThree', 1600, 80);
-    insertPastRun.run(5, p4.userId, 'PodiumFour', 1400, 60);
-    // Tier 7: P3 #1 (2100)
-    insertPastRun.run(7, p3.userId, 'PodiumThree', 2100, 150);
-    // Tier 9: P2 #1 (2500)
-    insertPastRun.run(9, p2.userId, 'PodiumTwo', 2500, 180);
+    const insertPastRun = async (
+      lvl: number,
+      uid: number,
+      uname: string,
+      score: number,
+      remSec: number
+    ) => {
+      await db.query(
+        `INSERT INTO challenge_runs (challenge_date, challenge_level, user_id, username, score, success, remaining_sec, kills, is_ranked)
+         VALUES ('2000-01-01', $1, $2, $3, $4, 1, $5, 3, 1)`,
+        [lvl, uid, uname, score, remSec]
+      );
+    };
+    await insertPastRun(5, p1.userId, 'PodiumOne', 2000, 120);
+    await insertPastRun(5, p2.userId, 'PodiumTwo', 1800, 100);
+    await insertPastRun(5, p3.userId, 'PodiumThree', 1600, 80);
+    await insertPastRun(5, p4.userId, 'PodiumFour', 1400, 60);
+    await insertPastRun(7, p3.userId, 'PodiumThree', 2100, 150);
+    await insertPastRun(9, p2.userId, 'PodiumTwo', 2500, 180);
 
-    const me1 = await (await app.request('/api/auth/me', { headers: { Cookie: p1.cookie } })).json();
-    const me2 = await (await app.request('/api/auth/me', { headers: { Cookie: p2.cookie } })).json();
-    const me3 = await (await app.request('/api/auth/me', { headers: { Cookie: p3.cookie } })).json();
-    const me4 = await (await app.request('/api/auth/me', { headers: { Cookie: p4.cookie } })).json();
+    const me1 = await (
+      await app.request('/api/auth/me', { headers: { Cookie: p1.cookie } })
+    ).json();
+    const me2 = await (
+      await app.request('/api/auth/me', { headers: { Cookie: p2.cookie } })
+    ).json();
+    const me3 = await (
+      await app.request('/api/auth/me', { headers: { Cookie: p3.cookie } })
+    ).json();
+    const me4 = await (
+      await app.request('/api/auth/me', { headers: { Cookie: p4.cookie } })
+    ).json();
 
-    // P1: 2 first-try Easy wins (today + past) & 1 Top-3 Easy (past day only)
     expect(me1.player.goals.challenge_pass_5).toBe(2);
     expect(me1.player.goals.challenge_top3_5).toBe(1);
 
-    // P2: #2 in Easy -> Top-3 Easy = 1, #1 in Hard -> Top-3 Hard = 1 & pass Hard = 1
     expect(me2.player.goals.challenge_top3_5).toBe(1);
     expect(me2.player.goals.challenge_pass_9).toBe(1);
     expect(me2.player.goals.challenge_top3_9).toBe(1);
 
-    // P3: #3 in Easy -> Top-3 Easy = 1, #1 in Medium -> Top-3 Medium = 1 & pass Medium = 1
     expect(me3.player.goals.challenge_top3_5).toBe(1);
     expect(me3.player.goals.challenge_pass_7).toBe(1);
     expect(me3.player.goals.challenge_top3_7).toBe(1);
 
-    // P4: #4 in Easy -> pass Easy = 1, but NOT Top 3!
     expect(me4.player.goals.challenge_pass_5).toBe(1);
     expect(me4.player.goals.challenge_top3_5).toBeUndefined();
   });
 
   it('enforces per-tier Challenge loadouts (virus/chipset level caps, no deck-switch, max deck capacity)', async () => {
-    const { app, db } = createApp({
-      dbPath: ':memory:',
-      assetsDir,
-    });
+    const { app, db } = await createApp({ assetsDir });
+    openDbs.push(db);
 
     const regRes = await app.request('/api/auth/dev-login', {
       method: 'POST',
@@ -756,7 +799,7 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     const mainDeckId = regJson.player.decks[0].id as string;
 
     // Grant high XP + credits and buy viruses/chipsets across levels 5..9 (including dckswi & dcksw2)
-    db.prepare('UPDATE users SET xp = 500, money = 500000 WHERE id = ?').run(userId);
+    await db.query('UPDATE users SET xp = 500, money = 500000 WHERE id = $1', [userId]);
     for (const vid of ['dmgm', 'dmgl', 'dmgxl', 'dckswi', 'dcksw2', 'reboo2']) {
       const r = await app.request('/api/store/buy', {
         method: 'POST',
@@ -850,7 +893,6 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(save9.status).toBe(200);
     const save9Json = await save9.json();
 
-    // Normal deck and activeChipset remain untouched while all 3 tier loadouts persist independently
     expect(save9Json.player.activeChipset).toBeNull();
     expect(save9Json.player.decks[0].content).toEqual(['dmgs', 'copy', 'scan1']);
     expect(save9Json.player.challengeLoadouts['5']).toEqual({
@@ -866,7 +908,6 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
       content: ['dmgxl', 'reboo2', 'scan1'],
     });
 
-    // Starting each Challenge tier injects its own saved Challenge deck & chipset
     const start5 = await (
       await app.request('/api/challenges/today/start', {
         method: 'POST',
@@ -888,19 +929,55 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(start9.init.decks[0].content).toEqual(['dmgxl', 'reboo2', 'scan1']);
   });
 
-  it('enforces Eternaltwin Charter compliance: OAuth 2.0 flow, state CSRF check, SHA-256 session hashing, zero stored OAuth/password secrets, prod lockdown & HTTP security headers', async () => {
+  it('enforces Eternaltwin Charter & Katal production compliance: PostgreSQL config, ETERNALTWIN OAuth 2.0 flow, state CSRF check, SHA-256 session hashing, zero stored secrets, prod lockdown & HTTP security headers', async () => {
+    // 0. Verify PostgreSQL connection config parser (Katal DATABASE_URL with ?version=17&charset=utf8 + Katal DATABASE_* vars + prod pglite block)
+    const urlCfg = resolvePgPoolConfig({
+      DATABASE_URL:
+        'postgresql://intrusion.staging.main:s3cr3t@localhost:5432/intrusion.staging?version=17&charset=utf8',
+      DB_POOL_MAX: '15',
+    });
+    expect(urlCfg.connectionString).toBe(
+      'postgresql://intrusion.staging.main:s3cr3t@localhost:5432/intrusion.staging?client_encoding=utf8'
+    );
+    expect(urlCfg.max).toBe(15);
+
+    const katalSplitCfg = resolvePgPoolConfig({
+      DATABASE_HOST: 'localhost',
+      DATABASE_PORT: '5432',
+      DATABASE_NAME: 'intrusion.staging',
+      DATABASE_USERNAME: 'intrusion.staging.main',
+      DATABASE_PASSWORD: 'pg_secret_password',
+    });
+    expect(katalSplitCfg.host).toBe('localhost');
+    expect(katalSplitCfg.port).toBe(5432);
+    expect(katalSplitCfg.database).toBe('intrusion.staging');
+    expect(katalSplitCfg.user).toBe('intrusion.staging.main');
+    expect(katalSplitCfg.password).toBe('pg_secret_password');
+
+    await expect(
+      openDatabaseFromEnv({ DATABASE_URL: 'pglite://memory' }, true, process.cwd())
+    ).rejects.toThrow(/interdit en production/);
+
     let mockDisplayName = 'DorianET';
-    const secretOauthAccessToken = 'etwin_live_secret_access_token_xyz987';
+    const secretOauthAccessToken = 'eternaltwin_live_secret_access_token_xyz987';
 
     const mockFetch: typeof globalThis.fetch = async (input, init) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
       if (url === 'https://eternaltwin.org/oauth/token') {
         expect(init?.method).toBe('POST');
         const authHeader = (init?.headers as Record<string, string>)?.Authorization ?? '';
-        const expectedBasic = Buffer.from('intrusion@clients:super_client_secret', 'utf8').toString('base64');
+        const expectedBasic = Buffer.from(
+          'intrusion@clients:super_client_secret',
+          'utf8'
+        ).toString('base64');
         expect(authHeader).toBe(`Basic ${expectedBasic}`);
         const bodyParams = new URLSearchParams(String(init?.body ?? ''));
-        if (bodyParams.get('code') !== 'valid_etwin_auth_code') {
+        if (bodyParams.get('code') !== 'valid_eternaltwin_auth_code') {
           return new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 });
         }
         return new Response(
@@ -941,18 +1018,25 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
       return new Response('Not Found', { status: 404 });
     };
 
-    const { app, db } = createApp({
-      dbPath: ':memory:',
+    const testPgDb = await openDatabaseFromEnv(
+      { DATABASE_URL: 'pglite://memory' },
+      false,
+      process.cwd()
+    );
+    openDbs.push(testPgDb);
+
+    const { app, db } = await createApp({
+      db: testPgDb,
       assetsDir,
       isProduction: true,
       publicUrl: 'https://intrusion.eternaltwin.org',
       sourceRepoUrl: 'https://github.com/eternaltwin/intrusion',
-      etwinOauth: {
+      eternaltwinOauth: {
         internalUrl: 'https://eternaltwin.org',
         externalUrl: 'https://eternaltwin.org',
         clientId: 'intrusion@clients',
         clientSecret: 'super_client_secret',
-        callbackUrl: 'https://intrusion.eternaltwin.org/api/auth/etwin/callback',
+        callbackUrl: 'https://intrusion.eternaltwin.org/api/auth/eternaltwin/callback',
         scope: 'base',
       },
       allowDevAuth: true, // Even if passed true, isProduction: true MUST strictly disable dev-login!
@@ -960,14 +1044,17 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     });
 
     // 1. Production strictly disables dev-login & legacy password endpoints do not exist
-    const devLoginProd = await app.request('https://intrusion.eternaltwin.org/api/auth/dev-login', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Origin: 'https://intrusion.eternaltwin.org',
-      },
-      body: JSON.stringify({ username: 'BypassAttempt' }),
-    });
+    const devLoginProd = await app.request(
+      'https://intrusion.eternaltwin.org/api/auth/dev-login',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'https://intrusion.eternaltwin.org',
+        },
+        body: JSON.stringify({ username: 'BypassAttempt' }),
+      }
+    );
     expect(devLoginProd.status).toBe(403);
 
     const legacyLogin = await app.request('https://intrusion.eternaltwin.org/api/auth/login', {
@@ -983,8 +1070,12 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     // 2. Security headers & HSTS are present in production
     expect(devLoginProd.headers.get('x-content-type-options')).toBe('nosniff');
     expect(devLoginProd.headers.get('x-frame-options')).toBe('DENY');
-    expect(devLoginProd.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
-    expect(devLoginProd.headers.get('strict-transport-security')).toContain('max-age=31536000');
+    expect(devLoginProd.headers.get('content-security-policy')).toContain(
+      "frame-ancestors 'none'"
+    );
+    expect(devLoginProd.headers.get('strict-transport-security')).toContain(
+      'max-age=31536000'
+    );
 
     // 3. Cross-origin CSRF POST is blocked with 403
     const csrfBlocked = await app.request('https://intrusion.eternaltwin.org/api/auth/logout', {
@@ -994,13 +1085,17 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(csrfBlocked.status).toBe(403);
 
     // 4. OAuth login initiates redirect to Eternaltwin with cryptographic state cookie
-    const loginInitRes = await app.request('https://intrusion.eternaltwin.org/api/auth/etwin/login');
+    const loginInitRes = await app.request(
+      'https://intrusion.eternaltwin.org/api/auth/eternaltwin/login'
+    );
     expect(loginInitRes.status).toBe(302);
     const redirectLoc = new URL(loginInitRes.headers.get('location')!);
-    expect(redirectLoc.origin + redirectLoc.pathname).toBe('https://eternaltwin.org/oauth/authorize');
+    expect(redirectLoc.origin + redirectLoc.pathname).toBe(
+      'https://eternaltwin.org/oauth/authorize'
+    );
     expect(redirectLoc.searchParams.get('client_id')).toBe('intrusion@clients');
     expect(redirectLoc.searchParams.get('redirect_uri')).toBe(
-      'https://intrusion.eternaltwin.org/api/auth/etwin/callback'
+      'https://intrusion.eternaltwin.org/api/auth/eternaltwin/callback'
     );
     const stateParam = redirectLoc.searchParams.get('state')!;
     expect(stateParam.length).toBe(64);
@@ -1011,19 +1106,21 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
 
     // 5. Forged / mismatched OAuth state is rejected
     const badStateRes = await app.request(
-      'https://intrusion.eternaltwin.org/api/auth/etwin/callback?code=valid_etwin_auth_code&state=forged_state',
+      'https://intrusion.eternaltwin.org/api/auth/eternaltwin/callback?code=valid_eternaltwin_auth_code&state=forged_state',
       { headers: { Cookie: stateCookiePair } }
     );
     expect(badStateRes.status).toBe(302);
     expect(badStateRes.headers.get('location')).toBe('/?auth_error=invalid_state');
 
     // 6. Complete valid OAuth flow -> exchanges code, fetches /api/v1/auth/self, creates session
-    const loginInit2 = await app.request('https://intrusion.eternaltwin.org/api/auth/etwin/login');
+    const loginInit2 = await app.request(
+      'https://intrusion.eternaltwin.org/api/auth/eternaltwin/login'
+    );
     const state2 = new URL(loginInit2.headers.get('location')!).searchParams.get('state')!;
     const stateCookie2 = loginInit2.headers.get('set-cookie')!.split(';')[0];
 
     const callbackRes = await app.request(
-      `https://intrusion.eternaltwin.org/api/auth/etwin/callback?code=valid_etwin_auth_code&state=${state2}`,
+      `https://intrusion.eternaltwin.org/api/auth/eternaltwin/callback?code=valid_eternaltwin_auth_code&state=${state2}`,
       { headers: { Cookie: stateCookie2 } }
     );
     expect(callbackRes.status).toBe(302);
@@ -1044,37 +1141,51 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     const meJson = await meRes.json();
     expect(meJson.player.username).toBe('DorianET');
     expect(meJson.auth.etwinEnabled).toBe(true);
+    expect(meJson.auth.etwinAuthorizePath).toBe('/api/auth/eternaltwin/login');
     expect(meJson.auth.devAuthEnabled).toBe(false);
     expect(meJson.auth.sourceRepoUrl).toBe('https://github.com/eternaltwin/intrusion');
 
-    // 8. Verify DB schema & storage compliance:
+    // 8. Verify PostgreSQL schema & storage compliance:
     // - No password_hash column in users
+    // - Uses eternaltwin_user_id column
     // - Raw session token is NOT stored in plaintext in sessions (only SHA-256 token_hash)
-    // - OAuth access_token is NOT stored anywhere in SQLite
-    const userCols = db.prepare("PRAGMA table_info('users')").all() as Array<{ name: string }>;
-    expect(userCols.some((c) => c.name === 'password_hash')).toBe(false);
-    expect(userCols.some((c) => c.name === 'etwin_user_id')).toBe(true);
+    // - OAuth access_token is NOT stored anywhere in PostgreSQL
+    const userColsRes = await db.query<{ column_name: string }>(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'users'`
+    );
+    const colNames = userColsRes.rows.map((c) => c.column_name);
+    expect(colNames.includes('password_hash')).toBe(false);
+    expect(colNames.includes('eternaltwin_user_id')).toBe(true);
 
-    const sessionRows = db.prepare('SELECT token_hash FROM sessions').all() as Array<{ token_hash: string }>;
-    expect(sessionRows.length).toBe(1);
-    expect(sessionRows[0].token_hash).not.toBe(rawSid);
-    expect(sessionRows[0].token_hash.length).toBe(64);
+    const sessionRes = await db.query<{ token_hash: string }>(
+      'SELECT token_hash FROM sessions'
+    );
+    expect(sessionRes.rows.length).toBe(1);
+    expect(sessionRes.rows[0].token_hash).not.toBe(rawSid);
+    expect(sessionRes.rows[0].token_hash.length).toBe(64);
 
-    const serializedUsers = JSON.stringify(db.prepare('SELECT * FROM users').all());
-    const serializedSessions = JSON.stringify(sessionRows);
+    const allUsersRes = await db.query('SELECT * FROM users');
+    const serializedUsers = JSON.stringify(allUsersRes.rows);
+    const serializedSessions = JSON.stringify(sessionRes.rows);
     expect(serializedUsers).not.toContain(secretOauthAccessToken);
     expect(serializedSessions).not.toContain(secretOauthAccessToken);
 
     // 9. Subsequent OAuth login syncs updated Eternaltwin display_name seamlessly
     mockDisplayName = 'DorianRenamed';
-    const loginInit3 = await app.request('https://intrusion.eternaltwin.org/api/auth/etwin/login');
+    const loginInit3 = await app.request(
+      'https://intrusion.eternaltwin.org/api/auth/eternaltwin/login'
+    );
     const state3 = new URL(loginInit3.headers.get('location')!).searchParams.get('state')!;
     const stateCookie3 = loginInit3.headers.get('set-cookie')!.split(';')[0];
     const callbackRes2 = await app.request(
-      `https://intrusion.eternaltwin.org/api/auth/etwin/callback?code=valid_etwin_auth_code&state=${state3}`,
+      `https://intrusion.eternaltwin.org/api/auth/eternaltwin/callback?code=valid_eternaltwin_auth_code&state=${state3}`,
       { headers: { Cookie: stateCookie3 } }
     );
-    const sid2 = /intrusion_sid=([a-f0-9]+)/.exec(callbackRes2.headers.get('set-cookie') ?? '')![1];
+    const sid2 = /intrusion_sid=([a-f0-9]+)/.exec(
+      callbackRes2.headers.get('set-cookie') ?? ''
+    )![1];
     const meRenamed = await (
       await app.request('https://intrusion.eternaltwin.org/api/auth/me', {
         headers: { Cookie: `intrusion_sid=${sid2}` },
@@ -1083,21 +1194,90 @@ describe('@intrusion/server — Auth, Multi-Decks, Store, Storage & Daily Challe
     expect(meRenamed.player.id).toBe(meJson.player.id);
     expect(meRenamed.player.username).toBe('DorianRenamed');
 
-    // 10. Verify parseEtwinSelfIdentity accepts both User & AccessToken contexts and rejects Guest/OauthClient
+    // 10. Verify parseEternaltwinSelfIdentity accepts both User & AccessToken contexts and rejects Guest/OauthClient
     expect(
-      parseEtwinSelfIdentity({
+      parseEternaltwinSelfIdentity({
         type: 'User',
         scope: 'Default',
         user: { type: 'User', id: 'u-1', display_name: { current: { value: 'CookieUser' } } },
       })
-    ).toEqual({ etwinUserId: 'u-1', displayName: 'CookieUser' });
-    expect(() => parseEtwinSelfIdentity({ type: 'Guest', scope: 'Default' })).toThrow();
+    ).toEqual({ eternaltwinUserId: 'u-1', displayName: 'CookieUser' });
+    expect(() => parseEternaltwinSelfIdentity({ type: 'Guest', scope: 'Default' })).toThrow();
     expect(() =>
-      parseEtwinSelfIdentity({
+      parseEternaltwinSelfIdentity({
         type: 'OauthClient',
         scope: 'Default',
         client: { type: 'OauthClient', id: 'c-1', display_name: 'Intrusion' },
       })
     ).toThrow();
+  });
+
+  it('migrates legacy local SQLite progress, decks, cards, and active session into PostgreSQL seamlessly', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'intrusion-sqlite-mig-'));
+    const sqliteFile = path.join(tmpDir, 'intrusion.sqlite');
+    const sqliteMod = (await import('node:sqlite')) as any;
+    const sq = new sqliteMod.DatabaseSync(sqliteFile);
+    sq.exec(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        etwin_user_id TEXT NOT NULL UNIQUE,
+        username TEXT NOT NULL,
+        money INTEGER NOT NULL,
+        xp INTEGER NOT NULL,
+        bios_level INTEGER NOT NULL,
+        active_chipset TEXT,
+        settings_json TEXT NOT NULL
+      );
+      CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+      CREATE TABLE user_items (user_id INTEGER NOT NULL, item_type TEXT NOT NULL, item_id TEXT NOT NULL, quantity INTEGER NOT NULL);
+      CREATE TABLE decks (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, slot_index INTEGER NOT NULL, name TEXT NOT NULL, capacity INTEGER NOT NULL, is_favorite INTEGER NOT NULL, content_json TEXT NOT NULL);
+      CREATE TABLE stolen_cards (id TEXT NOT NULL, user_id INTEGER NOT NULL, holder TEXT NOT NULL, card_number TEXT NOT NULL, amount INTEGER NOT NULL, redeemed INTEGER NOT NULL, captured_at TEXT NOT NULL);
+    `);
+    sq.prepare(
+      "INSERT INTO users (id, etwin_user_id, username, money, xp, bios_level, active_chipset, settings_json) VALUES (1, 'dev:legacyop', 'LegacyOp', 42000, 49, 3, 'turbo', '{}')"
+    ).run();
+    // Hash for raw token 'legacy_raw_session_token'
+    const { hashSessionToken } = await import('../src/services/auth.js');
+    const rawTok = 'legacy_raw_session_token_12345';
+    sq.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, 1, ?)').run(
+      hashSessionToken(rawTok),
+      Date.now() + 86_400_000
+    );
+    sq.prepare("INSERT INTO user_items VALUES (1, 'virus', 'dmgs', 2)").run();
+    sq.prepare("INSERT INTO user_items VALUES (1, 'chipset', 'turbo', 1)").run();
+    sq.prepare("INSERT INTO decks VALUES ('deck_1_0', 1, 0, 'Main', 5, 1, '[\"dmgs\",\"dmgs\"]')").run();
+    sq.prepare("INSERT INTO stolen_cards VALUES ('cc_1', 1, 'Corp', '4000-1111-2222-3333', 900, 0, '2026-11-26 20:00:00')").run();
+    sq.close();
+
+    try {
+      const { app, db } = await createApp({ assetsDir });
+      openDbs.push(db);
+
+      // Simulate user having logged in once on empty PG before migration (creating default xp=3 row)
+      await app.request('/api/auth/dev-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'LegacyOp' }),
+      });
+
+      const stats = await importLegacySqliteDatabase(db, sqliteFile);
+      expect(stats.importedUsers).toBe(1);
+      expect(stats.importedSessions).toBe(1);
+      expect(stats.importedCards).toBe(1);
+
+      const meRes = await app.request('/api/auth/me', {
+        headers: { Cookie: `intrusion_sid=${rawTok}` },
+      });
+      expect(meRes.status).toBe(200);
+      const meJson = await meRes.json();
+      expect(meJson.player.username).toBe('LegacyOp');
+      expect(meJson.player.money).toBe(42000);
+      expect(meJson.player.xp).toBe(49);
+      expect(meJson.player.biosLevel).toBe(3);
+      expect(meJson.player.activeChipset).toBe('turbo');
+      expect(meJson.player.decks[0].capacity).toBe(5);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

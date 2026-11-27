@@ -20,12 +20,15 @@
     "build": "npm run build:shared && npm run build:client && npm run build:server",
     "dev": "npm run build:shared && concurrently -n shared,server,client -c cyan,green,yellow \"npm run dev --workspace=@intrusion/shared\" \"npm run dev --workspace=@intrusion/server\" \"npm run dev --workspace=@intrusion/client\"",
     "dev:etwin": "node scripts/dev-etwin-mock.mjs",
+    "db:migrate-local": "tsx scripts/migrate-local-sqlite.ts",
     "start": "node packages/server/dist/index.js",
     "test": "vitest run -c vitest.config.mjs --configLoader native",
     "test:watch": "vitest -c vitest.config.mjs --configLoader native"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.6.0",
     "@types/node": "^22.13.4",
+    "@types/pg": "^8.23.1",
     "concurrently": "^9.1.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",

@@ -35,7 +35,7 @@ Comprendre où vit chaque responsabilité avant d'éditer :
    * `UserTerminal.hx`, `Dock.hx`, `WinApp*.hx` : terminal joueur, deck actif, RAM (`cc`), carte et logs.
    * `Data.hx`, `Types.hx` : chargement des ressources XML embarquées à la compilation.
 4. **Validation & Récompenses Serveur (`packages/server/src/app.ts`)** :
-   * Vérifie la session de mission active, applique les règles chipset (ex: mode `scout` sans butin ni incrément d'essais), calcule argent/XP/score, persiste le butin (`valuables`, `copiedFiles`, Challenges Quotidiens) dans SQLite.
+   * Vérifie la session de mission active, applique les règles chipset (ex: mode `scout` sans butin ni incrément d'essais), calcule argent/XP/score, persiste le butin (`valuables`, `copiedFiles`, Challenges Quotidiens) dans PostgreSQL.
 
 ## 2. Usage de `legacy/` selon l'Objectif
 

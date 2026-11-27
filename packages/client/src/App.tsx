@@ -24,12 +24,14 @@ import { OptionsView } from './classic/OptionsView';
 
 const DEFAULT_AUTH_CONFIG: AuthConfigDto = {
   etwinEnabled: true,
-  etwinAuthorizePath: '/api/auth/etwin/login',
+  etwinAuthorizePath: '/api/auth/eternaltwin/login',
   devAuthEnabled: false,
   sourceRepoUrl: 'https://github.com/eternaltwin/intrusion',
 };
 
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  eternaltwin_not_configured:
+    "Le client OAuth Eternaltwin n'est pas encore configuré sur cette instance.",
   etwin_not_configured:
     "Le client OAuth Eternaltwin n'est pas encore configuré sur cette instance.",
   oauth_denied: "L'autorisation Eternaltwin a été annulée.",

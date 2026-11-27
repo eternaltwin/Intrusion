@@ -25,16 +25,16 @@ Merci de contribuer à la préservation et à l'évolution d'**Intrusion** au se
 
 ## 3. Conventions Techniques & Architecture
 
-Le monorepo repose sur **Node.js 22+** et les workspaces npm :
+Le monorepo repose sur **Node.js 22+**, **PostgreSQL** et les workspaces npm :
 
 * `packages/shared` : logique pure et déterministe partagée (PRNG, parseurs XML/DSL, génération procédurale, schémas Zod). Aucune dépendance DOM ni I/O serveur.
-* `packages/server` : API HTTP **Hono**, validation systématique des entrées via **Zod**, requêtes préparées **SQLite** (`node:sqlite`), authentification **OAuth 2.0 Eternaltwin** exclusive.
-* `packages/client` : application **React 19 + TypeScript + Vite 6** (interface fidèle Classique + shell Cyberdeck). Toujours passer par `SafeHtml` pour l'affichage des fragments HTML de missions.
+* `packages/server` : API HTTP **Hono**, validation systématique des entrées via **Zod**, requêtes paramétrées **PostgreSQL** (`pg`), authentification **OAuth 2.0 Eternaltwin** exclusive (`ETERNALTWIN_*`).
+* `packages/client` : application **React 19 + TypeScript + Vite 6** (interface fidèle Classique). Toujours passer par `SafeHtml` pour l'affichage des fragments HTML de missions.
 * `packages/engine` : moteur tactique Haxe compilé vers `assets/www/intrusion-engine.js`.
 
 ### Règles Sécurité & Données Personnelles
 * **Identité Eternaltwin exclusive :** Ne jamais réintroduire de comptes locaux par mot de passe ni collecter d'e-mail ou données personnelles hors du profil OAuth Eternaltwin consenti (`id` et `display_name`).
-* **Protection des tokens :** Les `access_token` OAuth Eternaltwin ne doivent jamais être journalisés dans les logs, exposés au client, ni stockés en clair en base de données. Les jetons de session applicatifs sont hachés avec `SHA-256` avant persistance SQLite.
+* **Protection des tokens :** Les `access_token` OAuth Eternaltwin ne doivent jamais être journalisés dans les logs, exposés au client, ni stockés en clair en base de données. Les jetons de session applicatifs sont hachés avec `SHA-256` avant persistance PostgreSQL.
 
 ---
 
@@ -46,7 +46,7 @@ Tout changement significatif doit être couvert par des tests automatisés et v�
 # 1. Installer les dépendances
 npm install
 
-# 2. Exécuter la suite complète de tests (shared + server)
+# 2. Exécuter la suite complète de tests (shared + server PostgreSQL)
 npm test
 
 # 3. Vérifier la compilation TypeScript et le bundle de production
@@ -58,4 +58,4 @@ npm run build
 3. Vérifiez que `npm test` et `npm run build` passent sans erreur ni avertissement.
 4. Ouvrez une Pull Request claire décrivant le contexte, les changements et les vérifications effectuées.
 
-> **Impact infrastructure :** Toute évolution majeure impactant la charge serveur, le stockage SQLite ou ajoutant une dépendance externe doit être validée en amont avec le chef de projet et communiquée à l'équipe Eternaltwin avant déploiement.
+> **Impact infrastructure :** Toute évolution majeure impactant la charge serveur, le schéma/volume PostgreSQL ou ajoutant une dépendance externe doit être validée en amont avec le chef de projet et communiquée à l'équipe Eternaltwin avant déploiement.

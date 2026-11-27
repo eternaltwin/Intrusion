@@ -3,7 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
-import type { EtwinOauthConfig } from './services/auth.js';
+import { openDatabaseFromEnv } from './db/database.js';
+import type { EternaltwinOauthConfig } from './services/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../..');
@@ -25,19 +26,17 @@ if (typeof process.loadEnvFile === 'function') {
   }
 }
 
-const isProduction = process.env.NODE_ENV === 'production';
+const isProduction =
+  process.env.NODE_ENV === 'production' || process.env.APP_ENV === 'production';
 const host = process.env.HOST?.trim() || undefined;
 const port = parseInt(process.env.PORT ?? '8001', 10);
 const publicUrl =
-  process.env.PUBLIC_URL ?? (isProduction ? `http://localhost:${port}` : 'http://localhost:5173');
+  process.env.SELF_URL?.trim() ||
+  process.env.SELF_API_URL?.trim() ||
+  process.env.PUBLIC_URL?.trim() ||
+  (isProduction ? `http://localhost:${port}` : 'http://localhost:5173');
 const sourceRepoUrl =
   process.env.SOURCE_REPO_URL ?? 'https://github.com/eternaltwin/intrusion';
-const rawDbPath = process.env.DB_PATH?.trim();
-const dbPath = rawDbPath
-  ? rawDbPath === ':memory:'
-    ? ':memory:'
-    : path.resolve(repoRoot, rawDbPath)
-  : path.join(repoRoot, 'data', 'intrusion.sqlite');
 const assetsDir = path.join(repoRoot, 'assets');
 const clientDistDir = path.join(repoRoot, 'packages', 'client', 'dist');
 
@@ -47,56 +46,75 @@ function cleanEnvSecret(raw: string | undefined): string {
   return val;
 }
 
-const etwinUrl = process.env.ETWIN_URL ?? 'https://eternaltwin.org';
-const etwinExternalUrl = process.env.ETWIN_EXTERNAL_URL ?? etwinUrl;
-const etwinClientId = cleanEnvSecret(process.env.ETWIN_CLIENT_ID);
-const etwinClientSecret = cleanEnvSecret(process.env.ETWIN_CLIENT_SECRET);
-const etwinCallbackUrl =
-  process.env.ETWIN_CALLBACK_URL ?? `${publicUrl.replace(/\/+$/, '')}/api/auth/etwin/callback`;
+const eternaltwinUrl = process.env.ETERNALTWIN_URL ?? 'https://eternaltwin.org';
+const eternaltwinExternalUrl = process.env.ETERNALTWIN_EXTERNAL_URL ?? eternaltwinUrl;
+const eternaltwinClientId = cleanEnvSecret(process.env.ETERNALTWIN_CLIENT_ID);
+const eternaltwinClientSecret = cleanEnvSecret(process.env.ETERNALTWIN_CLIENT_SECRET);
+const eternaltwinCallbackUrl =
+  process.env.ETERNALTWIN_CALLBACK_URL ??
+  `${publicUrl.replace(/\/+$/, '')}/api/auth/eternaltwin/callback`;
 
 if (
-  (process.env.ETWIN_CLIENT_ID?.includes('<') || process.env.ETWIN_CLIENT_SECRET?.includes('<')) &&
-  (!etwinClientId || !etwinClientSecret)
+  (process.env.ETERNALTWIN_CLIENT_ID?.includes('<') ||
+    process.env.ETERNALTWIN_CLIENT_SECRET?.includes('<')) &&
+  (!eternaltwinClientId || !eternaltwinClientSecret)
 ) {
   console.warn(
-    '[Intrusion Server] ETWIN_CLIENT_ID / ETWIN_CLIENT_SECRET contiennent encore des placeholders (<...>) dans .env : OAuth Eternaltwin ignoré jusqu’à configuration réelle.'
+    '[Intrusion Server] ETERNALTWIN_CLIENT_ID / ETERNALTWIN_CLIENT_SECRET contiennent encore des placeholders (<...>) dans .env : OAuth Eternaltwin ignoré jusqu’à configuration réelle.'
   );
 }
 
-const etwinOauth: EtwinOauthConfig | undefined =
-  etwinClientId && etwinClientSecret
+const eternaltwinOauth: EternaltwinOauthConfig | undefined =
+  eternaltwinClientId && eternaltwinClientSecret
     ? {
-        internalUrl: etwinUrl,
-        externalUrl: etwinExternalUrl,
-        clientId: etwinClientId,
-        clientSecret: etwinClientSecret,
-        callbackUrl: etwinCallbackUrl,
-        scope: process.env.ETWIN_OAUTH_SCOPE ?? 'base',
+        internalUrl: eternaltwinUrl,
+        externalUrl: eternaltwinExternalUrl,
+        clientId: eternaltwinClientId,
+        clientSecret: eternaltwinClientSecret,
+        callbackUrl: eternaltwinCallbackUrl,
+        scope: process.env.ETERNALTWIN_OAUTH_SCOPE ?? 'base',
       }
     : undefined;
 
-if (isProduction && !etwinOauth) {
+if (isProduction && !eternaltwinOauth) {
   console.warn(
-    '[Intrusion Server] ATTENTION: NODE_ENV=production mais ETWIN_CLIENT_ID / ETWIN_CLIENT_SECRET ne sont pas configurés.'
+    '[Intrusion Server] ATTENTION: NODE_ENV=production mais ETERNALTWIN_CLIENT_ID / ETERNALTWIN_CLIENT_SECRET ne sont pas configurés.'
   );
 }
 
 const allowDevAuth =
-  !isProduction && (!etwinOauth || process.env.ETWIN_DEV_AUTH === 'true');
+  !isProduction && (!eternaltwinOauth || process.env.ETERNALTWIN_DEV_AUTH === 'true');
 
-const { app } = createApp({
-  dbPath,
+const db = await openDatabaseFromEnv(process.env, isProduction, repoRoot);
+
+const { app } = await createApp({
+  db,
   assetsDir,
   clientDistDir,
   isProduction,
   publicUrl,
   sourceRepoUrl,
-  etwinOauth,
+  eternaltwinOauth,
   allowDevAuth,
 });
 
-serve({ fetch: app.fetch, port, ...(host ? { hostname: host } : {}) }, (info) => {
-  console.log(
-    `[Intrusion Server] Listening on http://localhost:${info.port} (mode=${isProduction ? 'production' : 'development'}, etwinOauth=${Boolean(etwinOauth)}, devAuth=${allowDevAuth})`
-  );
-});
+const httpServer = serve(
+  { fetch: app.fetch, port, ...(host ? { hostname: host } : {}) },
+  (info) => {
+    console.log(
+      `[Intrusion Server] Listening on http://${host ?? 'localhost'}:${info.port} (mode=${isProduction ? 'production' : 'development'}, eternaltwinOauth=${Boolean(eternaltwinOauth)}, devAuth=${allowDevAuth})`
+    );
+  }
+);
+
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  httpServer.close();
+  await db.close().catch(() => {});
+  process.exit(0);
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import type { DatabaseSync } from 'node:sqlite';
+import type { AppDatabase, DbExecutor } from '../db/database.js';
 import {
   CHALLENGE_LEVELS,
   FORBIDDEN_CHALLENGE_VIRUSES,
@@ -15,7 +15,7 @@ import {
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
 const SESSION_TTL_MS = SESSION_TTL_SECONDS * 1000;
 
-export interface EtwinOauthConfig {
+export interface EternaltwinOauthConfig {
   internalUrl: string;
   externalUrl: string;
   clientId: string;
@@ -24,8 +24,10 @@ export interface EtwinOauthConfig {
   scope?: string;
 }
 
-export interface EtwinIdentity {
-  etwinUserId: string;
+export type EtwinOauthConfig = EternaltwinOauthConfig;
+
+export interface EternaltwinIdentity {
+  eternaltwinUserId: string;
   displayName: string;
 }
 
@@ -60,7 +62,10 @@ export function verifyOauthState(
   return timingSafeEqual(a, b);
 }
 
-export function buildEtwinAuthorizationUrl(config: EtwinOauthConfig, state: string): string {
+export function buildEternaltwinAuthorizationUrl(
+  config: EternaltwinOauthConfig,
+  state: string
+): string {
   const base = config.externalUrl.replace(/\/+$/, '');
   const authUrl = new URL(`${base}/oauth/authorize`);
   authUrl.searchParams.set('response_type', 'code');
@@ -71,7 +76,7 @@ export function buildEtwinAuthorizationUrl(config: EtwinOauthConfig, state: stri
   return authUrl.toString();
 }
 
-const ALLOWED_ETWIN_AUTH_CONTEXT_TYPES = new Set([
+const ALLOWED_ETERNALTWIN_AUTH_CONTEXT_TYPES = new Set([
   'user',
   'accesstoken',
   'access_token',
@@ -79,14 +84,14 @@ const ALLOWED_ETWIN_AUTH_CONTEXT_TYPES = new Set([
   'oauth_access_token',
 ]);
 
-export function parseEtwinSelfIdentity(payload: unknown): EtwinIdentity {
+export function parseEternaltwinSelfIdentity(payload: unknown): EternaltwinIdentity {
   if (!payload || typeof payload !== 'object') {
     throw new Error('Profil Eternaltwin invalide.');
   }
   const root = payload as Record<string, any>;
   if (
     typeof root.type === 'string' &&
-    !ALLOWED_ETWIN_AUTH_CONTEXT_TYPES.has(root.type.trim().toLowerCase())
+    !ALLOWED_ETERNALTWIN_AUTH_CONTEXT_TYPES.has(root.type.trim().toLowerCase())
   ) {
     throw new Error('Contexte Eternaltwin non-utilisateur refusé.');
   }
@@ -132,21 +137,23 @@ export function parseEtwinSelfIdentity(payload: unknown): EtwinIdentity {
   }
 
   return {
-    etwinUserId: rawId,
+    eternaltwinUserId: rawId,
     displayName: cleanDisplay,
   };
 }
+
+export const parseEtwinSelfIdentity = parseEternaltwinSelfIdentity;
 
 /**
  * Exchanges an Eternaltwin authorization code for an access token over HTTP,
  * queries `/api/v1/auth/self` in memory, and discards `access_token` immediately
  * without ever persisting or logging it (Charte Eternaltwin — Article 4).
  */
-export async function exchangeEtwinCodeForIdentity(
-  config: EtwinOauthConfig,
+export async function exchangeEternaltwinCodeForIdentity(
+  config: EternaltwinOauthConfig,
   code: string,
   fetchImpl: typeof globalThis.fetch = globalThis.fetch
-): Promise<EtwinIdentity> {
+): Promise<EternaltwinIdentity> {
   const apiBase = config.internalUrl.replace(/\/+$/, '');
   const basicCredentials = Buffer.from(
     `${config.clientId}:${config.clientSecret}`,
@@ -181,7 +188,9 @@ export async function exchangeEtwinCodeForIdentity(
     } catch {
       // Ignore non-JSON error body
     }
-    throw new Error(`Échec de l'échange OAuth Eternaltwin (HTTP ${tokenRes.status}${oauthErrCode}).`);
+    throw new Error(
+      `Échec de l'échange OAuth Eternaltwin (HTTP ${tokenRes.status}${oauthErrCode}).`
+    );
   }
 
   const tokenJson = (await tokenRes.json()) as { access_token?: unknown };
@@ -205,59 +214,62 @@ export async function exchangeEtwinCodeForIdentity(
   }
 
   const selfJson = await selfRes.json();
-  return parseEtwinSelfIdentity(selfJson);
+  return parseEternaltwinSelfIdentity(selfJson);
 }
 
-export function createSession(db: DatabaseSync, userId: number): string {
+export async function createSession(db: DbExecutor, userId: number): Promise<string> {
   const now = Date.now();
-  db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(now);
+  await db.query('DELETE FROM sessions WHERE expires_at < $1', [now]);
   const rawToken = randomBytes(32).toString('hex');
   const tokenHash = hashSessionToken(rawToken);
   const expiresAt = now + SESSION_TTL_MS;
-  db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)').run(
-    tokenHash,
-    userId,
-    expiresAt
+  await db.query(
+    'INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)',
+    [tokenHash, userId, expiresAt]
   );
   return rawToken;
 }
 
-export function deleteSession(db: DatabaseSync, rawToken: string): void {
+export async function deleteSession(db: DbExecutor, rawToken: string): Promise<void> {
   const tokenHash = hashSessionToken(rawToken);
-  db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
+  await db.query('DELETE FROM sessions WHERE token_hash = $1', [tokenHash]);
 }
 
-export function getUserIdFromSession(
-  db: DatabaseSync,
+export async function getUserIdFromSession(
+  db: DbExecutor,
   rawToken: string | undefined
-): number | null {
+): Promise<number | null> {
   if (!rawToken) return null;
   const tokenHash = hashSessionToken(rawToken);
-  const row = db
-    .prepare('SELECT user_id, expires_at FROM sessions WHERE token_hash = ?')
-    .get(tokenHash) as { user_id: number; expires_at: number } | undefined;
+  const res = await db.query<{ user_id: number; expires_at: number }>(
+    'SELECT user_id, expires_at FROM sessions WHERE token_hash = $1',
+    [tokenHash]
+  );
+  const row = res.rows[0];
   if (!row) return null;
-  if (row.expires_at < Date.now()) {
-    db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
+  if (Number(row.expires_at) < Date.now()) {
+    await db.query('DELETE FROM sessions WHERE token_hash = $1', [tokenHash]);
     return null;
   }
   return row.user_id;
 }
 
-export function upsertEtwinUser(
-  db: DatabaseSync,
+export async function upsertEternaltwinUser(
+  db: AppDatabase,
   catalog: GameDataBundle,
-  etwinUserId: string,
+  eternaltwinUserId: string,
   displayName: string
-): number {
+): Promise<number> {
   const cleanName = displayName.trim().slice(0, 32) || 'Operateur';
-  const existing = db
-    .prepare('SELECT id, username FROM users WHERE etwin_user_id = ?')
-    .get(etwinUserId) as { id: number; username: string } | undefined;
+  const existingRes = await db.query<{ id: number; username: string }>(
+    'SELECT id, username FROM users WHERE eternaltwin_user_id = $1',
+    [eternaltwinUserId]
+  );
+  const existing = existingRes.rows[0];
 
   if (existing) {
     if (existing.username !== cleanName) {
-      db.prepare('UPDATE users SET username = ? WHERE id = ?').run(cleanName, existing.id);
+      await db.query('UPDATE users SET username = $1 WHERE id = $2', [cleanName, existing.id]);
     }
     return existing.id;
   }
@@ -266,25 +278,37 @@ export function upsertEtwinUser(
     .filter((v) => v.start)
     .map((v) => v.id);
 
-  const res = db
-    .prepare(
-      'INSERT INTO users (etwin_user_id, username, money, xp, bios_level, active_chipset, settings_json) VALUES (?, ?, 10000, 3, 1, NULL, ?)'
-    )
-    .run(etwinUserId, cleanName, JSON.stringify(DEFAULT_USER_SETTINGS));
+  return db.transaction(async (tx) => {
+    const recheck = await tx.query<{ id: number }>(
+      'SELECT id FROM users WHERE eternaltwin_user_id = $1',
+      [eternaltwinUserId]
+    );
+    if (recheck.rows[0]) {
+      return recheck.rows[0].id;
+    }
 
-  const userId = Number(res.lastInsertRowid);
-  const insertItem = db.prepare(
-    'INSERT INTO user_items (user_id, item_type, item_id) VALUES (?, ?, ?)'
-  );
-  for (const vid of startingViruses) {
-    insertItem.run(userId, 'virus', vid);
-  }
+    const ins = await tx.query<{ id: number }>(
+      `INSERT INTO users (eternaltwin_user_id, username, money, xp, bios_level, active_chipset, settings_json)
+       VALUES ($1, $2, 10000, 3, 1, NULL, $3)
+       RETURNING id`,
+      [eternaltwinUserId, cleanName, JSON.stringify(DEFAULT_USER_SETTINGS)]
+    );
+    const userId = ins.rows[0].id;
 
-  db.prepare(
-    'INSERT INTO decks (id, user_id, slot_index, name, capacity, is_favorite, content_json) VALUES (?, ?, 0, ?, 3, 1, ?)'
-  ).run(`deck_${userId}_0`, userId, 'Deck Principal', JSON.stringify(startingViruses.slice(0, 3)));
+    for (const vid of startingViruses) {
+      await tx.query(
+        'INSERT INTO user_items (user_id, item_type, item_id) VALUES ($1, $2, $3)',
+        [userId, 'virus', vid]
+      );
+    }
 
-  return userId;
+    await tx.query(
+      'INSERT INTO decks (id, user_id, slot_index, name, capacity, is_favorite, content_json) VALUES ($1, $2, 0, $3, 3, 1, $4)',
+      [`deck_${userId}_0`, userId, 'Deck Principal', JSON.stringify(startingViruses.slice(0, 3))]
+    );
+
+    return userId;
+  });
 }
 
 function localTodayDateStr(nowMs = Date.now()): string {
@@ -295,24 +319,25 @@ function localTodayDateStr(nowMs = Date.now()): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-export function syncUserChallengeGoals(
-  db: DatabaseSync,
+export async function syncUserChallengeGoals(
+  db: DbExecutor,
   userId: number,
   todayStr = localTodayDateStr()
-): void {
+): Promise<void> {
   // 1) First-try ranked wins per difficulty (immediate)
-  db.prepare(
+  await db.query(
     `INSERT INTO user_goals (user_id, goal_id, value)
-     SELECT user_id, 'challenge_pass_' || challenge_level, COUNT(*)
+     SELECT user_id, 'challenge_pass_' || challenge_level::text, COUNT(*)::int
      FROM challenge_runs
-     WHERE user_id = ? AND is_ranked = 1 AND success = 1 AND challenge_level IN (5, 7, 9)
+     WHERE user_id = $1 AND is_ranked = 1 AND success = 1 AND challenge_level IN (5, 7, 9)
      GROUP BY user_id, challenge_level
-     ON CONFLICT(user_id, goal_id) DO UPDATE SET
-       value = MAX(user_goals.value, excluded.value)`
-  ).run(userId);
+     ON CONFLICT (user_id, goal_id) DO UPDATE SET
+       value = GREATEST(user_goals.value, EXCLUDED.value)`,
+    [userId]
+  );
 
   // 2) End-of-day Top 3 podiums per difficulty (awarded once challenge_date < todayStr)
-  db.prepare(
+  await db.query(
     `WITH ranked AS (
        SELECT
          user_id,
@@ -322,41 +347,43 @@ export function syncUserChallengeGoals(
            ORDER BY score DESC, remaining_sec DESC, id ASC
          ) AS rn
        FROM challenge_runs
-       WHERE is_ranked = 1 AND success = 1 AND challenge_date < ? AND challenge_level IN (5, 7, 9)
+       WHERE is_ranked = 1 AND success = 1 AND challenge_date < $1 AND challenge_level IN (5, 7, 9)
      )
      INSERT INTO user_goals (user_id, goal_id, value)
-     SELECT user_id, 'challenge_top3_' || challenge_level, COUNT(*)
+     SELECT user_id, 'challenge_top3_' || challenge_level::text, COUNT(*)::int
      FROM ranked
-     WHERE user_id = ? AND rn <= 3
+     WHERE user_id = $2 AND rn <= 3
      GROUP BY user_id, challenge_level
-     ON CONFLICT(user_id, goal_id) DO UPDATE SET
-       value = MAX(user_goals.value, excluded.value)`
-  ).run(todayStr, userId);
+     ON CONFLICT (user_id, goal_id) DO UPDATE SET
+       value = GREATEST(user_goals.value, EXCLUDED.value)`,
+    [todayStr, userId]
+  );
 }
 
-export function buildPlayerDto(
-  db: DatabaseSync,
+export async function buildPlayerDto(
+  db: DbExecutor,
   userId: number,
   bundle?: GameDataBundle
-): PlayerDto | null {
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as
-    | {
-        id: number;
-        username: string;
-        money: number;
-        xp: number;
-        bios_level: number;
-        active_chipset: string | null;
-        settings_json: string;
-      }
-    | undefined;
+): Promise<PlayerDto | null> {
+  const userRes = await db.query<{
+    id: number;
+    username: string;
+    money: number;
+    xp: number;
+    bios_level: number;
+    active_chipset: string | null;
+    settings_json: string;
+  }>('SELECT * FROM users WHERE id = $1', [userId]);
+  const user = userRes.rows[0];
   if (!user) return null;
 
-  syncUserChallengeGoals(db, userId);
+  await syncUserChallengeGoals(db, userId);
 
-  const items = db
-    .prepare('SELECT item_type, item_id, quantity FROM user_items WHERE user_id = ?')
-    .all(userId) as Array<{ item_type: string; item_id: string; quantity: number }>;
+  const itemsRes = await db.query<{ item_type: string; item_id: string; quantity: number }>(
+    'SELECT item_type, item_id, quantity FROM user_items WHERE user_id = $1',
+    [userId]
+  );
+  const items = itemsRes.rows;
 
   const viruses: string[] = [];
   const ownedCounts = new Map<string, number>();
@@ -369,18 +396,16 @@ export function buildPlayerDto(
   }
   const chipsets = items.filter((i) => i.item_type === 'chipset').map((i) => i.item_id);
 
-  const deckRows = db
-    .prepare('SELECT * FROM decks WHERE user_id = ? ORDER BY slot_index ASC')
-    .all(userId) as Array<{
+  const deckRes = await db.query<{
     id: string;
     slot_index: number;
     name: string;
     capacity: number;
     is_favorite: number;
     content_json: string;
-  }>;
+  }>('SELECT * FROM decks WHERE user_id = $1 ORDER BY slot_index ASC', [userId]);
 
-  const decks = deckRows.map((d) => ({
+  const decks = deckRes.rows.map((d) => ({
     id: d.id,
     slotIndex: d.slot_index,
     name: d.name,
@@ -415,17 +440,15 @@ export function buildPlayerDto(
     return rawChip;
   };
 
-  const loadoutRows = db
-    .prepare(
-      'SELECT challenge_level, chipset_id, content_json FROM challenge_loadouts WHERE user_id = ?'
-    )
-    .all(userId) as Array<{
+  const loadoutRes = await db.query<{
     challenge_level: number;
     chipset_id: string | null;
     content_json: string;
-  }>;
+  }>('SELECT challenge_level, chipset_id, content_json FROM challenge_loadouts WHERE user_id = $1', [
+    userId,
+  ]);
   const savedByTier = new Map<number, { chipsetId: string | null; content: string[] }>();
-  for (const row of loadoutRows) {
+  for (const row of loadoutRes.rows) {
     savedByTier.set(row.challenge_level, {
       chipsetId: row.chipset_id,
       content: JSON.parse(row.content_json || '[]') as string[],
@@ -454,17 +477,19 @@ export function buildPlayerDto(
     }
   }
 
-  const valRows = db
-    .prepare('SELECT valuable_id, quantity FROM user_valuables WHERE user_id = ? AND quantity > 0')
-    .all(userId) as Array<{ valuable_id: string; quantity: number }>;
+  const valRes = await db.query<{ valuable_id: string; quantity: number }>(
+    'SELECT valuable_id, quantity FROM user_valuables WHERE user_id = $1 AND quantity > 0',
+    [userId]
+  );
   const valuables: Record<string, number> = {};
-  for (const r of valRows) valuables[r.valuable_id] = r.quantity;
+  for (const r of valRes.rows) valuables[r.valuable_id] = r.quantity;
 
-  const goalRows = db
-    .prepare('SELECT goal_id, value FROM user_goals WHERE user_id = ?')
-    .all(userId) as Array<{ goal_id: string; value: number }>;
+  const goalRes = await db.query<{ goal_id: string; value: number }>(
+    'SELECT goal_id, value FROM user_goals WHERE user_id = $1',
+    [userId]
+  );
   const goals: Record<string, number> = {};
-  for (const r of goalRows) goals[r.goal_id] = r.value;
+  for (const r of goalRes.rows) goals[r.goal_id] = r.value;
 
   const parsedSettings = JSON.parse(user.settings_json || '{}');
   const settings: PlayerDto['settings'] = {

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import http from 'node:http';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 
-const PORT = parseInt(process.env.ETWIN_MOCK_PORT ?? '8002', 10);
-const EXPECTED_CLIENT_ID = process.env.ETWIN_CLIENT_ID ?? 'intrusion@clients';
-const EXPECTED_CLIENT_SECRET = process.env.ETWIN_CLIENT_SECRET ?? 'dev_secret';
+const PORT = parseInt(process.env.ETERNALTWIN_MOCK_PORT ?? '8002', 10);
+const EXPECTED_CLIENT_ID = process.env.ETERNALTWIN_CLIENT_ID ?? 'intrusion@clients';
+const EXPECTED_CLIENT_SECRET = process.env.ETERNALTWIN_CLIENT_SECRET ?? 'dev_secret';
 const EXPECTED_CALLBACK_URI =
-  process.env.ETWIN_CALLBACK_URL ?? 'http://localhost:5173/api/auth/etwin/callback';
+  process.env.ETERNALTWIN_CALLBACK_URL ?? 'http://localhost:5173/api/auth/eternaltwin/callback';
 
 /** @type {Map<string, { username: string; redirectUri: string; expiresAt: number }>} */
 const authCodes = new Map();

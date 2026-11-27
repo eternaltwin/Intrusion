@@ -27,6 +27,8 @@ Ce projet réutilise des bibliothèques open-source dans le strict respect de le
 * **PixiJS, `@pixi/sound` & `pixi-filters` (`assets/www/vendor/pixi*.min.js` et dépendance npm `pixi.js`)** — Copyright &copy; Matthew Groves, Chad Engler et contributeurs PixiJS — Licence **MIT**.
 * **React & React DOM (`react`, `react-dom`)** — Copyright &copy; Meta Platforms, Inc. and affiliates — Licence **MIT**.
 * **Hono & `@hono/node-server` & `@hono/zod-validator`** — Copyright &copy; Yusuke Wada et contributeurs — Licence **MIT**.
+* **node-postgres (`pg`, `@types/pg`)** — Copyright &copy; Brian Carlson et contributeurs — Licence **MIT**.
+* **PGlite (`@electric-sql/pglite`, tests & développement local)** — Copyright &copy; ElectricSQL / Neon et contributeurs — Licence **Apache-2.0**.
 * **Zod (`zod`)** — Copyright &copy; Colin McDonnell — Licence **MIT**.
 * **fast-xml-parser (`fast-xml-parser`)** — Copyright &copy; Natural Intelligence — Licence **MIT**.
 * **Lucide Icons (`lucide-react`)** — Copyright &copy; Cole Bemis & contributeurs Lucide — Licence **ISC**.

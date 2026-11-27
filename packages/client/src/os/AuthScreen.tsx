@@ -15,7 +15,7 @@ export function AuthScreen({
   const [loading, setLoading] = useState(false);
 
   const etwinEnabled = authConfig?.etwinEnabled ?? true;
-  const authorizePath = authConfig?.etwinAuthorizePath ?? '/api/auth/etwin/login';
+  const authorizePath = authConfig?.etwinAuthorizePath ?? '/api/auth/eternaltwin/login';
   const devAuthEnabled = authConfig?.devAuthEnabled ?? false;
 
   async function handleDevSubmit(e: FormEvent) {
